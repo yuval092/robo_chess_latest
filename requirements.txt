@@ -1,0 +1,6 @@
+mujoco
+gymnasium-robotics
+stable-baselines3
+huggingface_hub
+numpy
+PyYAML>=6.0
