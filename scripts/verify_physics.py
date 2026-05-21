@@ -94,50 +94,51 @@ def test_static_stability(debug=False):
         return False
 
 def test_kinematic_reachability(debug=False):
-    print("Testing Kinematic Reachability (arm at new position)...")
+    print("Testing Kinematic Reachability (all 64 chess squares)...")
     try:
         env = ChessTaskEnv(debug=debug)
-        env.reset() # Critical: ensures torso is raised
+        env.reset()  # Critical: ensures torso is raised
         cfg = load_config("env")
         safe_z = cfg["safe_z"]
         grasp_z = cfg["grasp_z"]
         cx, cy = cfg["table_center_xy"]
         hx, hy = cfg["table_half_x"], cfg["table_half_y"]
         margin = cfg.get("edge_margin", 0.02)
-        
-        # Test corners and centers
-        test_positions = [
-            np.array([cx - hx + margin, cy]),               # near edge center
-            np.array([cx + hx - margin, cy]),               # far edge center
-            np.array([cx, cy - hy + margin]),               # right edge center
-            np.array([cx, cy + hy - margin]),               # left edge center
-            np.array([cx - hx + margin, cy - hy + margin]), # near-right corner
-            np.array([cx + hx - margin, cy + hy - margin]), # far-left corner
+
+        # Build all 64 chess square centers from env config
+        x0 = cx - hx + margin;  x1 = cx + hx - margin
+        y0 = cy - hy + margin;  y1 = cy + hy - margin
+        sq_x = (x1 - x0) / 8;   sq_y = (y1 - y0) / 8
+        squares = [
+            (x0 + (r + 0.5)*sq_x, y0 + (c + 0.5)*sq_y, r, c)
+            for r in range(8) for c in range(8)
         ]
-        
-        for pt_xy in test_positions:
-            # Check safe_z
-            pt_safe = np.array([pt_xy[0], pt_xy[1], safe_z])
-            env._settle_arm_to_start(pt_safe)
-            grip_pos = env._utils.get_site_xpos(env.model, env.data, "robot0:grip")
-            err = np.linalg.norm(pt_safe - grip_pos)
-            print(f"  - Reach safe_z at {pt_xy}: err={err:.6f}m")
-            if err > 0.005: 
-                print(f"    ERROR: High error reaching safe_z")
-                env.close()
-                return False
-            
-            # Check grasp_z
-            pt_grasp = np.array([pt_xy[0], pt_xy[1], grasp_z])
-            env._settle_arm_to_start(pt_grasp)
-            grip_pos = env._utils.get_site_xpos(env.model, env.data, "robot0:grip")
-            err = np.linalg.norm(pt_grasp - grip_pos)
-            print(f"  - Reach grasp_z at {pt_xy}: err={err:.6f}m")
-            if err > 0.005:
-                print(f"    ERROR: High error reaching grasp_z")
-                env.close()
-                return False
-            
+
+        max_err = 0.0
+        worst = None
+        THRESHOLD = 0.005  # 5mm
+
+        for (sx, sy, row, col) in squares:
+            for (z, z_name) in [(safe_z, "safe_z"), (grasp_z, "grasp_z")]:
+                target = np.array([sx, sy, z])
+                env._settle_arm_to_start(target)
+                grip_pos = env._utils.get_site_xpos(env.model, env.data, "robot0:grip")
+                err = np.linalg.norm(target - grip_pos)
+                if err > max_err:
+                    max_err = err
+                    worst = (row, col, z_name, sx, sy, err)
+
+        print(f"  - Max error across 64 squares × 2 heights: {max_err*1000:.1f}mm")
+        if worst:
+            r, c, zn, sx, sy, e = worst
+            print(f"  - Worst: row={r} col={c} ({zn}) pos=({sx:.3f},{sy:.3f}) err={e*1000:.1f}mm")
+
+        if max_err > THRESHOLD:
+            print(f"  ERROR: max_err={max_err*1000:.1f}mm exceeds 5mm threshold.")
+            env.close()
+            return False
+
+        print(f"  - All 64 squares reachable within {THRESHOLD*1000:.0f}mm threshold.")
         env.close()
         return True
     except Exception as e:
