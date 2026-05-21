@@ -3,7 +3,7 @@ ScriptedController: Deterministic arm movement for all waypoint stages.
 """
 import numpy as np
 import mujoco
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from typing import Optional
 
 

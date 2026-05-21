@@ -18,9 +18,9 @@ def assert_mandatory_preconditions(uw):
     """Call at the start of every test run."""
     print("Checking mandatory preconditions...")
     
-    # 1. GRASP_Z check
-    assert abs(uw.GRASP_Z - 0.425) < 0.001, \
-        f"GRASP_Z={uw.GRASP_Z}, expected 0.425. Restart process after env.yaml change."
+    # 1. GRASP_Z check (Updated to 0.430 in Stage 3)
+    assert abs(uw.GRASP_Z - 0.430) < 0.001, \
+        f"GRASP_Z={uw.GRASP_Z}, expected 0.430. Restart process after env.yaml change."
     
     # 2. Cube mass check
     cube_body_id = mujoco.mj_name2id(uw.model, mujoco.mjtObj.mjOBJ_BODY, "object0")
@@ -29,16 +29,15 @@ def assert_mandatory_preconditions(uw):
     assert abs(mass - 0.05) < 0.001, \
         f"Cube mass={mass:.3f}, expected 0.05. XML not updated."
     
-    # 3. Finger threshold check
-    # Plan says 0.016 for verification (ABOVE the stall point of 0.0141).
-    assert abs(uw.GRASP_VERIFY_FINGER_THRESHOLD - 0.016) < 0.001, \
-        f"GRASP_VERIFY_FINGER_THRESHOLD={uw.GRASP_VERIFY_FINGER_THRESHOLD}, expected 0.016"
+    # 3. Finger threshold check (Updated to 0.003 in Stage 3)
+    assert abs(uw.GRASP_VERIFY_FINGER_THRESHOLD - 0.003) < 0.001, \
+        f"GRASP_VERIFY_FINGER_THRESHOLD={uw.GRASP_VERIFY_FINGER_THRESHOLD}, expected 0.003"
         
-    # 3.5. Actuator Kp check
+    # 3.5. Actuator Kp check (Updated to 20000 in Stage 3)
     l_act_id = mujoco.mj_name2id(uw.model, mujoco.mjtObj.mjOBJ_ACTUATOR, "robot0:l_gripper_finger_joint")
     kp = uw.model.actuator_gainprm[l_act_id, 0]
     print(f"  - Actuator Kp: {kp}")
-    assert kp == 150000, f"Expected 150000, got {kp}"
+    assert abs(kp - 20000) < 1.0, f"Expected 20000, got {kp}"
 
     # 4. Geom parameters
     cube_geom_id = mujoco.mj_name2id(uw.model, mujoco.mjtObj.mjOBJ_GEOM, "object0")
@@ -61,44 +60,48 @@ def assert_mandatory_preconditions(uw):
     
     print("[OK] Mandatory preconditions verified")
 
-def sample_valid_pos(uw):
-    """Samples a valid board position within reachable workspace."""
-    return uw._sample_board_position()
+def _valid_board_position(uw):
+    """Samples a board position using config dimensions."""
+    cx, cy = uw.env_cfg["table_center_xy"]
+    hx, hy = uw.env_cfg["table_half_x"], uw.env_cfg["table_half_y"]
+    margin = uw.env_cfg.get("edge_margin", 0.04)
+    
+    min_x, max_x = cx - hx + margin, cx + hx - margin
+    min_y, max_y = cy - hy + margin, cy + hy - margin
+    
+    x = uw.np_random.uniform(min_x, max_x)
+    y = uw.np_random.uniform(min_y, max_y)
+    return np.array([x, y])
 
 def move_arm_to_target(uw, target, tolerance=0.001, max_steps=200):
-    """Moves arm directly using mocap for test setup. Uses robust method."""
+    """Moves arm directly using mocap for test setup."""
     return uw._move_mocap_to(target, uw.VERTICAL_QUAT, max_steps=max_steps, tolerance=tolerance)
 
-def _valid_board_position(uw, max_retries=10):
-    """Samples a board position and retries if it is outside reachable workspace."""
-    for _ in range(max_retries):
-        pos = uw._sample_board_position()[:2]
-        # Valid range based on physical reach of Fetch arm pointing straight down
-        if 0.64 <= pos[0] <= 1.12 and -0.02 <= pos[1] <= 0.54:
-            return pos
-    raise RuntimeError("Could not sample a valid board position after multiple retries")
-
 def test_static_grasp(env, debug=False) -> dict:
-    """Test 1: Place arm at HOVER_Z, then HOVER_Z -> GRASP_Z, close fingers, check stability."""
+    """Test 1: Place arm at HOVER_Z, then execute grasp, check stability."""
     uw = env.unwrapped
     uw.force_scenario = "descend"
     uw.hide_object = False
-    obs, _ = env.reset()
+    env.reset()
     
-    # Position arm exactly at HOVER_Z above cube center (simulates RL DESCEND arrival)
-    cube_pos = uw.get_cube_position()
-    src_xy = _valid_board_position(uw) # Use bounds fix
+    src_xy = _valid_board_position(uw)
+    cube_z = uw.TABLE_SURFACE_Z + uw.CUBE_HEIGHT / 2.0
     
     # Teleport cube to valid position
     obj_joint_id = uw.model.joint("object0:joint").id
     qpos_start = uw.model.jnt_qposadr[obj_joint_id]
     uw.data.qpos[qpos_start : qpos_start + 2] = src_xy
-    uw.data.qpos[qpos_start + 2] = 0.415
+    uw.data.qpos[qpos_start + 2] = cube_z
+    uw.data.qpos[qpos_start + 3 : qpos_start + 7] = [1, 0, 0, 0]
+    uw.data.qvel[:] = 0.0
     mujoco.mj_forward(uw.model, uw.data)
     
-    # Update cube_pos after teleport
     cube_pos = uw.get_cube_position()
     target_hover = np.array([cube_pos[0], cube_pos[1], uw.HOVER_Z])
+    
+    # Open fingers first for setup
+    uw.finger_target_joint = uw.FINGER_OPEN_JOINT
+    uw._set_gripper_state()
     
     move_arm_to_target(uw, target_hover)
     
@@ -109,8 +112,7 @@ def test_static_grasp(env, debug=False) -> dict:
     result = uw.execute_grasp()
     
     cube_pos_after = uw.get_cube_position()
-    expected_cube_z = 0.415
-    cube_z_displacement = abs(cube_pos_after[2] - expected_cube_z) * 1000
+    cube_z_displacement = abs(cube_pos_after[2] - cube_z) * 1000
     cube_xy_displacement = np.linalg.norm(cube_pos_after[:2] - src_xy) * 1000
     
     if debug:
@@ -134,12 +136,19 @@ def test_lift(env, debug=False) -> dict:
     env.reset()
     
     src_xy = _valid_board_position(uw)
+    cube_z = uw.TABLE_SURFACE_Z + uw.CUBE_HEIGHT / 2.0
+    
     obj_joint_id = uw.model.joint("object0:joint").id
     qpos_start = uw.model.jnt_qposadr[obj_joint_id]
     uw.data.qpos[qpos_start : qpos_start + 2] = src_xy
-    uw.data.qpos[qpos_start + 2] = 0.415
+    uw.data.qpos[qpos_start + 2] = cube_z
+    uw.data.qpos[qpos_start + 3 : qpos_start + 7] = [1, 0, 0, 0]
+    uw.data.qvel[:] = 0.0
     mujoco.mj_forward(uw.model, uw.data)
     
+    # Setup
+    uw.finger_target_joint = uw.FINGER_OPEN_JOINT
+    uw._set_gripper_state()
     cube_pos = uw.get_cube_position()
     move_arm_to_target(uw, np.array([cube_pos[0], cube_pos[1], uw.HOVER_Z]))
     
@@ -147,7 +156,7 @@ def test_lift(env, debug=False) -> dict:
     if not grasp_result["success"]:
         return {"success": False, "reason": f"GRASP_FAILED: {grasp_result.get('reason')}"}
     
-    # Lift to SAFE_Z
+    # Lift to SAFE_Z manually (not using Controller to test raw physics)
     target_z = uw.SAFE_Z
     max_z_deviation = 0.0
     cube_dropped = False
@@ -165,7 +174,10 @@ def test_lift(env, debug=False) -> dict:
         # Check cube
         cube_pos = uw.get_cube_position()
         grip_pos = uw._utils.get_site_xpos(uw.model, uw.data, "robot0:grip")
-        z_offset = grip_pos[2] - cube_pos[2] # should be ~15mm
+        z_offset = grip_pos[2] - cube_pos[2] # expected ~0.015m if at top, but actually site-to-COM
+        # Corrected: site is at finger tips. Cube is 30mm tall. 
+        # COM is at 15mm from top.
+        # site_z should be near cube_top_z. So site_z - cube_COM_z should be ~15mm.
         deviation = abs(z_offset - 0.015)
         max_z_deviation = max(max_z_deviation, deviation)
         
@@ -192,19 +204,26 @@ def test_lift(env, debug=False) -> dict:
     }
 
 def test_transit_held(env, debug=False) -> dict:
-    """Test 3: Transit horizontally while holding cube. Verify no drop, no rotation."""
+    """Test 3: Transit horizontally while holding cube."""
     uw = env.unwrapped
     uw.force_scenario = "descend"
     uw.hide_object = False
     env.reset()
     
     src_xy = _valid_board_position(uw)
+    cube_z = uw.TABLE_SURFACE_Z + uw.CUBE_HEIGHT / 2.0
+    
     obj_joint_id = uw.model.joint("object0:joint").id
     qpos_start = uw.model.jnt_qposadr[obj_joint_id]
     uw.data.qpos[qpos_start : qpos_start + 2] = src_xy
-    uw.data.qpos[qpos_start + 2] = 0.415
+    uw.data.qpos[qpos_start + 2] = cube_z
+    uw.data.qpos[qpos_start + 3 : qpos_start + 7] = [1, 0, 0, 0]
+    uw.data.qvel[:] = 0.0
     mujoco.mj_forward(uw.model, uw.data)
     
+    # Setup
+    uw.finger_target_joint = uw.FINGER_OPEN_JOINT
+    uw._set_gripper_state()
     cube_pos = uw.get_cube_position()
     move_arm_to_target(uw, np.array([cube_pos[0], cube_pos[1], uw.HOVER_Z]))
     
@@ -234,7 +253,7 @@ def test_transit_held(env, debug=False) -> dict:
             break
             
         step_vec = 0.5 * error
-        if np.linalg.norm(step_vec) > 0.005: # Slower for transit stability
+        if np.linalg.norm(step_vec) > 0.005:
             step_vec = step_vec / np.linalg.norm(step_vec) * 0.005
         uw.data.mocap_pos[0][:3] += step_vec
         uw._mujoco_step(None)
@@ -318,7 +337,7 @@ def main():
     print("="*40)
     for test in ["static", "lift", "transit"]:
         s = stats[test]
-        rate = s["success"] / args.n_trials * 100
+        rate = s["success"] / args.n_trials * 100 if args.n_trials > 0 else 0
         print(f"{test.capitalize():<10}: {s['success']}/{args.n_trials} ({rate:.1f}%)")
         if s["fail_reasons"]:
             print(f"  Failures: {s['fail_reasons']}")

@@ -69,6 +69,7 @@ class ChessTaskEnv(ChessSimulationEnv):
             "observation": spaces.Box(-np.inf, np.inf, shape=(7,), dtype="float32"),
             "achieved_goal": spaces.Box(-np.inf, np.inf, shape=(3,), dtype="float32"),
             "desired_goal": spaces.Box(-np.inf, np.inf, shape=(3,), dtype="float32"),
+            "scenario_id": spaces.Discrete(4), # 0: None, 1: transit, 2: descend, 3: ascend
         })
 
         # --- Task Constants ---
@@ -144,6 +145,10 @@ class ChessTaskEnv(ChessSimulationEnv):
         # New minimal observation vector (7D: pos, vel, finger)
         obs_vec = np.concatenate([grip_pos, grip_vel, [l_finger]])
         
+        # Scenario ID mapping
+        scen_map = {None: 0, "transit": 1, "descend": 2, "ascend": 3}
+        scenario_id = scen_map.get(self.current_scenario, 0)
+        
         return {
             "observation": obs_vec,
             "achieved_goal": grip_pos,
@@ -152,6 +157,7 @@ class ChessTaskEnv(ChessSimulationEnv):
             "grip_vel": grip_vel,
             "l_finger": l_finger,
             "goal_pos": goal_pos,
+            "scenario_id": scenario_id,
         }
 
     def get_cube_position(self) -> np.ndarray:
@@ -186,6 +192,9 @@ class ChessTaskEnv(ChessSimulationEnv):
         """Physically sets the joint positions of the fingers based on the target state."""
         self._utils.set_joint_qpos(self.model, self.data, "robot0:l_gripper_finger_joint", self.finger_target_joint)
         self._utils.set_joint_qpos(self.model, self.data, "robot0:r_gripper_finger_joint", self.finger_target_joint)
+        self.data.qvel[self.model.joint("robot0:l_gripper_finger_joint").dofadr[0]] = 0.0
+        self.data.qvel[self.model.joint("robot0:r_gripper_finger_joint").dofadr[0]] = 0.0
+        mujoco.mj_forward(self.model, self.data)
 
     def _check_cube_held(self, grip_pos: np.ndarray) -> tuple[bool, str | None]:
         """
@@ -323,6 +332,7 @@ class ChessTaskEnv(ChessSimulationEnv):
             
             # Then close them scripted
             self.finger_target_joint = self.FINGER_CLOSED_JOINT
+            self._set_gripper_state() # Fix: Force close immediately to ensure convergence
             self._move_mocap_to(arm_start_pos, self.VERTICAL_QUAT, max_steps=150, tolerance=0.003)
         else:
             # Transit: stay closed
@@ -360,7 +370,6 @@ class ChessTaskEnv(ChessSimulationEnv):
                 f"  ArmJoints:  [{jq_str}]\n"
                 f"{'='*80}"
             )
-            print(msg)
             self.logger.debug(msg)
 
         return True
@@ -471,7 +480,6 @@ class ChessTaskEnv(ChessSimulationEnv):
         cube_pos = self.get_cube_position().copy()
         result["pre_grasp_cube_xy"] = cube_pos[:2].copy()
 
-        print(f"[GRASP] Start. Cube at {cube_pos}, Grip at {self._utils.get_site_xpos(self.model, self.data, 'robot0:grip')}")
         self.logger.debug(f"[GRASP] Start. Cube at {cube_pos}, Grip at {self._utils.get_site_xpos(self.model, self.data, 'robot0:grip')}")
         # Cube rotation check: diagonal cube (yaw >25°) has effective width 42.4mm,
         # exceeding max finger opening (38mm). Abort before plunge to prevent stub.
@@ -490,9 +498,6 @@ class ChessTaskEnv(ChessSimulationEnv):
             result["reason"] = f"CUBE_ROTATED (yaw={math.degrees(effective_yaw):.1f}°)"
             return result
 
-        # Drive to [cube_xy, HOVER_Z] with VERTICAL_QUAT in one combined move.
-        # _move_mocap_to asserts both position and quat every step, so vertical
-        # correction and XY alignment happen simultaneously without either drifting.
         align_target = np.array([cube_pos[0], cube_pos[1], self.HOVER_Z])
         if not self._move_mocap_to(align_target, self.VERTICAL_QUAT, max_steps=100, tolerance=0.001):
             result["reason"] = "ROTATION_FAILED (kinematic limit — arm cannot reach vertical at this position)"
@@ -516,21 +521,21 @@ class ChessTaskEnv(ChessSimulationEnv):
 
         grip_pos = self._utils.get_site_xpos(self.model, self.data, "robot0:grip").copy()
         grasp_pos = grip_pos.copy()  # Capture for Phase 6
-        print(f"[GRASP] Post-Plunge. Grip at {grip_pos}, Cube at {self.get_cube_position()}")
-        self.logger.debug(f"[GRASP] Post-Plunge. Grip at {grip_pos}, Cube at {self.get_cube_position()}")
+        if self.debug:
+            self.logger.debug(f"[GRASP] Post-Plunge. Grip at {grip_pos}, Cube at {self.get_cube_position()}")
         if abs(grip_pos[2] - self.GRASP_Z) > 0.008:
             result["reason"] = (f"PLUNGE_FAILED (z={grip_pos[2]*1000:.1f}mm, "
                                 f"target={self.GRASP_Z*1000:.1f}mm)")
             return result
 
         # ── Phase 4: Grasp (Finger Close, Linear Ramp) ───────────────────────────
-        # Ramp finger target from OPEN (0.0181) to CLOSED (0.012) over 150 steps.
+        # Ramp finger target from OPEN (0.0181) to CLOSED (0.0000) over 150 steps.
         # Direct jump → 2000N impulse → physics explosion. Ramp → ~300N stable hold.
         # Re-assert plunge_target + VERTICAL_QUAT every step to prevent gravity sag.
         self.grasp_mode = True
         close_target  = grasp_pos.copy()  # already at [cube_xy, GRASP_Z]
         ramp_start    = self.FINGER_OPEN_JOINT    # 0.0181
-        ramp_end      = self.FINGER_CLOSED_JOINT  # 0.012
+        ramp_end      = self.FINGER_CLOSED_JOINT  # 0.0000
         ramp_delta    = (ramp_start - ramp_end) / self.GRASP_CLOSE_STEPS
 
         steps_used = 0
@@ -704,7 +709,7 @@ class ChessTaskEnv(ChessSimulationEnv):
         # Ramp from CLOSED (0.012) to OPEN (0.0181) over 80 steps.
         # Slow release prevents the sudden opening force from launching the cube sideways.
         release_target = plunge_target.copy()
-        ramp_start = self.FINGER_CLOSED_JOINT  # 0.012
+        ramp_start = self.FINGER_CLOSED_JOINT  # 0.0000
         ramp_end   = self.FINGER_OPEN_JOINT    # 0.0181
         ramp_delta = (ramp_end - ramp_start) / 80
 

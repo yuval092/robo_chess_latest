@@ -29,7 +29,7 @@ def add_common_args(parser: argparse.ArgumentParser) -> argparse.ArgumentParser:
     return parser
 
 
-def make_env(args, force_scenario=None):
+def make_env(args, force_scenario=None, hide_object=True):
     """
     Create the gymnasium environment using parsed args.
     Handles render_mode selection based on --visualize flag.
@@ -42,6 +42,7 @@ def make_env(args, force_scenario=None):
         "ChessFetchTask-v0",
         render_mode=render_mode,
         force_scenario=force_scenario,
+        hide_object=hide_object,
         debug=args.debug,
     )
     return env
