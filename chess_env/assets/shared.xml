@@ -40,6 +40,7 @@
     </equality>
 
     <contact>
+        <exclude body1="robot0:base_link" body2="table0"></exclude>
         <exclude body1="robot0:r_gripper_finger_link" body2="robot0:l_gripper_finger_link"></exclude>
         <exclude body1="robot0:torso_lift_link" body2="robot0:torso_fixed_link"></exclude>
         <exclude body1="robot0:torso_lift_link" body2="robot0:shoulder_pan_link"></exclude>
@@ -51,7 +52,7 @@
             <joint armature="1" damping="50" frictionloss="0" stiffness="0"></joint>
 
             <default class="robot0:fetchGripper">
-                <geom condim="4" margin="0.001" type="box" user="0" rgba="0.356 0.361 0.376 1.0"></geom>
+                <geom condim="4" margin="0.001" type="box" user="0" rgba="0.356 0.361 0.376 1.0" solref="0.002 1" solimp="0.99 0.999 0.001"></geom>
                 <joint armature="100" damping="1000" limited="true" solimplimit="0.99 0.999 0.01" solreflimit="0.01 1" type="slide"></joint>
             </default>
 

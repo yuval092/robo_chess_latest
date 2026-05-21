@@ -17,20 +17,20 @@ class ChessTaskEnv(ChessSimulationEnv):
     pretrained transport weights without requiring piece-grasping physics.
     """
 
-    def __init__(self, force_scenario=None, drift_curriculum_steps=None, force_drift_limit=None, hide_object=True, debug=False, fixed_drift=False, sample_debug_freq=None, **kwargs):
+    def __init__(self, force_scenario=None, hide_object=True, debug=False, **kwargs):
         """
         Initializes the task environment.
 
         Args:
             force_scenario (str): Lock the environment into 'transit', 'descend', or 'ascend'.
-            drift_curriculum_steps (int): Total steps over which the drift limit tightens.
-            force_drift_limit (float): Override the curriculum with a fixed radial drift limit.
             hide_object (bool): If True, teleports the piece to a hidden location (used for pure movement).
             debug (bool): Enables verbose per-step state logging.
-            fixed_drift (bool): If True, bypasses the curriculum and locks the drift limit to its end value.
-            sample_debug_freq (int): If set, enables debug mode every N episodes for one episode.
         """
         # Consume legacy params to avoid gym warnings
+        kwargs.pop('drift_curriculum_steps', None)
+        kwargs.pop('force_drift_limit', None)
+        kwargs.pop('fixed_drift', None)
+        kwargs.pop('sample_debug_freq', None)
         kwargs.pop('total_curriculum_steps', None)
         kwargs.pop('num_envs', None)
         kwargs.pop('curriculum_progress_override', None)
@@ -40,16 +40,13 @@ class ChessTaskEnv(ChessSimulationEnv):
         self.physics_cfg = load_config("physics")
 
         self.force_scenario = force_scenario
-        self.force_drift_limit = force_drift_limit
         self.hide_object = hide_object
         self.base_debug = debug
         self.debug = debug
-        self.fixed_drift = fixed_drift
-        self.sample_debug_freq = sample_debug_freq or self.env_cfg.get("sample_debug_freq", None)
         
         # Initialization Debug
         if debug:
-            print(f"[DEBUG INIT] Pid {os.getpid()} | Scenario: {force_scenario} | CurriculumSteps: {drift_curriculum_steps} | ForceDrift: {force_drift_limit} | Fixed: {fixed_drift}")
+            print(f"[DEBUG INIT] Pid {os.getpid()} | Scenario: {force_scenario}")
         
         self.current_scenario = None
         self.tube_center_xy = None
@@ -62,6 +59,18 @@ class ChessTaskEnv(ChessSimulationEnv):
         # Initialize base simulation
         super().__init__(debug=debug, **kwargs)
 
+        # Override observation space to match our minimal dict (Stage 2)
+        from gymnasium import spaces
+        self.observation_space = spaces.Dict({
+            "grip_pos": spaces.Box(-np.inf, np.inf, shape=(3,), dtype="float32"),
+            "grip_vel": spaces.Box(-np.inf, np.inf, shape=(3,), dtype="float32"),
+            "l_finger": spaces.Box(-np.inf, np.inf, shape=(), dtype="float32"),
+            "goal_pos": spaces.Box(-np.inf, np.inf, shape=(3,), dtype="float32"),
+            "observation": spaces.Box(-np.inf, np.inf, shape=(7,), dtype="float32"),
+            "achieved_goal": spaces.Box(-np.inf, np.inf, shape=(3,), dtype="float32"),
+            "desired_goal": spaces.Box(-np.inf, np.inf, shape=(3,), dtype="float32"),
+        })
+
         # --- Task Constants ---
         self.CUBE_HEIGHT = self.env_cfg["cube_height"]
         self.CUBE_Z = self.env_cfg["cube_z"]
@@ -69,27 +78,13 @@ class ChessTaskEnv(ChessSimulationEnv):
         self.HOVER_Z = self.env_cfg.get("hover_z", 0.460)
         self.SAFE_Z = self.env_cfg["safe_z"]
         self.SUCCESS_THRESHOLD = self.env_cfg["success_threshold"]
-        self.SUCCESS_BONUS = self.env_cfg["success_bonus"]
-        self.DRIFT_LIMIT_START = self.env_cfg["drift_limit_start"]
         self.DRIFT_LIMIT_END = self.env_cfg["drift_limit_end"]
-        self.DRIFT_CURRICULUM_STEPS = drift_curriculum_steps or self.env_cfg.get("drift_curriculum_steps", 500_000 // 15)
+        self.current_drift_limit = self.env_cfg["drift_limit_end"]  # Fixed; no curriculum
         self.FLOOR_LIMIT = self.env_cfg["floor_limit"]
-        self.CRASH_PENALTY = self.env_cfg["crash_penalty"]
         self.HIDDEN_OBJECT_POS = np.array(self.env_cfg["hidden_object_pos"])
         self.MAX_SETTLE_STEPS = self.physics_cfg["max_settle_steps"]
         self.SETTLE_TOLERANCE = self.physics_cfg["settle_tolerance"]
         self.SETTLE_GAIN = self.physics_cfg["settle_gain"]
-
-        # --- Reward & Precision Tuning ---
-        self.STABILITY_VEL_THRESHOLD = self.env_cfg["stability_vel_threshold"]
-        self.BRAKING_DIST = self.env_cfg["braking_dist"]
-        self.FLOOR_PROXIMITY_THRESHOLD = self.env_cfg["floor_proximity_threshold"]
-        self.Z_REWARD_WEIGHT = self.env_cfg["z_reward_weight"]
-        self.XY_REWARD_WEIGHT = self.env_cfg.get("xy_reward_weight", 2.0)
-        self.JITTER_PENALTY_WEIGHT = self.env_cfg["jitter_penalty_weight"]
-        self.FLOOR_PENALTY = self.env_cfg["floor_penalty"]
-        self.BRAKING_REWARD_WEIGHT = self.env_cfg["braking_reward_weight"]
-        self.DIST_REWARD_WEIGHT = self.env_cfg["dist_reward_weight"]
         self.SETTLE_STEPS_FINAL = self.physics_cfg["settle_steps_final"]
         self.HALT_VEL_THRESHOLD = self.env_cfg.get("halt_vel_threshold", 0.0005)
 
@@ -134,78 +129,30 @@ class ChessTaskEnv(ChessSimulationEnv):
             handler.setLevel(logging.DEBUG)
             self.logger.addHandler(handler)
         
-        # Initial level based on sampled debug
-        if self.sample_debug_freq is not None:
-            self.logger.setLevel(logging.DEBUG if (self.episode_number % self.sample_debug_freq == 0) else logging.INFO)
-
-    def _build_phase9_observation(self):
-        """
-        Constructs a 25-dimensional observation vector.
-        
-        Implements the 'Holding Object' trick: by mapping object_pos to grip_pos,
-        the model is convinced it is always carrying a piece, forcing it to
-        use its stable transport (Phase 2) logic.
-        
-        Vector Mapping:
-            0-2:   Gripper Position
-            3-5:   Object Position (Mapped to Gripper Position)
-            6-8:   Object-to-Goal Relative Position
-            9-10:  Gripper Finger State (Masked/Zero)
-            11-13: Scenario ID (One-Hot: Transit, Descend, Ascend)
-            14-19: Object Velocity (Masked/Zero)
-            20-22: Gripper Velocity
-            23-24: Gripper Finger Velocity (Masked/Zero)
-        """
-        (
-            grip_pos,
-            object_pos,
-            object_rel_pos,
-            gripper_state,
-            object_rot,
-            object_velp,
-            object_velr,
-            grip_velp,
-            gripper_vel,
-        ) = self.generate_mujoco_observations()
-
-        scenario_map = {
-            "transit": [1.0, 0.0, 0.0],
-            "descend": [0.0, 1.0, 0.0],
-            "ascend": [0.0, 0.0, 1.0]
-        }
-        scenario_id_vec = scenario_map.get(self.current_scenario, [0.0, 0.0, 0.0])
-        
-        # Apply the architectural trick
-        plunge_target_for_model = grip_pos.copy()
-
-        if hasattr(self, 'goal') and self.goal is not None and self.goal.shape == (3,):
-            relative_dist_for_model = self.goal.copy() - grip_pos
-        else:
-            relative_dist_for_model = np.zeros(3)
-
-        obs = np.concatenate(
-            [
-                grip_pos,                 # 0-2
-                plunge_target_for_model,     # 3-5
-                relative_dist_for_model,  # 6-8
-                np.zeros(2),              # 9-10
-                scenario_id_vec,          # 11-13
-                np.zeros(3),              # 14-16
-                np.zeros(3),              # 17-19
-                grip_velp,                # 20-22
-                np.zeros(2),              # 23-24
-            ]
-        )
-
-        return {
-            "observation": obs.copy(),
-            "achieved_goal": grip_pos.copy(),
-            "desired_goal": self.goal.copy(),
-        }
+        # Initial level
+        self.logger.setLevel(logging.DEBUG if debug else logging.INFO)
 
     def _get_obs(self):
-        """Returns the current observation dictionary."""
-        return self._build_phase9_observation()
+        """Returns a minimal physics-state dict for status/debugging."""
+        grip_pos = self._utils.get_site_xpos(self.model, self.data, "robot0:grip").copy().astype(np.float32)
+        grip_vel = self._utils.get_site_xvelp(self.model, self.data, "robot0:grip").copy().astype(np.float32)
+        l_finger = np.float32(self._utils.get_joint_qpos(
+            self.model, self.data, "robot0:l_gripper_finger_joint"
+        ).item())
+        goal_pos = self.goal_pos.copy().astype(np.float32) if self.goal_pos is not None else np.zeros(3, dtype=np.float32)
+        
+        # New minimal observation vector (7D: pos, vel, finger)
+        obs_vec = np.concatenate([grip_pos, grip_vel, [l_finger]])
+        
+        return {
+            "observation": obs_vec,
+            "achieved_goal": grip_pos,
+            "desired_goal": goal_pos,
+            "grip_pos": grip_pos,
+            "grip_vel": grip_vel,
+            "l_finger": l_finger,
+            "goal_pos": goal_pos,
+        }
 
     def get_cube_position(self) -> np.ndarray:
         """Returns the current 3D world position of the cube."""
@@ -281,9 +228,8 @@ class ChessTaskEnv(ChessSimulationEnv):
         self.episode_steps = 0
         self.episode_number += 1
 
-        # Periodic Sampled Debugging
-        if self.sample_debug_freq is not None:
-            self.debug = self.base_debug or (self.episode_number % self.sample_debug_freq == 0)
+        # Stage 2 removed periodic debug sampling
+        self.debug = self.base_debug
         
         if self.debug:
             self.logger.setLevel(logging.DEBUG)
@@ -366,6 +312,7 @@ class ChessTaskEnv(ChessSimulationEnv):
         if self.current_scenario == "descend":
             # Descend: closed --> opened (scripted transition before RL)
             self.finger_target_joint = self.FINGER_OPEN_JOINT
+            self._set_gripper_state()
             self._move_mocap_to(arm_start_pos, self.VERTICAL_QUAT, max_steps=150, tolerance=0.003)
         elif self.current_scenario == "ascend":
             # Ascend: start opened --> closed (scripted transition before RL)
@@ -521,9 +468,11 @@ class ChessTaskEnv(ChessSimulationEnv):
 
         # ── Phase 1+2: Rotation Abort Check + Perfect Align & Verticalize ────────
         # Read cube position and check for dangerous diagonal orientation.
-        cube_pos = self.get_cube_position()
+        cube_pos = self.get_cube_position().copy()
         result["pre_grasp_cube_xy"] = cube_pos[:2].copy()
 
+        print(f"[GRASP] Start. Cube at {cube_pos}, Grip at {self._utils.get_site_xpos(self.model, self.data, 'robot0:grip')}")
+        self.logger.debug(f"[GRASP] Start. Cube at {cube_pos}, Grip at {self._utils.get_site_xpos(self.model, self.data, 'robot0:grip')}")
         # Cube rotation check: diagonal cube (yaw >25°) has effective width 42.4mm,
         # exceeding max finger opening (38mm). Abort before plunge to prevent stub.
         cube_quat = self.get_cube_quat()  # (w, x, y, z)
@@ -566,6 +515,9 @@ class ChessTaskEnv(ChessSimulationEnv):
             self._mujoco_step(None)                             # 4. step physics
 
         grip_pos = self._utils.get_site_xpos(self.model, self.data, "robot0:grip").copy()
+        grasp_pos = grip_pos.copy()  # Capture for Phase 6
+        print(f"[GRASP] Post-Plunge. Grip at {grip_pos}, Cube at {self.get_cube_position()}")
+        self.logger.debug(f"[GRASP] Post-Plunge. Grip at {grip_pos}, Cube at {self.get_cube_position()}")
         if abs(grip_pos[2] - self.GRASP_Z) > 0.008:
             result["reason"] = (f"PLUNGE_FAILED (z={grip_pos[2]*1000:.1f}mm, "
                                 f"target={self.GRASP_Z*1000:.1f}mm)")
@@ -576,7 +528,7 @@ class ChessTaskEnv(ChessSimulationEnv):
         # Direct jump → 2000N impulse → physics explosion. Ramp → ~300N stable hold.
         # Re-assert plunge_target + VERTICAL_QUAT every step to prevent gravity sag.
         self.grasp_mode = True
-        close_target  = plunge_target.copy()  # already at [cube_xy, GRASP_Z]
+        close_target  = grasp_pos.copy()  # already at [cube_xy, GRASP_Z]
         ramp_start    = self.FINGER_OPEN_JOINT    # 0.0181
         ramp_end      = self.FINGER_CLOSED_JOINT  # 0.012
         ramp_delta    = (ramp_start - ramp_end) / self.GRASP_CLOSE_STEPS
@@ -590,13 +542,6 @@ class ChessTaskEnv(ChessSimulationEnv):
             self.data.mocap_quat[0][:] = self.VERTICAL_QUAT    # 3. re-lock vertical
             self._mujoco_step(None)                             # 4. step physics
             steps_used += 1
-
-            # Explosion guard
-            if step % 10 == 0:
-                cube_now = self.get_cube_position()
-                if cube_now[2] > self.GRASP_Z + 0.050:
-                    result["reason"] = f"CUBE_EXPLOSION (z={cube_now[2]*1000:.1f}mm)"
-                    return result
 
             # Early abort: fingers fully closed after 30 steps = no cube contact.
             # With cube: fingers stall at j≈0.0141, never drop below 0.003.
@@ -656,15 +601,16 @@ class ChessTaskEnv(ChessSimulationEnv):
             if grip_pos[2] >= self.HOVER_Z - 0.001:
                 break
             target_z = min(self.HOVER_Z, target_z + 0.001)
-            plunge_target = np.array([release_target[0], release_target[1], target_z])
+            target_vec = np.array([grasp_pos[0], grasp_pos[1], target_z])
             
             self._set_action(zero_action)
-            error = plunge_target - self._utils.get_site_xpos(self.model, self.data, "robot0:grip")
+            error = target_vec - self._utils.get_site_xpos(self.model, self.data, "robot0:grip")
             self.data.mocap_pos[0][:3] += error
             self.data.mocap_quat[0][:] = self.VERTICAL_QUAT
             self._mujoco_step(None)
 
             # Cube drop check: use RELATIVE distance between grip and cube (not absolute altitude).
+
             # The cube starts at TABLE_Z + CUBE_H/2 = 0.415m (on the table). An absolute
             # threshold of TABLE_Z + CUBE_H/2 + 0.005 = 0.420m would always fire on step 1
             # because 0.415 < 0.420. Instead, verify the cube travels with the arm:
@@ -748,6 +694,7 @@ class ChessTaskEnv(ChessSimulationEnv):
         # Verify plunge reached place_z before releasing the cube. If the arm stalled
         # mid-descent and we open fingers here, the cube falls from height.
         grip_pos = self._utils.get_site_xpos(self.model, self.data, "robot0:grip").copy()
+        place_pos = grip_pos.copy()  # Capture for Phase 6
         if abs(grip_pos[2] - place_z) > 0.008:
             result["reason"] = (f"PLUNGE_FAILED (z={grip_pos[2]*1000:.1f}mm, "
                                 f"target={place_z*1000:.1f}mm)")
@@ -804,10 +751,10 @@ class ChessTaskEnv(ChessSimulationEnv):
             if grip_pos[2] >= self.HOVER_Z - 0.001:
                 break
             target_z = min(self.HOVER_Z, target_z + 0.001)
-            plunge_target = np.array([release_target[0], release_target[1], target_z])
+            target_vec = np.array([place_pos[0], place_pos[1], target_z])
             
             self._set_action(zero_action)
-            error = plunge_target - self._utils.get_site_xpos(self.model, self.data, "robot0:grip")
+            error = target_vec - self._utils.get_site_xpos(self.model, self.data, "robot0:grip")
             self.data.mocap_pos[0][:3] += error
             self.data.mocap_quat[0][:] = self.VERTICAL_QUAT
             self._mujoco_step(None)
@@ -909,9 +856,11 @@ class ChessTaskEnv(ChessSimulationEnv):
 
             if needs_open:
                 self.finger_target_joint = self.FINGER_OPEN_JOINT
+                self._set_gripper_state()
                 self._move_mocap_to(nominal_exit_pos, self.VERTICAL_QUAT, max_steps=100, tolerance=0.003)
             elif needs_close:
                 self.finger_target_joint = self.FINGER_CLOSED_JOINT
+                self._set_gripper_state()
                 self._move_mocap_to(nominal_exit_pos, self.VERTICAL_QUAT, max_steps=100, tolerance=0.003)
 
             # Finger validation (same as _reset_sim Phase 3)
@@ -932,144 +881,17 @@ class ChessTaskEnv(ChessSimulationEnv):
         return self._get_obs(), info
 
     def compute_reward(self, achieved_goal, desired_goal, info):
-        """
-        Dense reward shaping:
-        1. Distance: Negative L2 norm to goal.
-        2. Z-Error: Penalty for height inaccuracy.
-        3. Braking: Penalty for high velocity when near the goal.
-        """
-        achieved_goal = np.asarray(achieved_goal)
-        desired_goal = np.asarray(desired_goal)
-        scalar_input = achieved_goal.ndim == 1
-        if scalar_input:
-            achieved_goal, desired_goal = achieved_goal[None, :], desired_goal[None, :]
-
-        dist_to_goal = np.linalg.norm(achieved_goal - desired_goal, axis=1)
-        reward = -self.DIST_REWARD_WEIGHT * dist_to_goal
-        
-        z_err = np.abs(achieved_goal[:, 2] - desired_goal[:, 2])
-        reward -= self.Z_REWARD_WEIGHT * z_err
-
-        xy_err = np.linalg.norm(achieved_goal[:, :2] - desired_goal[:, :2], axis=1)
-        reward -= self.XY_REWARD_WEIGHT * xy_err
-
-        grip_velp = self._utils.get_site_xvelp(self.model, self.data, "robot0:grip")
-        g_speed = np.linalg.norm(grip_velp)
-        
-        braking_mask = (dist_to_goal < self.BRAKING_DIST).astype(np.float32)
-        reward -= self.BRAKING_REWARD_WEIGHT * g_speed * braking_mask
-
-        return float(reward[0]) if scalar_input else reward
+        """Stub: scripted system does not use reward."""
+        return 0.0
 
     def step(self, action):
         """
-        Executes a physics step:
-        1. Forces gripper target based on scenario state machine.
-        2. Enforces absolute finger position via Simulation-level actuator override.
-        3. Checks for tube breaches (including footprint) and finger faults.
+        Minimal physics step. The ScriptedController drives the arm via
+        _move_mocap_to; this step() satisfies the Gymnasium interface only.
         """
-        self.total_env_steps += 1
-        self.episode_steps += 1
-        
-        # 1. State Machine Enforcement
-        if self.current_scenario == "descend" and not self.grasp_mode:
-            self.finger_target_joint = self.FINGER_OPEN_JOINT
-        elif self.current_scenario != "descend":
-            self.finger_target_joint = self.FINGER_CLOSED_JOINT
-            
-        action_copy = action.copy()
-        action_copy[3] = -1.0 # Standardize; simulation.py will override with finger_target_joint
-        
-        action_copy = np.clip(action_copy, self.action_space.low, self.action_space.high)
-        self._set_action(action_copy)
-        self._mujoco_step(action_copy)
-        self._step_callback()
-
+        zero = np.zeros(4)
+        zero[3] = -1.0
+        self._set_action(zero)
+        self._mujoco_step(zero)
         obs = self._get_obs()
-        gripper_pos = obs["observation"][0:3]
-        gripper_vel = obs["observation"][20:23]
-        
-        terminated, truncated = False, False
-        crashed = False
-        crash_reason = None
-        
-        # 2. Finger Fault Check (Production Certification)
-        l_finger = self._utils.get_joint_qpos(self.model, self.data, "robot0:l_gripper_finger_joint").item()
-        finger_fault = False
-        if not self.grasp_mode:
-            finger_fault = abs(l_finger - self.finger_target_joint) > 0.003
-            if finger_fault:
-                crashed = True
-                crash_reason = f"FINGER_FAULT (actual={l_finger:.4f}, target={self.finger_target_joint:.4f})"
-        
-        # NEW: Cube drop check (only during grasp_mode in ascend/transit)
-        if self.grasp_mode and self.current_scenario in {"ascend", "transit"}:
-            cube_held, drop_reason = self._check_cube_held(gripper_pos)
-            if not cube_held:
-                crashed = True
-                crash_reason = drop_reason
-
-        # 3. Collision & Drift Detection
-        current_drift_limit = self.DRIFT_LIMIT_END
-        if not self.fixed_drift and self.force_drift_limit is None:
-            dp = min(self.total_env_steps / self.DRIFT_CURRICULUM_STEPS, 1.0)
-            current_drift_limit = self.DRIFT_LIMIT_START - (self.DRIFT_LIMIT_START - self.DRIFT_LIMIT_END) * dp
-        elif self.force_drift_limit is not None:
-            current_drift_limit = self.force_drift_limit
-
-        if self.current_scenario == "transit":
-            if gripper_pos[2] < self.FLOOR_LIMIT:
-                crashed = True
-                crash_reason = f"FLOOR_HIT (z={gripper_pos[2]:.4f} < limit={self.FLOOR_LIMIT:.4f})"
-        elif self.current_scenario in {"descend", "ascend"}:
-            drift = np.linalg.norm(gripper_pos[:2] - self.tube_center_xy)
-            drift_outer = drift + self.FINGER_OUTER_OFFSET
-            
-            # The curriculum drift limit now governs the center.
-            # Footprint check is implicitly governed by curriculum.
-            if drift > current_drift_limit:
-                crashed = True
-                crash_reason = f"TUBE_BREACH (center={drift:.4f} > limit={current_drift_limit:.4f})"
-            elif gripper_pos[2] < self.TABLE_SURFACE_Z:
-                crashed = True
-                crash_reason = f"TABLE_HIT (z={gripper_pos[2]:.4f} < surface={self.TABLE_SURFACE_Z:.4f})"
-
-        if self.debug:
-            info_log = { "fault": finger_fault, "limit": f"{current_drift_limit:.4f}" }
-            msg = (f"[DEBUG TASK] Ep{self.episode_number} Step {self.episode_steps:03d} | "
-                   f"Grip: [{', '.join([f'{x:.4f}' for x in gripper_pos])}] | "
-                   f"Target: [{', '.join([f'{x:.4f}' for x in self.goal_pos])}] | "
-                   f"Fingers: {l_finger:.4f} | Info: {info_log}")
-            self.logger.debug(msg)
-        
-        reward = self.compute_reward(gripper_pos, self.goal_pos, {})
-        reward -= self.JITTER_PENALTY_WEIGHT * np.linalg.norm(action_copy[:3]) ** 2 
-        
-        if gripper_pos[2] < self.FLOOR_LIMIT + self.FLOOR_PROXIMITY_THRESHOLD:
-            reward += self.FLOOR_PENALTY
-
-        is_near = self._is_success(gripper_pos, self.goal_pos)
-        is_stable = np.linalg.norm(gripper_vel) < self.STABILITY_VEL_THRESHOLD
-        success = float(is_near and is_stable)
-        
-        if crashed:
-            terminated = True
-            reward = self.CRASH_PENALTY
-            success = 0.0
-
-        if success:
-            terminated = True
-            reward += self.SUCCESS_BONUS
-
-        if self.debug and terminated:
-            outcome = f"CRASH ({crash_reason})" if crashed else ("SUCCESS" if success else "TIMEOUT")
-            msg = (f"\n[EPISODE {self.episode_number} END] Scenario={self.current_scenario} | "
-                   f"Outcome={outcome} | Reward={reward:.2f}\n")
-            self.logger.debug(msg)
-
-        info = {
-            "is_success": float(success),
-            "scenario": self.current_scenario,
-            "crash_reason": crash_reason
-        }
-        return obs, reward, terminated, truncated, info
+        return obs, 0.0, False, False, {"is_success": 0.0, "scenario": self.current_scenario}
