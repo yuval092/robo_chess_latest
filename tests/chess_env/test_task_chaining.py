@@ -27,7 +27,7 @@ def test_soft_reset_flow():
     uw.current_scenario = "transit"
     nominal_xy = np.array([0.5, 0.5])
     exit_wp = np.array([0.5, 0.5, 0.550])
-    next_goal = np.array([0.5, 0.5, 0.430]) # descend
+    next_goal = np.array([0.5, 0.5, 0.460]) # descend (HOVER_Z)
     
     obs, info = uw.soft_reset(
         new_scenario="descend",
@@ -37,6 +37,7 @@ def test_soft_reset_flow():
     )
     
     assert isinstance(obs, dict)
+    assert "grip_pos" in obs
     assert "observation" in obs
     assert "halt_steps" in info
     assert "align_steps" in info
@@ -52,7 +53,7 @@ def test_soft_reset_finger_validation():
     
     nominal_xy = np.array([0.5, 0.5])
     exit_wp = np.array([0.5, 0.5, 0.550])
-    next_goal = np.array([0.5, 0.5, 0.430])
+    next_goal = np.array([0.5, 0.5, 0.460]) # HOVER_Z
     
     # This should pass without error with the current physics
     obs, info = uw.soft_reset(

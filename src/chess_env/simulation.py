@@ -97,6 +97,10 @@ class ChessSimulationEnv(MujocoFetchPickAndPlaceEnv):
                 return goal
         return goal
 
+    def _render_callback(self):
+        """Suppress Fetch's moving target0 goal marker in chess visualizations."""
+        pass
+
     def _reset_sim(self):
         """
         Resets the simulation state. Samples a new object position on the board.
@@ -172,8 +176,9 @@ class ChessSimulationEnv(MujocoFetchPickAndPlaceEnv):
         """
         super()._env_setup(initial_qpos)
         
-        # Force torso to maximum height for optimal board reach
-        self._utils.set_joint_qpos(self.model, self.data, "robot0:torso_lift_joint", 0.4)
+        # Force torso to optimal operating height for board reach
+        torso_height = self.env_cfg.get("torso_height", 0.25)
+        self._utils.set_joint_qpos(self.model, self.data, "robot0:torso_lift_joint", torso_height)
         
         # Force crane orientation immediately on setup
         self._utils.set_mocap_quat(self.model, self.data, "robot0:mocap", self.VERTICAL_QUAT)

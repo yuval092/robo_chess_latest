@@ -31,6 +31,42 @@ def test_xml_integrity(debug=False):
         print(f"  - ERROR: Failed to load environment: {e}")
         return False
 
+def test_table_geometry(debug=False):
+    print("Testing Table Geometry (70x70cm, 4 legs)...")
+    try:
+        cfg = load_config("env")
+        if cfg["table_half_x"] != 0.35 or cfg["table_half_y"] != 0.35:
+            print(f"  - ERROR: table_half_x/y expected 0.35, got {cfg['table_half_x']}/{cfg['table_half_y']}")
+            return False
+            
+        env = ChessTaskEnv(debug=debug)
+        model = env.model
+        # Verify 4 leg geoms exist
+        for leg_name in ["table0_leg_far_plus", "table0_leg_far_minus",
+                         "table0_leg_near_plus", "table0_leg_near_minus"]:
+            try:
+                model.geom(leg_name)
+                print(f"  - Leg '{leg_name}' found.")
+            except Exception:
+                print(f"  - ERROR: Leg '{leg_name}' NOT found.")
+                env.close()
+                return False
+        
+        # Verify surface top Z = 0.400
+        geom_id = mujoco.mj_name2id(model, mujoco.mjtObj.mjOBJ_GEOM, "table0_surface")
+        body_id = mujoco.mj_name2id(model, mujoco.mjtObj.mjOBJ_BODY, "table0")
+        surface_top = model.body_pos[body_id][2] + model.geom_pos[geom_id][2] + model.geom_size[geom_id][2]
+        if abs(surface_top - 0.400) > 0.001:
+            print(f"  - ERROR: Surface Z = {surface_top:.4f}, expected 0.400")
+            env.close()
+            return False
+        print(f"  - Surface top Z = {surface_top:.4f} (correct)")
+        env.close()
+        return True
+    except Exception as e:
+        print(f"  - ERROR during Table Geometry test: {e}")
+        return False
+
 def test_static_stability(debug=False):
     print("Testing Static Stability (no-action drift check)...")
     try:
@@ -58,43 +94,51 @@ def test_static_stability(debug=False):
         return False
 
 def test_kinematic_reachability(debug=False):
-    print("Testing Kinematic Reachability...")
+    print("Testing Kinematic Reachability (all 64 chess squares)...")
     try:
         env = ChessTaskEnv(debug=debug)
+        env.reset()  # Critical: ensures torso is raised
         cfg = load_config("env")
         safe_z = cfg["safe_z"]
         grasp_z = cfg["grasp_z"]
-        
-        # Test reaching safe_z and grasp_z at various board positions
-        # Using a fixed seed for reproducibility in tests if needed, or just sampling
-        test_points = [
-            env._sample_board_position(),
-            env._sample_board_position()
+        cx, cy = cfg["table_center_xy"]
+        hx, hy = cfg["table_half_x"], cfg["table_half_y"]
+        margin = cfg.get("edge_margin", 0.02)
+
+        # Build all 64 chess square centers from env config
+        x0 = cx - hx + margin;  x1 = cx + hx - margin
+        y0 = cy - hy + margin;  y1 = cy + hy - margin
+        sq_x = (x1 - x0) / 8;   sq_y = (y1 - y0) / 8
+        squares = [
+            (x0 + (r + 0.5)*sq_x, y0 + (c + 0.5)*sq_y, r, c)
+            for r in range(8) for c in range(8)
         ]
-        
-        for pt in test_points:
-            # Check safe_z
-            pt_safe = pt.copy()
-            pt_safe[2] = safe_z
-            env._settle_arm_to_start(pt_safe)
-            grip_pos = env._utils.get_site_xpos(env.model, env.data, "robot0:grip")
-            err = np.linalg.norm(pt_safe - grip_pos)
-            print(f"  - Reach safe_z at {pt[:2]}: err={err:.6f}m")
-            if err > 0.005: 
-                print(f"    ERROR: High error reaching safe_z")
-                return False
-            
-            # Check grasp_z
-            pt_grasp = pt.copy()
-            pt_grasp[2] = grasp_z
-            env._settle_arm_to_start(pt_grasp)
-            grip_pos = env._utils.get_site_xpos(env.model, env.data, "robot0:grip")
-            err = np.linalg.norm(pt_grasp - grip_pos)
-            print(f"  - Reach grasp_z at {pt[:2]}: err={err:.6f}m")
-            if err > 0.005:
-                print(f"    ERROR: High error reaching grasp_z")
-                return False
-            
+
+        max_err = 0.0
+        worst = None
+        THRESHOLD = 0.005  # 5mm
+
+        for (sx, sy, row, col) in squares:
+            for (z, z_name) in [(safe_z, "safe_z"), (grasp_z, "grasp_z")]:
+                target = np.array([sx, sy, z])
+                env._settle_arm_to_start(target)
+                grip_pos = env._utils.get_site_xpos(env.model, env.data, "robot0:grip")
+                err = np.linalg.norm(target - grip_pos)
+                if err > max_err:
+                    max_err = err
+                    worst = (row, col, z_name, sx, sy, err)
+
+        print(f"  - Max error across 64 squares × 2 heights: {max_err*1000:.1f}mm")
+        if worst:
+            r, c, zn, sx, sy, e = worst
+            print(f"  - Worst: row={r} col={c} ({zn}) pos=({sx:.3f},{sy:.3f}) err={e*1000:.1f}mm")
+
+        if max_err > THRESHOLD:
+            print(f"  ERROR: max_err={max_err*1000:.1f}mm exceeds 5mm threshold.")
+            env.close()
+            return False
+
+        print(f"  - All 64 squares reachable within {THRESHOLD*1000:.0f}mm threshold.")
         env.close()
         return True
     except Exception as e:
@@ -138,20 +182,20 @@ def verify_grasp_xml_changes(debug=False):
         print(f"  - Cube mass: {mass:.3f}kg")
         assert abs(mass - 0.05) < 0.001, f"Expected 0.05, got {mass:.3f}"
         
-        # 2. Actuator Kp
+        # 2. Actuator Kp (Updated to 20000 in Stage 3)
         l_act_id = mujoco.mj_name2id(model, mujoco.mjtObj.mjOBJ_ACTUATOR, "robot0:l_gripper_finger_joint")
         kp = model.actuator_gainprm[l_act_id, 0]
         print(f"  - Actuator Kp: {kp}")
-        assert kp == 150000, f"Expected 150000, got {kp}"
+        assert abs(kp - 20000) < 1.0, f"Expected 20000, got {kp}"
         
         # 3. Actuator ctrlrange
         ctrl_max = model.actuator_ctrlrange[l_act_id, 1]
         print(f"  - Actuator ctrlrange max: {ctrl_max:.3f}")
         assert abs(ctrl_max - 0.05) < 0.001, f"Expected 0.05, got {ctrl_max:.3f}"
         
-        # 4. GRASP_Z
+        # 4. GRASP_Z (Updated to 0.430 in Stage 3)
         print(f"  - GRASP_Z: {uw.GRASP_Z:.3f}m")
-        assert abs(uw.GRASP_Z - 0.425) < 0.001, f"Expected 0.425, got {uw.GRASP_Z:.3f}"
+        assert abs(uw.GRASP_Z - 0.430) < 0.001, f"Expected 0.430, got {uw.GRASP_Z:.3f}"
         
         env.close()
         return True
@@ -167,6 +211,7 @@ def main():
     print("--- RoboChess Physics Verification ---")
     results = {
         "XML Integrity": test_xml_integrity(debug=args.debug),
+        "Table Geometry": test_table_geometry(debug=args.debug),
         "Grasp XML Verification": verify_grasp_xml_changes(debug=args.debug),
         "Static Stability": test_static_stability(debug=args.debug),
         "Kinematic Reachability": test_kinematic_reachability(debug=args.debug),
