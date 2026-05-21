@@ -97,6 +97,10 @@ class ChessSimulationEnv(MujocoFetchPickAndPlaceEnv):
                 return goal
         return goal
 
+    def _render_callback(self):
+        """Suppress Fetch's moving target0 goal marker in chess visualizations."""
+        pass
+
     def _reset_sim(self):
         """
         Resets the simulation state. Samples a new object position on the board.
