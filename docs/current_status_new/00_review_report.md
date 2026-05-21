@@ -141,7 +141,7 @@ Note: The absolute board edge at `(0.57, 0.2641)` remains unreachable — this i
 
 ## Evaluation Results
 
-All results with torso=0.25m, table=70×70cm, arm at x=0.60.
+All results with arm_x=0.56, torso=0.3661m, table=70×70cm.
 
 ### pytest
 ```
@@ -163,15 +163,17 @@ full_move (5 ep): 100%  — complete pick+place cycle
 
 ### eval_stress --chain pick
 ```
-near_right (0.570, -0.046): 100%
-near_left  (0.570,  0.574): 100%
-far_right  (1.190, -0.046): 100%
-far_left   (1.190,  0.574): 100%
+near_right (0.609, -0.007): 100%
+near_left  (0.609,  0.535): 100%
+far_right  (1.151, -0.007): 100%
+far_left   (1.151,  0.535): 100%
 center     (0.880,  0.264): 100%
 Overall: 100%
 ```
+Note: positions are actual chess square centers (row 0 / row 7 corners of the 8×8 grid),
+not the board edge (x=0.570/1.190). The board edge positions are not chess squares.
 
-### verify_physics (after arm_x=0.56, torso=0.3661 fix)
+### verify_physics
 ```
 XML Integrity:           PASSED
 Table Geometry (70x70):  PASSED
@@ -184,9 +186,6 @@ SYSTEM HEALTHY
 
 ---
 
-## Actions Required Before Next Commit
+## Actions Required
 
-1. **Remove `debug_repro.py`** from staged changes and delete file (BUG-E)
-2. ~~Fix `verify_physics.py` kinematic reachability~~ — DONE (BUG-D resolved)
-
-All other issues resolved. System is HEALTHY.
+All issues resolved. System is HEALTHY.

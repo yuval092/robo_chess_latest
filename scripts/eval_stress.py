@@ -32,6 +32,10 @@ def get_test_positions(args) -> list:
     min_x, max_x = cx - hx + margin, cx + hx - margin
     min_y, max_y = cy - hy + margin, cy + hy - margin
 
+    # Chess square grid boundaries (8×8 on usable board area)
+    sq_x = (max_x - min_x) / 8
+    sq_y = (max_y - min_y) / 8
+
     if args.grid:
         n = args.grid_size
         xs = np.linspace(min_x, max_x, n)
@@ -44,12 +48,17 @@ def get_test_positions(args) -> list:
         center = np.array([cx, cy])
         return [(name, src, center) for name, src in positions]
     else:
-        # 4 corners + center
+        # 4 corner chess squares + center
+        # Use actual chess square centers (row/col 0 and 7), not board edges
+        near_x = min_x + 0.5 * sq_x   # row 0 center (~0.609m)
+        far_x  = min_x + 7.5 * sq_x   # row 7 center (~1.151m)
+        right_y = min_y + 0.5 * sq_y  # col 0 center
+        left_y  = min_y + 7.5 * sq_y  # col 7 center
         corners = [
-            ("near_right", np.array([min_x, min_y])),
-            ("near_left",  np.array([min_x, max_y])),
-            ("far_right",  np.array([max_x, min_y])),
-            ("far_left",   np.array([max_x, max_y])),
+            ("near_right", np.array([near_x, right_y])),
+            ("near_left",  np.array([near_x, left_y])),
+            ("far_right",  np.array([far_x,  right_y])),
+            ("far_left",   np.array([far_x,  left_y])),
             ("center",     np.array([cx, cy])),
         ]
         center = np.array([cx, cy])
@@ -60,7 +69,9 @@ def run_position(name, src_xy, dst_xy, args) -> dict:
     """Run N episodes at a specific source position."""
     hide_object = args.chain not in ("pick", "full_move")
     env = make_env(args, force_scenario="transit", hide_object=hide_object)
-    ctrl = ScriptedController(env, drift_limit=args.drift_limit)
+    render_fn = env.render if args.visualize else None
+    ctrl = ScriptedController(env, drift_limit=args.drift_limit,
+                              render_fn=render_fn, render_delay=args.delay)
     inner = env.unwrapped
 
     successes = 0
@@ -143,15 +154,6 @@ def main():
         print(f"{r['name']:<18} {xy_str:>20} {r['rate']:>7.0%}  {status}")
     
     total_episodes = sum(r["n"] for r in all_results)
-    if total_episodes > 0:
-        overall = sum(r["successes"] for r in all_results) / total_episodes
-        print(f"\nOverall success rate: {overall:.1%}")
-    print("=" * 55)
-
-
-if __name__ == "__main__":
-    main()
-"n"] for r in all_results)
     if total_episodes > 0:
         overall = sum(r["successes"] for r in all_results) / total_episodes
         print(f"\nOverall success rate: {overall:.1%}")

@@ -122,14 +122,17 @@ python scripts/eval_stress.py --chain vertical --n-episodes 5
 python scripts/eval_stress.py --chain pick --grid --grid-size 4 --n-episodes 2
 ```
 
-**Default positions (5)**: The 4 board corners + center, computed from `env.yaml`:
+**Default positions (5)**: The 4 corner chess squares + center, computed from `env.yaml`.
+Chess squares are centered on an 8×8 grid within the usable board area (table extents minus `edge_margin`):
 ```
-near_right: (cx - hx + margin, cy - hy + margin) = (0.570, -0.046)
-near_left:  (cx - hx + margin, cy + hy - margin) = (0.570,  0.574)
-far_right:  (cx + hx - margin, cy - hy + margin) = (1.190, -0.046)
-far_left:   (cx + hx - margin, cy + hy - margin) = (1.190,  0.574)
-center:     (cx, cy)                              = (0.880,  0.264)
+near_right: row 0, col 0 → (0.609, -0.007)
+near_left:  row 0, col 7 → (0.609,  0.535)
+far_right:  row 7, col 0 → (1.151, -0.007)
+far_left:   row 7, col 7 → (1.151,  0.535)
+center:     (cx, cy)     → (0.880,  0.264)
 ```
+Note: these are actual chess square centers, not the board edge (x=0.570 / x=1.190). The board edge
+is reachable in transit but is NOT a chess square position, so it is not tested here.
 
 **Grid mode** (`--grid --grid-size N`): Creates an N×N grid of positions across the usable board area. Useful for identifying systematic dead zones.
 
@@ -138,10 +141,10 @@ center:     (cx, cy)                              = (0.880,  0.264)
 =======================================================
 Position                             XY     Rate
 -------------------------------------------------------
-near_right              (0.570, -0.046)    100%  OK
-near_left                (0.570,  0.574)   100%  OK
-far_right               (1.190, -0.046)    100%  OK
-far_left                 (1.190,  0.574)   100%  OK
+near_right              (0.609, -0.007)    100%  OK
+near_left                (0.609, 0.535)   100%  OK
+far_right               (1.151, -0.007)    100%  OK
+far_left                 (1.151, 0.535)   100%  OK
 center                   (0.880,  0.264)   100%  OK
 
 Overall success rate: 100.0%

@@ -42,7 +42,8 @@ def main():
 
     env = gym.make("ChessFetchTask-v0", render_mode="human",
                    force_scenario=force_scenario, debug=args.debug)
-    ctrl = ScriptedController(env, drift_limit=args.drift_limit)
+    ctrl = ScriptedController(env, drift_limit=args.drift_limit,
+                              render_fn=env.render, render_delay=args.delay)
     inner = env.unwrapped
 
     ep = 0
@@ -79,16 +80,6 @@ def main():
 
             if args.wait:
                 input("Press Enter for next episode...")
-
-    except KeyboardInterrupt:
-        print("\nStopped by user.")
-    finally:
-        env.close()
-
-
-if __name__ == "__main__":
-    main()
-           time.sleep(args.delay)
 
     except KeyboardInterrupt:
         print("\nStopped by user.")

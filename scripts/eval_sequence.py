@@ -3,7 +3,7 @@ eval_sequence.py — Full scenario chain evaluation using ScriptedController.
 
 Usage:
     python scripts/eval_sequence.py
-        [--chain full_move|pick|place|vertical]
+        [--chain full_move|pick|vertical]
         [--src-xy "0.88 0.2641"] [--dst-xy "1.00 0.40"]
         [--n-episodes 20] [--drift-limit 0.010]
         [--visualize] [--delay 0.02] [--debug]
@@ -18,14 +18,16 @@ import src.chess_env
 from src.chess_env.controller import ScriptedController, SequenceResult
 from src.utils.args import add_common_args, make_env
 
-CHAIN_CHOICES = ["full_move", "pick", "place", "vertical"]
+CHAIN_CHOICES = ["full_move", "pick", "vertical"]
 
 
 def run_sequence_episodes(args, src_xy, dst_xy) -> list:
     """Run N episodes of the specified chain. Returns list of SequenceResult."""
     hide_object = args.chain not in ("pick", "full_move")
     env = make_env(args, force_scenario="transit", hide_object=hide_object)
-    ctrl = ScriptedController(env, drift_limit=args.drift_limit)
+    render_fn = env.render if args.visualize else None
+    ctrl = ScriptedController(env, drift_limit=args.drift_limit,
+                              render_fn=render_fn, render_delay=args.delay)
     inner = env.unwrapped
     results = []
 
@@ -107,31 +109,6 @@ def main():
 
     src_xy = np.array([float(x) for x in args.src_xy.split()])
     dst_xy = np.array([float(x) for x in args.dst_xy.split()])
-
-    print(f"Chain: {args.chain}, src={src_xy}, dst={dst_xy}, n={args.n_episodes}")
-    results = run_sequence_episodes(args, src_xy, dst_xy)
-    print_summary(results, args.chain)
-
-
-if __name__ == "__main__":
-    main()
-in args.dst_xy.split()])
-
-    print(f"Chain: {args.chain}, src={src_xy}, dst={dst_xy}, n={args.n_episodes}")
-    results = run_sequence_episodes(args, src_xy, dst_xy)
-    print_summary(results, args.chain)
-
-
-if __name__ == "__main__":
-    main()
-_xy}, dst={dst_xy}, n={args.n_episodes}")
-    results = run_sequence_episodes(args, src_xy, dst_xy)
-    print_summary(results, args.chain)
-
-
-if __name__ == "__main__":
-    main()
-in args.dst_xy.split()])
 
     print(f"Chain: {args.chain}, src={src_xy}, dst={dst_xy}, n={args.n_episodes}")
     results = run_sequence_episodes(args, src_xy, dst_xy)

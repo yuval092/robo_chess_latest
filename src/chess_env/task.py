@@ -287,6 +287,12 @@ class ChessTaskEnv(ChessSimulationEnv):
             arm_start_pos = np.array([start_xy[0], start_xy[1], self.HOVER_Z])
             self.goal_pos = np.array([start_xy[0], start_xy[1], self.SAFE_Z])
 
+        # NEW: Ensure self.goal is set BEFORE any call to self.render()
+        # FetchEnv's _render_callback uses self.goal, which is normally set 
+        # by RobotEnv.reset() AFTER _reset_sim() returns.
+        if self.goal_pos is not None:
+            self.goal = self.goal_pos.copy()
+
         # Reset parent simulation
         super()._reset_sim()
 

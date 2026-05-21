@@ -21,7 +21,9 @@ STAGE_CHOICES = ["transit", "descend", "ascend"]
 def evaluate_stage(stage: str, args) -> dict:
     """Run N episodes of a single stage and collect accuracy statistics."""
     env = make_env(args, force_scenario=stage)
-    ctrl = ScriptedController(env, drift_limit=args.drift_limit)
+    render_fn = env.render if args.visualize else None
+    ctrl = ScriptedController(env, drift_limit=args.drift_limit,
+                              render_fn=render_fn, render_delay=args.delay)
     inner = env.unwrapped
 
     successes = 0
@@ -101,17 +103,6 @@ def main():
         sys.exit(1)
 
     results = []
-    for stage in stages:
-        print(f"\nEvaluating stage: {stage} ({args.n_episodes} episodes)...")
-        result = evaluate_stage(stage, args)
-        results.append(result)
-
-    print_summary(results)
-
-
-if __name__ == "__main__":
-    main()
-s = []
     for stage in stages:
         print(f"\nEvaluating stage: {stage} ({args.n_episodes} episodes)...")
         result = evaluate_stage(stage, args)
