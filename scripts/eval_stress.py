@@ -100,11 +100,6 @@ def run_position(name, src_xy, dst_xy, args) -> dict:
         else:
             failures.append(result.failed_at or "unknown")
 
-        if args.visualize:
-            env.render()
-        if args.delay > 0:
-            time.sleep(args.delay)
-
     env.close()
     return {
         "name": name,
@@ -148,6 +143,15 @@ def main():
         print(f"{r['name']:<18} {xy_str:>20} {r['rate']:>7.0%}  {status}")
     
     total_episodes = sum(r["n"] for r in all_results)
+    if total_episodes > 0:
+        overall = sum(r["successes"] for r in all_results) / total_episodes
+        print(f"\nOverall success rate: {overall:.1%}")
+    print("=" * 55)
+
+
+if __name__ == "__main__":
+    main()
+"n"] for r in all_results)
     if total_episodes > 0:
         overall = sum(r["successes"] for r in all_results) / total_episodes
         print(f"\nOverall success rate: {overall:.1%}")

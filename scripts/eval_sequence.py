@@ -41,13 +41,6 @@ def run_sequence_episodes(args, src_xy, dst_xy) -> list:
             result = ctrl.run_full_move(src_xy, dst_xy)
         elif args.chain == "pick":
             result = ctrl.run_pick_sequence(src_xy)
-        elif args.chain == "place":
-            # Note: For place, we assume cube is already at src_xy or held.
-            # Simplified for eval: reset with cube at src_xy, run pick, then place.
-            # If chain is just "place", we should force held state.
-            # But the Controller handles this. For pure place eval:
-            inner.grasp_mode = True # Force held
-            result = ctrl.run_place_sequence(dst_xy)
         elif args.chain == "vertical":
             from src.chess_env.waypoints import SAFE_Z, HOVER_Z
             nom_exit = np.array([src_xy[0], src_xy[1], SAFE_Z])
@@ -63,11 +56,6 @@ def run_sequence_episodes(args, src_xy, dst_xy) -> list:
                 grasp_quality=None
             )
         results.append(result)
-
-        if args.visualize:
-            env.render()
-        if args.delay > 0:
-            time.sleep(args.delay)
 
     env.close()
     return results
@@ -119,6 +107,31 @@ def main():
 
     src_xy = np.array([float(x) for x in args.src_xy.split()])
     dst_xy = np.array([float(x) for x in args.dst_xy.split()])
+
+    print(f"Chain: {args.chain}, src={src_xy}, dst={dst_xy}, n={args.n_episodes}")
+    results = run_sequence_episodes(args, src_xy, dst_xy)
+    print_summary(results, args.chain)
+
+
+if __name__ == "__main__":
+    main()
+in args.dst_xy.split()])
+
+    print(f"Chain: {args.chain}, src={src_xy}, dst={dst_xy}, n={args.n_episodes}")
+    results = run_sequence_episodes(args, src_xy, dst_xy)
+    print_summary(results, args.chain)
+
+
+if __name__ == "__main__":
+    main()
+_xy}, dst={dst_xy}, n={args.n_episodes}")
+    results = run_sequence_episodes(args, src_xy, dst_xy)
+    print_summary(results, args.chain)
+
+
+if __name__ == "__main__":
+    main()
+in args.dst_xy.split()])
 
     print(f"Chain: {args.chain}, src={src_xy}, dst={dst_xy}, n={args.n_episodes}")
     results = run_sequence_episodes(args, src_xy, dst_xy)

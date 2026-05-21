@@ -53,11 +53,6 @@ def evaluate_stage(stage: str, args) -> dict:
             crash_reasons[reason] = crash_reasons.get(reason, 0) + 1
         step_counts.append(result.steps)
 
-        if args.visualize:
-            env.render()
-            if args.delay > 0:
-                time.sleep(args.delay)
-
     env.close()
     return {
         "stage": stage,
@@ -106,6 +101,17 @@ def main():
         sys.exit(1)
 
     results = []
+    for stage in stages:
+        print(f"\nEvaluating stage: {stage} ({args.n_episodes} episodes)...")
+        result = evaluate_stage(stage, args)
+        results.append(result)
+
+    print_summary(results)
+
+
+if __name__ == "__main__":
+    main()
+s = []
     for stage in stages:
         print(f"\nEvaluating stage: {stage} ({args.n_episodes} episodes)...")
         result = evaluate_stage(stage, args)

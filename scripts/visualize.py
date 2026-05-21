@@ -76,12 +76,19 @@ def main():
 
             res_str = "SUCCESS" if result.success else f"FAIL ({result.crash_reason})"
             print(f"Ep {ep}: {res_str}")
-            env.render()
 
             if args.wait:
                 input("Press Enter for next episode...")
-            elif args.delay > 0:
-                time.sleep(args.delay)
+
+    except KeyboardInterrupt:
+        print("\nStopped by user.")
+    finally:
+        env.close()
+
+
+if __name__ == "__main__":
+    main()
+           time.sleep(args.delay)
 
     except KeyboardInterrupt:
         print("\nStopped by user.")

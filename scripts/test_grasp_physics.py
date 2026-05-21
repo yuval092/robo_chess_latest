@@ -29,9 +29,9 @@ def assert_mandatory_preconditions(uw):
     assert abs(mass - 0.05) < 0.001, \
         f"Cube mass={mass:.3f}, expected 0.05. XML not updated."
     
-    # 3. Finger threshold check (Updated to 0.003 in Stage 3)
-    assert abs(uw.GRASP_VERIFY_FINGER_THRESHOLD - 0.003) < 0.001, \
-        f"GRASP_VERIFY_FINGER_THRESHOLD={uw.GRASP_VERIFY_FINGER_THRESHOLD}, expected 0.003"
+    # 3. Finger threshold check (Updated to 0.016 in Stage 4)
+    assert abs(uw.GRASP_VERIFY_FINGER_THRESHOLD - 0.016) < 0.001, \
+        f"GRASP_VERIFY_FINGER_THRESHOLD={uw.GRASP_VERIFY_FINGER_THRESHOLD}, expected 0.016"
         
     # 3.5. Actuator Kp check (Updated to 20000 in Stage 3)
     l_act_id = mujoco.mj_name2id(uw.model, mujoco.mjtObj.mjOBJ_ACTUATOR, "robot0:l_gripper_finger_joint")

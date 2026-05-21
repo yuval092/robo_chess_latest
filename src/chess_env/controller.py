@@ -43,11 +43,13 @@ class ScriptedController:
     FLOOR_LIMIT           = 0.400   # Abort transit if grip Z drops below this
     GRASP_VERIFY_DRIFT_MM = 30.0    # Max XY drift for "cube held" check post-grasp
 
-    def __init__(self, env, drift_limit: float = 0.010):
+    def __init__(self, env, drift_limit: float = 0.010, render_fn=None, render_delay: float = 0.0):
         """
         Args:
             env: gymnasium-wrapped ChessTaskEnv (or the unwrapped env directly)
             drift_limit: Tube constraint radius in meters for descend/ascend (default 1cm)
+            render_fn: Optional callback for rendering intermediate frames
+            render_delay: Optional delay after each render call
         """
         # Unwrap to access ChessTaskEnv directly
         inner = env
@@ -56,6 +58,8 @@ class ScriptedController:
         self._env = inner
         self._wrapped_env = env  # Keep reference for TimeLimit reset
         self.drift_limit = drift_limit
+        self._render_fn = render_fn
+        self._render_delay = render_delay
 
     # ------------------------------------------------------------------
     # Internal movement primitive with per-step safety checks
@@ -75,6 +79,7 @@ class ScriptedController:
         The abort_fn signature: (grip_pos: np.ndarray) -> (abort: bool, reason: str)
         If abort_fn is None, no safety checks are applied.
         """
+        import time
         env = self._env
         for step in range(max_steps):
             grip_pos = env._utils.get_site_xpos(env.model, env.data, "robot0:grip").copy()
@@ -104,6 +109,11 @@ class ScriptedController:
             env.data.mocap_pos[0][:3] += step_vec  # Apply capped delta
             env.data.mocap_quat[0][:] = env.VERTICAL_QUAT
             env._mujoco_step(None)
+
+            if self._render_fn is not None:
+                self._render_fn()
+                if self._render_delay > 0:
+                    time.sleep(self._render_delay)
 
         # Timed out — report final position
         grip_pos = env._utils.get_site_xpos(env.model, env.data, "robot0:grip").copy()

@@ -172,10 +172,9 @@ class ChessSimulationEnv(MujocoFetchPickAndPlaceEnv):
         """
         super()._env_setup(initial_qpos)
         
-        # Force torso to maximum height for optimal board reach
-        torso_id = mujoco.mj_name2id(self.model, mujoco.mjtObj.mjOBJ_JOINT, "robot0:torso_lift_joint")
-        torso_max = self.model.jnt_range[torso_id][1]
-        self._utils.set_joint_qpos(self.model, self.data, "robot0:torso_lift_joint", torso_max)
+        # Force torso to optimal operating height for board reach
+        torso_height = self.env_cfg.get("torso_height", 0.25)
+        self._utils.set_joint_qpos(self.model, self.data, "robot0:torso_lift_joint", torso_height)
         
         # Force crane orientation immediately on setup
         self._utils.set_mocap_quat(self.model, self.data, "robot0:mocap", self.VERTICAL_QUAT)

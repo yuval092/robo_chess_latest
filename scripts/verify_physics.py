@@ -32,11 +32,11 @@ def test_xml_integrity(debug=False):
         return False
 
 def test_table_geometry(debug=False):
-    print("Testing Table Geometry (60x60cm, 4 legs)...")
+    print("Testing Table Geometry (70x70cm, 4 legs)...")
     try:
         cfg = load_config("env")
-        if cfg["table_half_x"] != 0.30 or cfg["table_half_y"] != 0.30:
-            print(f"  - ERROR: table_half_x/y expected 0.30, got {cfg['table_half_x']}/{cfg['table_half_y']}")
+        if cfg["table_half_x"] != 0.35 or cfg["table_half_y"] != 0.35:
+            print(f"  - ERROR: table_half_x/y expected 0.35, got {cfg['table_half_x']}/{cfg['table_half_y']}")
             return False
             
         env = ChessTaskEnv(debug=debug)

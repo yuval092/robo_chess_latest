@@ -190,10 +190,18 @@ class ChessTaskEnv(ChessSimulationEnv):
 
     def _set_gripper_state(self):
         """Physically sets the joint positions of the fingers based on the target state."""
-        self._utils.set_joint_qpos(self.model, self.data, "robot0:l_gripper_finger_joint", self.finger_target_joint)
-        self._utils.set_joint_qpos(self.model, self.data, "robot0:r_gripper_finger_joint", self.finger_target_joint)
+        target = self.finger_target_joint
+        self._utils.set_joint_qpos(self.model, self.data, "robot0:l_gripper_finger_joint", target)
+        self._utils.set_joint_qpos(self.model, self.data, "robot0:r_gripper_finger_joint", target)
         self.data.qvel[self.model.joint("robot0:l_gripper_finger_joint").dofadr[0]] = 0.0
         self.data.qvel[self.model.joint("robot0:r_gripper_finger_joint").dofadr[0]] = 0.0
+        
+        # Sync actuator ctrl to prevent position actuator from fighting the teleport
+        l_id = mujoco.mj_name2id(self.model, mujoco.mjtObj.mjOBJ_ACTUATOR, "robot0:l_gripper_finger_joint")
+        r_id = mujoco.mj_name2id(self.model, mujoco.mjtObj.mjOBJ_ACTUATOR, "robot0:r_gripper_finger_joint")
+        self.data.ctrl[l_id] = target
+        self.data.ctrl[r_id] = target
+        
         mujoco.mj_forward(self.model, self.data)
 
     def _check_cube_held(self, grip_pos: np.ndarray) -> tuple[bool, str | None]:
@@ -304,8 +312,9 @@ class ChessTaskEnv(ChessSimulationEnv):
             
         mujoco.mj_forward(self.model, self.data)
         
-        # Force torso to maximum height (0.4) for board reach
-        self._utils.set_joint_qpos(self.model, self.data, "robot0:torso_lift_joint", 0.4)
+        # Force torso to optimal height for board reach
+        torso_height = self.env_cfg.get("torso_height", 0.25)
+        self._utils.set_joint_qpos(self.model, self.data, "robot0:torso_lift_joint", torso_height)
         mujoco.mj_forward(self.model, self.data)
         
         # --- PHASE 1: Settle arm CLOSED for stability ---
@@ -401,6 +410,7 @@ class ChessTaskEnv(ChessSimulationEnv):
         Automatically handles site-to-body offsets by applying deltas.
         """
         zero_action = np.zeros(4)
+        should_render = (self.render_mode == "human")
         for _ in range(max_steps):
             grip_pos = self._utils.get_site_xpos(self.model, self.data, "robot0:grip")
             error = target_pos - grip_pos
@@ -412,6 +422,8 @@ class ChessTaskEnv(ChessSimulationEnv):
             self.data.mocap_pos[0][:3] += error
             self.data.mocap_quat[0][:] = target_quat
             self._mujoco_step(None)
+            if should_render:
+                self.render()
             
         final_pos = self._utils.get_site_xpos(self.model, self.data, "robot0:grip")
         return bool(np.linalg.norm(final_pos - target_pos) < tolerance)

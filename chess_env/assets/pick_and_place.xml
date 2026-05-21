@@ -16,17 +16,17 @@
 		<include file="robot.xml"></include>
 
 		<body pos="0.88 0.2641 0" name="table0">
-			<geom name="table0_surface" type="box" size="0.30 0.30 0.025"
+			<geom name="table0_surface" type="box" size="0.35 0.35 0.025"
 				  pos="0 0 0.375" mass="2000" material="table_mat"
 				  solref="0.002 1" solimp="0.99 0.999 0.001"/>
 			<geom name="table0_leg_far_plus" type="box" size="0.04 0.04 0.1875"
-				  pos="0.26 0.26 0.1875" mass="0" material="table_mat"/>
+				  pos="0.31 0.31 0.1875" mass="0" material="table_mat"/>
 			<geom name="table0_leg_far_minus" type="box" size="0.04 0.04 0.1875"
-				  pos="0.26 -0.26 0.1875" mass="0" material="table_mat"/>
+				  pos="0.31 -0.31 0.1875" mass="0" material="table_mat"/>
 			<geom name="table0_leg_near_plus" type="box" size="0.04 0.04 0.1875"
-				  pos="-0.26 0.26 0.1875" mass="0" material="table_mat"/>
+				  pos="-0.31 0.31 0.1875" mass="0" material="table_mat"/>
 			<geom name="table0_leg_near_minus" type="box" size="0.04 0.04 0.1875"
-				  pos="-0.26 -0.26 0.1875" mass="0" material="table_mat"/>
+				  pos="-0.31 -0.31 0.1875" mass="0" material="table_mat"/>
 		</body>
 
 		<body name="object0" pos="0.01 0.01 0.01">
