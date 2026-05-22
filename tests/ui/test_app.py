@@ -50,6 +50,28 @@ def test_snapshot_returns_initial_board(client):
     assert len(data["legal_moves"]) == 20
 
 
+def test_index_renders_interactive_controls(client):
+    response = client.get("/")
+
+    assert response.status_code == 200
+    html = response.get_data(as_text=True)
+    for element_id in ["board", "new-game", "computer", "refresh", "flip-board", "history"]:
+        assert f'id="{element_id}"' in html
+    assert "busy-overlay" not in html
+
+
+def test_new_game_endpoint_resets_snapshot(client):
+    client.post("/api/move", json={"src": "e2", "dst": "e4"})
+
+    response = client.post("/api/new-game", json={})
+
+    assert response.status_code == 200
+    data = response.get_json()
+    assert data["board"]["e2"] == "P"
+    assert data["board"]["e4"] is None
+    assert data["move_history_san"] == []
+
+
 def test_illegal_move_returns_400(client):
     response = client.post("/api/move", json={"src": "e2", "dst": "e5"})
 

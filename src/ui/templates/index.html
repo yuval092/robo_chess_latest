@@ -8,21 +8,61 @@
 </head>
 <body>
   <main class="shell">
-    <section class="board-wrap">
-      <div id="board" class="board" aria-label="Chess board"></div>
-      <div class="files"><span>h</span><span>g</span><span>f</span><span>e</span><span>d</span><span>c</span><span>b</span><span>a</span></div>
+    <section class="play-area">
+      <header class="topbar">
+        <div>
+          <h1>RoboChess</h1>
+          <div class="subline" id="subline">Ready</div>
+        </div>
+        <div class="toolbar">
+          <button id="refresh" class="icon-button" type="button" title="Refresh board" aria-label="Refresh board">Refresh</button>
+          <button id="flip-board" class="icon-button" type="button" title="Flip board" aria-label="Flip board">Flip</button>
+        </div>
+      </header>
+
+      <div class="board-frame">
+        <div id="board" class="board" aria-label="Chess board"></div>
+        <div class="files" id="files" aria-hidden="true"></div>
+      </div>
     </section>
+
     <aside class="panel">
-      <div class="status">
-        <div class="turn" id="turn">White</div>
-        <div class="state" id="state">Ready</div>
-      </div>
-      <div class="actions">
-        <button id="new-game">New game</button>
-        <button id="computer">Let computer play</button>
-      </div>
-      <div class="history" id="history"></div>
-      <div class="error" id="error"></div>
+      <section class="status-panel">
+        <div class="status-head">
+          <div>
+            <div class="eyebrow">Turn</div>
+            <div class="turn" id="turn">White</div>
+          </div>
+          <div class="state-pill" id="state">Ready</div>
+        </div>
+        <div class="facts">
+          <div>
+            <span>Last move</span>
+            <strong id="last-move">-</strong>
+          </div>
+          <div>
+            <span>Legal moves</span>
+            <strong id="legal-count">0</strong>
+          </div>
+        </div>
+      </section>
+
+      <section class="actions">
+        <button id="new-game" class="primary-action" type="button">New game</button>
+        <button id="computer" type="button">Let computer play</button>
+      </section>
+
+      <section class="history-card">
+        <div class="section-title">Moves</div>
+        <div class="history" id="history"></div>
+      </section>
+
+      <section class="fen-card">
+        <div class="section-title">FEN</div>
+        <code id="fen">-</code>
+      </section>
+
+      <div class="error" id="error" role="status" aria-live="polite"></div>
     </aside>
   </main>
   <script src="/static/app.js"></script>

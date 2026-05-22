@@ -38,7 +38,7 @@ class ScriptedController:
     VERTICAL_TOLERANCE_M  = 0.004   # 4mm: success threshold for descend/ascend
     STEP_GAIN             = 1.0     # Full error applied per step (proportional)
     MIN_STEP_SIZE_M       = 0.002   # 2mm floor prevents slow final-approach creep
-    MAX_STEP_SIZE_M       = 0.024   # 24mm per physics step max after validation against crowded moves
+    MAX_STEP_SIZE_M       = 0.024   # 24mm per physics step max; keeps edge-square reachability under 5mm
     TRANSIT_MAX_STEPS     = 300     # Sufficient for longest board diagonal at 12mm/step
     VERTICAL_MAX_STEPS    = 200     # Sufficient for 90mm (SAFE_Z → HOVER_Z)
     FLOOR_LIMIT           = 0.400   # Abort transit if grip Z drops below this
