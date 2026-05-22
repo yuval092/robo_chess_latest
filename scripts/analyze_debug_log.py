@@ -27,8 +27,8 @@ PHASE_EXPECTED_STEPS = {
     "grasp_p0_halt":       30,
     "grasp_p12_align":    100,
     "grasp_p3_plunge":     50,
-    "grasp_p4_close":      45,
-    "grasp_p5_hold":       15,
+    "grasp_p4_close":      36,
+    "grasp_p5_hold":       10,
     "grasp_p6_retract":    80,
     "softreset_p1_halt":   30,
     "softreset_p2_align":  80,
@@ -37,7 +37,7 @@ PHASE_EXPECTED_STEPS = {
     "place_p0_halt":       20,
     "place_p12_align":    100,
     "place_p3_plunge":     50,
-    "place_p4_release":    25,
+    "place_p4_release":    15,
     "place_p5_verify":      5,
     "place_p6_retract":    80,
     "ascend":             100,
@@ -46,6 +46,18 @@ PHASE_EXPECTED_STEPS = {
 STALL_VEL_THRESHOLD = 0.002   # m/s — grip speed below this is a stall
 STALL_MIN_STEPS = 10           # consecutive below-threshold steps = stall
 PIECE_VIBRATION_THRESHOLD = 0.003  # m/s — piece velocity while the arm is stationary
+STALL_PHASES = {
+    "transit",
+    "descend",
+    "ascend",
+    "grasp_p12_align",
+    "grasp_p3_plunge",
+    "grasp_p6_retract",
+    "softreset_p2_align",
+    "place_p12_align",
+    "place_p3_plunge",
+    "place_p6_retract",
+}
 
 
 def load_records(path: Path) -> list[dict]:
@@ -80,22 +92,42 @@ def detect_stalls(recs: list[dict]) -> list[dict]:
     stalls = []
     in_stall = False
     stall_start = None
+    stall_phase = None
     for rec in recs:
-        slow = grip_speed(rec) < STALL_VEL_THRESHOLD
+        if rec["phase"] not in STALL_PHASES:
+            slow = False
+        else:
+            slow = grip_speed(rec) < STALL_VEL_THRESHOLD
+        if in_stall and rec["phase"] != stall_phase:
+            span = rec["step"] - stall_start
+            if span >= STALL_MIN_STEPS:
+                stalls.append({
+                    "start_step": stall_start,
+                    "end_step": rec["step"],
+                    "phase": stall_phase,
+                    "duration_s": round(span * PHYSICS_DT, 4),
+                    "steps": span,
+                })
+            in_stall = False
+            stall_start = None
+            stall_phase = None
         if slow and not in_stall:
             in_stall = True
             stall_start = rec["step"]
+            stall_phase = rec["phase"]
         elif not slow and in_stall:
             span = rec["step"] - stall_start
             if span >= STALL_MIN_STEPS:
                 stalls.append({
                     "start_step": stall_start,
                     "end_step": rec["step"],
-                    "phase": rec["phase"],
+                    "phase": stall_phase,
                     "duration_s": round(span * PHYSICS_DT, 4),
                     "steps": span,
                 })
             in_stall = False
+            stall_start = None
+            stall_phase = None
     # Handle stall that runs to end
     if in_stall:
         span = recs[-1]["step"] - stall_start
@@ -103,7 +135,7 @@ def detect_stalls(recs: list[dict]) -> list[dict]:
             stalls.append({
                 "start_step": stall_start,
                 "end_step": recs[-1]["step"],
-                "phase": recs[-1]["phase"],
+                "phase": stall_phase,
                 "duration_s": round(span * PHYSICS_DT, 4),
                 "steps": span,
             })

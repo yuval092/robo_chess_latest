@@ -12,6 +12,7 @@ sys.path.append(os.getcwd())
 
 import src.chess_env
 from src.chess_env.controller import ScriptedController
+from src.chess_env.environment_generation import regenerate_environment
 from src.chess_game.board_mapper import BoardMapper
 from src.chess_game.chess_service import ChessService
 from src.chess_game.game_orchestrator import GameOrchestrator
@@ -109,6 +110,8 @@ def main():
     parser.add_argument("--visualize", action="store_true")
     parser.add_argument("--delay", type=float, default=0.0)
     args = parser.parse_args()
+
+    regenerate_environment()
 
     env = gym.make(
         "ChessFetchTask-v0",

@@ -118,6 +118,10 @@ class ChessTaskEnv(ChessSimulationEnv):
             "empty_grasp_threshold", self.GRASP_RAMP_END + 0.003
         )
         self.GRASP_HOLD_STEPS = self.env_cfg.get("grasp_hold_steps", 50)
+        self.GRASP_PLUNGE_STEP_M = self.env_cfg.get("grasp_plunge_step_m", 0.002)
+        self.GRASP_RETRACT_STEP_M = self.env_cfg.get("grasp_retract_step_m", 0.002)
+        self.RELEASE_RAMP_STEPS = self.env_cfg.get("release_ramp_steps", 12)
+        self.RELEASE_SETTLE_STEPS = self.env_cfg.get("release_settle_steps", 8)
         self.GRASP_VERIFY_XY_THRESHOLD = self.env_cfg.get("grasp_verify_xy_threshold", 0.015)
         self.GRASP_VERIFY_Z_THRESHOLD = self.env_cfg.get("grasp_verify_z_threshold", 0.020)
         self.GRASP_VERIFY_FINGER_THRESHOLD = self.env_cfg.get("grasp_verify_finger_threshold", 0.012)
@@ -632,11 +636,12 @@ class ChessTaskEnv(ChessSimulationEnv):
         place_z = self.GRASP_Z
         grip_pos = self._utils.get_site_xpos(self.model, self.data, "robot0:grip").copy()
         target_z = grip_pos[2]
-        for _ in range(int(round(max(0.0, target_z - place_z) / 0.002)) + 10):
+        plunge_step_m = self.GRASP_PLUNGE_STEP_M
+        for _ in range(int(round(max(0.0, target_z - place_z) / plunge_step_m)) + 6):
             grip_pos = self._utils.get_site_xpos(self.model, self.data, "robot0:grip")
             if grip_pos[2] <= place_z + 0.001:
                 break
-            target_z = max(place_z, target_z - 0.002)
+            target_z = max(place_z, target_z - plunge_step_m)
             plunge_target = np.array([cube_pos[0], cube_pos[1], target_z])
             
             self._set_action(zero_action)
@@ -738,7 +743,7 @@ class ChessTaskEnv(ChessSimulationEnv):
 
         # ── Phase 6: Retract (PLACE_Z → HOVER_Z) ──────────────────────────────────
         self._debug_current_phase = "grasp_p6_retract"
-        retract_step_m = 0.002
+        retract_step_m = self.GRASP_RETRACT_STEP_M
         target_z = place_z
         for _ in range(int(round((self.HOVER_Z - place_z) / retract_step_m)) + 3):
             grip_pos = self._utils.get_site_xpos(self.model, self.data, "robot0:grip")
@@ -821,11 +826,12 @@ class ChessTaskEnv(ChessSimulationEnv):
         place_z = self.GRASP_Z
         grip_pos = self._utils.get_site_xpos(self.model, self.data, "robot0:grip").copy()
         target_z = grip_pos[2]
-        for _ in range(int(round(max(0.0, target_z - place_z) / 0.002)) + 10):
+        plunge_step_m = self.GRASP_PLUNGE_STEP_M
+        for _ in range(int(round(max(0.0, target_z - place_z) / plunge_step_m)) + 6):
             grip_pos = self._utils.get_site_xpos(self.model, self.data, "robot0:grip")
             if grip_pos[2] <= place_z + 0.001:
                 break
-            target_z = max(place_z, target_z - 0.002)
+            target_z = max(place_z, target_z - plunge_step_m)
             plunge_target = np.array([dst_xy[0], dst_xy[1], target_z])
             
             self._set_action(zero_action)
@@ -852,8 +858,8 @@ class ChessTaskEnv(ChessSimulationEnv):
         release_target = place_pos.copy()
         ramp_start = self.GRASP_RAMP_END       # 0.010 — actual finger position during grip
         ramp_end   = self.FINGER_OPEN_JOINT    # 0.0181
-        release_ramp_steps = 12
-        release_settle_steps = 8
+        release_ramp_steps = self.RELEASE_RAMP_STEPS
+        release_settle_steps = self.RELEASE_SETTLE_STEPS
         ramp_delta = (ramp_end - ramp_start) / release_ramp_steps
 
         for step in range(release_ramp_steps):
@@ -899,7 +905,7 @@ class ChessTaskEnv(ChessSimulationEnv):
 
         # ── Phase 6: Retract (PLACE_Z → HOVER_Z) ──────────────────────────────────
         self._debug_current_phase = "place_p6_retract"
-        retract_step_m = 0.002
+        retract_step_m = self.GRASP_RETRACT_STEP_M
         target_z = place_z
         for _ in range(int(round((self.HOVER_Z - place_z) / retract_step_m)) + 3):
             grip_pos = self._utils.get_site_xpos(self.model, self.data, "robot0:grip")
