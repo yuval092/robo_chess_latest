@@ -29,10 +29,31 @@ The cube remains the only part the gripper interacts with.
 
 ## STL Strategy
 
-Preferred:
+Preferred approach — generate STLs with a Python script using simple geometric primitives:
 
-- Use simple locally generated STL assets to avoid licensing and network dependency.
-- Store them under:
+Create `scripts/generate_chess_stls.py`.
+
+Use `numpy-stl` or hand-coded triangle meshes. Piece approximations:
+
+| Piece | Geometric approximation |
+|-------|------------------------|
+| Pawn | Short cylinder (r=6mm, h=18mm) |
+| Rook | Cylinder (r=7mm, h=20mm) with flat top |
+| Knight | Cylinder (r=6mm, h=16mm) with angled top flat |
+| Bishop | Tall narrow cylinder (r=5mm, h=24mm) with pointed top sphere |
+| Queen | Medium cylinder (r=6mm, h=22mm) with crown indent |
+| King | Tall cylinder (r=6mm, h=26mm) with cross top |
+
+All shapes should be centered at origin with base at z=0 and fit within a 16mm radius, 30mm height envelope. Do not import from external STL repositories unless needed.
+
+If using downloaded assets:
+
+- Record source URL and license in `chess_env/stls/chess/LICENSES.md`.
+- Normalize scale and orientation before committing.
+- Verify mesh triangle count is under 2000 per mesh; MuJoCo loads large meshes slowly.
+- Run `python -c "import mujoco; ..."` load test before committing.
+
+Store generated STLs under:
 
 ```text
 chess_env/stls/chess/pawn.stl
@@ -42,12 +63,6 @@ chess_env/stls/chess/bishop.stl
 chess_env/stls/chess/queen.stl
 chess_env/stls/chess/king.stl
 ```
-
-If downloading assets:
-
-- Record source URL and license in `chess_env/stls/chess/LICENSES.md`.
-- Normalize scale and orientation.
-- Do not add oversized detailed meshes that slow MuJoCo loading.
 
 The STLs are visual-only, so approximate silhouettes are acceptable as long as each type is visually distinct.
 
@@ -62,6 +77,36 @@ Use these constraints unless visual testing proves a better value:
 - Visual mesh height should be large enough to identify the piece but not so large that `HOVER_Z` and `SAFE_Z` movements are visually obscured.
 - If a visually accurate STL would clip through the gripper during grasp, keep the collision cube authoritative and document the visual clipping as acceptable, or implement a render-only hide/fade of the selected piece's STL during the grasp/place phases.
 - Do not add collision to the STL to solve visual clipping; that would violate the physics design.
+
+## Reserve Piece Count
+
+In the worst case, all 8 pawns of one color promote to the same piece type (e.g., all 8 to queens). Pre-create the following reserve pieces per color:
+
+```yaml
+reserves:
+  per_color:
+    queen: 9    # 1 starting + 8 possible promotions = 9; but starting queen is on board, so 8 in reserve
+    rook: 8
+    bishop: 8
+    knight: 8
+```
+
+In practice, promotion to the same type multiple times in one game is rare, but the model must support it. Park all reserve pieces at their off-board `promotion_reserve` slots defined in `configs/chess.yaml`. Their freejoints start at those floor positions. Total additional bodies: 32 reserve bodies (8 queen + 8 rook + 8 bishop + 8 knight) × 2 colors = 64 reserve bodies. This brings total piece-related bodies to 96.
+
+**Important**: All 64 reserve bodies exist in XML at all times. They are never removed. When a pawn promotes, the selected reserve piece is teleported from its floor slot to the promotion square. When a promoted piece is captured, it is teleported back to a reserve/graveyard slot.
+
+## XML Generator Script
+
+Do not write 96 piece XML bodies by hand. Create `scripts/generate_pieces_xml.py`.
+
+The script must:
+
+1. Load `configs/chess.yaml` for piece parameters and reserve geometry.
+2. For each of the 32 active pieces: generate body XML with correct starting position, freejoint, collision geom, visual geom.
+3. For each of the 64 reserve bodies: generate body XML at the designated floor reserve position.
+4. Write `<!-- generated chess pieces -->` and `<!-- generated reserve pieces -->` XML fragments.
+
+Starting piece positions use `BoardMapper.square_to_piece_xyz(square)` which returns `[x, y, table_z + cube_height/2]`. These are world coordinates. Since piece bodies are declared at world level (not inside `table0`), use world coordinates directly.
 
 ## XML Implementation
 
@@ -151,6 +196,12 @@ Black: a8 rook, b8 knight, c8 bishop, d8 queen, e8 king, f8 bishop, g8 knight, h
 Black pawns: a7-h7
 ```
 
+## Freejoint Damping
+
+Use `damping="0.5"` for all piece freejoints instead of `object0`'s `damping="0.1"`. With 32 pieces on the table simultaneously, low damping leads to visible physics drift between moves. Higher damping also reduces the energy of minor piece impacts from gripper contact.
+
+The value 0.5 is not validated against MuJoCo unit conventions. Add a `verify_physics.py` check that confirms all 32 pieces stay within 1mm of their initial squares over 5 simulated seconds (no arm interaction). Adjust upward if drift still occurs.
+
 ## Reset Behavior
 
 Replace `object0`-specific reset with piece reset:
@@ -162,6 +213,23 @@ Replace `object0`-specific reset with piece reset:
 - Call `mujoco.mj_forward`.
 
 During this stage, it is acceptable to keep `object0` for backward-compatibility scripts, but new chess code must use the piece registry and not hardcode `object0`.
+
+## Post-Place Piece Orientation Reset
+
+After `execute_place` the piece cube is physically stable but may have a non-identity yaw relative to its starting orientation. The current arm uses `VERTICAL_QUAT` throughout, so yaw is not controlled. Over successive moves this accumulates: pieces drift from their "upright" visual orientation.
+
+After each successful physical move, the `MovementExecutor` must snap the placed piece back to identity quaternion using a freejoint teleport:
+
+```python
+# After successful execute_place and arm retract
+placed_xyz = board_mapper.square_to_piece_xyz(dst_square)
+piece_teleporter.teleport_piece_to_xyz(piece_id, placed_xyz, quat=IDENTITY_QUAT)
+```
+
+This is safe because:
+- The gripper has already retracted to SAFE_Z before this call.
+- The piece is physically resting on the table; snapping its quat to identity with `mj_forward` is no different from a teleport.
+- The XY correction also allows fine re-centering if placement error was within tolerance but not exact.
 
 ## Crowded Board Clearance Risk
 

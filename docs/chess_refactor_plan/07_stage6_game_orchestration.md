@@ -82,18 +82,59 @@ game:
   auto_computer_reply: true
 ```
 
-## Concurrency
+## Arm Home Position Between Moves
 
-Physical movement is slow and should be serialized.
+After each completed physical move (arm move + orientation snap), the orchestrator must send the arm to `arm_home_xy` from `configs/chess.yaml` before committing the turn and triggering the next move.
+
+Add to `PhysicalPlanExecutor`:
+
+```python
+def return_to_home(self) -> PhysicalMoveResult:
+    """Transit arm to home_xy at SAFE_Z. Used between turns."""
+```
+
+The commit protocol becomes:
+
+```python
+physical_result = physical_executor.execute(plan)
+home_result = physical_executor.return_to_home()
+# now safe to push chess board and start computer turn
+chess_service.push(move)
+```
+
+If `return_to_home` fails, treat it as a non-fatal warning: log and continue. The arm's last-known position will be its actual location. This is not a reason to reject the move.
+
+**Settle delay**: After returning home, add a 0.5 second simulation settle before starting the computer turn. This allows any physics disturbances (piece wobble from the move) to settle so the board is stable when the computer selects its move.
+
+## Concurrency And Threading Model
+
+Physical movement is slow and must be serialized. MuJoCo is not thread-safe.
+
+**Threading model:**
+
+- The main Python thread owns MuJoCo: all `env.step()`, `execute_grasp()`, `_mujoco_step()`, and `env.render()` calls.
+- Flask / FastAPI server runs in a background daemon thread via `threading.Thread(target=app.run, daemon=True)`.
+- A single `threading.Lock()` protects all MuJoCo env access.
+- The background server thread acquires the lock only to read a frozen `GameSnapshot` copy after a move completes. It never calls MuJoCo APIs.
+
+**Move execution flow:**
+
+```
+Background thread (Flask) → submits move request to a Queue
+Main thread → dequeues request → acquires lock → runs physical plan → releases lock → posts result
+Background thread → reads result from result Queue → responds to HTTP client
+```
+
+Use `queue.Queue` for request/response handoff between threads.
+
+**GLFW constraint**: `render_mode="human"` opens a GLFW window that calls OpenGL. GLFW must be driven from the same thread that created it (the main thread). Never call `env.render()` from the Flask background thread.
 
 Requirements:
 
-- Orchestrator has a busy flag.
+- Orchestrator has a `is_busy` flag (set in main thread, read by background thread with lock).
 - UI cannot submit another move while busy.
-- Move execution should run in a background worker thread or async task if UI server would otherwise block.
-- Every result updates a single authoritative in-memory game state.
-
-Do not allow concurrent MuJoCo access from multiple threads without a lock.
+- Every result updates a single authoritative in-memory `GameSnapshot` that the server thread reads as a frozen copy.
+- No MuJoCo call is ever made from the Flask thread.
 
 ## PhysicalPlanExecutor
 
@@ -144,6 +185,31 @@ Important:
 - `chess_service.push(move)` happens after physical execution.
 - `piece_tracker.apply_committed_move` happens after chess push.
 - For computer moves, the same path is used after move selection.
+
+## Promotion Intermediate State
+
+When a human pawn move reaches the back rank, the orchestrator must return an intermediate result to the UI BEFORE the chess board is pushed:
+
+```python
+@dataclass(frozen=True)
+class MoveExecutionResult:
+    accepted: bool
+    physical_success: bool
+    awaiting_promotion: bool = False  # new field
+    promotion_square: str | None = None
+    ...
+```
+
+Workflow:
+1. Human submits `e7e8` (no promotion piece specified).
+2. Orchestrator detects `move.promotion is None` and the move is a promotion candidate.
+3. Orchestrator executes the arm pawn move (pawn goes to e8, arm retracts to home).
+4. Returns `awaiting_promotion=True` to UI.
+5. UI displays promotion choice: queen, rook, bishop, knight.
+6. Human selects queen → UI POSTs `api/promote?piece=q&square=e8`.
+7. Orchestrator executes the two teleport commands and pushes the move with promotion piece.
+
+If the arm pawn move fails before promotion choice, return `physical_success=False`. Do not show promotion dialog.
 
 ## Recovery State
 

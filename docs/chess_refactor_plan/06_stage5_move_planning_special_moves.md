@@ -118,6 +118,25 @@ Implementation detail:
 - It is physically acceptable to move king first then rook because the move has already been legally validated.
 - If king move succeeds and rook move fails, enter recovery-required state. Do not push the chess board until both physical moves succeed.
 
+## Castling Clearance Risk
+
+After the king arm move completes (king is now at g1), the arm ascends to SAFE_Z and transits to h1 to pick up the rook. The king body is now at g1, 8cm from h1. When the arm descends to HOVER_Z over h1, the gripper is centered on h1.
+
+At that point:
+- Gripper center: h1 world position (0.600, 0.464)
+- King center: g1 world position (0.600, 0.384)
+- Distance: 0.08m (one cell)
+- Finger outer offset: 0.033m — finger faces toward g1 are 0.04m from h1 center, which is 0.04m from king edge at 0.399m (king half-width 0.015m → king edge at 0.384 + 0.015 = 0.399m from center).
+- Clearance: 0.04 - 0.015 = 0.025m (25mm). This is sufficient.
+
+**However**, if the king or rook initial pickup is slightly off-center, the king at g1 may be closer to the h1 descent corridor. Add a targeted clearance test:
+
+```bash
+python scripts/eval_special_moves.py --case castling --clearance-check
+```
+
+This test must measure the actual XY separation between the king at g1 and the gripper during the h1 descent and flag if it falls below 15mm.
+
 ## En Passant
 
 Example:
@@ -186,6 +205,57 @@ Why not change the pawn STL in place:
 - MuJoCo mesh/material swapping at runtime is awkward.
 - Keeping reserve pieces makes identity and visuals explicit.
 - Teleporting to/from reserves matches the user requirement.
+
+## Promotion Arm Workflow Detail
+
+The plan says:
+```
+ArmMoveCommand(pawn_id, src_square=e7, dst_square=e8)
+TeleportCommand(pawn_id, destination_kind=promotion_reserve, ...)
+TeleportCommand(promoted_piece_id, destination_kind=square, destination_id=e8)
+```
+
+This ordering requires that the arm has fully retracted from e8 before `TeleportCommand` fires. The physical executor must enforce this sequencing:
+
+1. `ArmMoveCommand` for pawn: run full arm move (transit→descend→grasp→ascend→transit→descend→place→**ascend to SAFE_Z** + **return to home_xy**).
+2. Only after arm is at SAFE_Z and home_xy: execute `TeleportCommand` for the pawn.
+3. Execute `TeleportCommand` for reserve piece.
+
+**If teleportation fires while the arm is still at GRASP_Z over e8**, the teleport would remove the piece the arm just placed, creating a MuJoCo glitch. The `PhysicalPlanExecutor` must not call `TeleportCommand` until the arm move (including retract) is fully complete.
+
+**Promotion piece selection timing**: For human moves, the UI must ask for promotion piece choice AFTER the pawn arm move succeeds and the arm has retracted. The orchestrator should return an intermediate state:
+
+```python
+MoveExecutionResult(
+    accepted=True,
+    physical_success=True,
+    awaiting_promotion=True,
+    promotion_square="e8"
+)
+```
+
+The UI then shows the promotion dialog, the human chooses a piece type, and the orchestrator executes the two remaining `TeleportCommand`s.
+
+For computer moves, promotion piece is chosen by `choose_engine_move()` upfront; no intermediate wait.
+
+## Partial Castling Recovery
+
+If the king arm move succeeds but the rook arm move fails (e.g., TUBE_BREACH or GRASP_FAILED on the rook):
+
+- Chess board has NOT been pushed (commit protocol: push only after all commands succeed).
+- Physical state: king is at g1, rook is still at h1 (or mid-move).
+- `PhysicalOccupancy` has NOT been updated.
+
+Recovery options exposed by orchestrator:
+1. **Retry**: re-execute the full castling plan. The plan must be aware that the king is physically already at g1 but logically still at e1 (chess board not pushed). The retry must: detect that king is already at g1 (via `PhysicalOccupancy.square_of_piece(king_id) == "g1"`), skip the king arm move, attempt only the rook arm move.
+2. **Abort and resync**: call `resync_physical_to_logical()` to teleport the king back to e1, then let the human try again.
+
+Add these two recovery paths to `GameOrchestrator`:
+
+```python
+def retry_failed_castling(self) -> MoveExecutionResult: ...
+def abort_and_resync(self) -> RecoveryResult: ...
+```
 
 ## Plan Transaction Rules
 

@@ -1,0 +1,30 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>RoboChess</title>
+  <link rel="stylesheet" href="/static/styles.css">
+</head>
+<body>
+  <main class="shell">
+    <section class="board-wrap">
+      <div id="board" class="board" aria-label="Chess board"></div>
+      <div class="files"><span>h</span><span>g</span><span>f</span><span>e</span><span>d</span><span>c</span><span>b</span><span>a</span></div>
+    </section>
+    <aside class="panel">
+      <div class="status">
+        <div class="turn" id="turn">White</div>
+        <div class="state" id="state">Ready</div>
+      </div>
+      <div class="actions">
+        <button id="new-game">New game</button>
+        <button id="computer">Let computer play</button>
+      </div>
+      <div class="history" id="history"></div>
+      <div class="error" id="error"></div>
+    </aside>
+  </main>
+  <script src="/static/app.js"></script>
+</body>
+</html>

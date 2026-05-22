@@ -79,6 +79,38 @@ class PhysicalOccupancy:
 
 This layer tracks expected physical occupancy. It is not the chess source of truth, but it must match after every completed move.
 
+## Active Piece Contract — Critical
+
+`ChessTaskEnv` currently hardcodes `object0` in several places. After Stage 3 refactor, the following contract must hold:
+
+**`set_active_piece(piece_id: str)` must be called before any of:**
+- `execute_grasp()`
+- `execute_place(dst_xy)`
+- `_check_cube_held(grip_pos)`
+
+The `MovementExecutor.move_piece_between_squares` is responsible for calling `set_active_piece` before initiating the arm move sequence. `execute_grasp` and `execute_place` must never contain hardcoded `"object0"` after this stage.
+
+**Affected internal methods that must respect `active_piece_joint_name`:**
+
+| Method | Change |
+|--------|--------|
+| `get_cube_position()` | Returns active piece position |
+| `get_cube_quat()` | Returns active piece quaternion |
+| `_check_cube_held(grip_pos)` | Checks active piece vs grip position, not object0 |
+| `execute_grasp` Phase 4–6 | Live cube tracking uses `get_cube_position()`, which now routes to active piece |
+| `_reset_sim` | Still resets object0 for legacy tests; add `reset_active_piece(piece_id)` for chess |
+
+**The backward-compat alias pattern is correct but add an explicit guard:**
+
+```python
+def get_cube_position(self):
+    if self.active_piece_body_name is None:
+        return self._get_body_position("object0")  # legacy fallback
+    return self.get_active_piece_position()
+```
+
+If `set_active_piece` is never called before `execute_grasp`, the system should log a warning rather than silently tracking the wrong piece.
+
 ## Refactor Existing Object-Specific Code
 
 Current code hardcodes `object0` in:
@@ -114,6 +146,19 @@ def get_cube_position(self):
 ```
 
 This lets current tests continue while chess-specific tests are added.
+
+## Crowded Descent Finger Clearance
+
+The existing 2mm neighbor displacement test checks that adjacent pieces are not knocked over. A separate check is needed for whether the gripper FINGERS physically fit in the descent corridor.
+
+At `GRASP_Z = 0.430m`, the gripper fingers extend outward by `finger_outer_offset = 0.033m` from the grip center. Adjacent cube faces at 8cm center-to-center spacing are 50mm apart. The finger outer edge extends 33mm from center, leaving `50 - 33 = 17mm` clearance between the finger tip and the adjacent cube face.
+
+This is adequate for axis-aligned descents (picking from a1 with no piece at b1), but when picking pieces surrounded on all 4 sides (center board), the clearance is equal in all directions. The gripper must approach perfectly centered on the target square. The existing `GRASP_VERIFY_XY_THRESHOLD = 0.015m` (15mm) could allow descent with only 2mm finger clearance on the tight side.
+
+**Required actions:**
+1. In crowded-board integration tests, add an explicit clearance check: verify no neighbor piece is displaced while the gripper is descending and ascending (not just after the move).
+2. For center-board crowded picks, consider tightening `TRANSIT_TOLERANCE_M` before descent from 4mm to 2mm if clearance tests show displacement.
+3. Document that gripper is always oriented with the same yaw (VERTICAL_QUAT does not control gripper yaw, only wrist pitch). Verify the gripper yaw does not cause a finger to align toward a neighboring piece rather than between them.
 
 ## Graveyard And Promotion Reserve Geometry
 
@@ -177,6 +222,18 @@ If any stage fails:
   - grip position
   - current scenario
   - move being executed
+
+## Post-Move Reconciliation
+
+After each physical move, `MovementExecutor` must perform an explicit reconciliation step before returning `PhysicalMoveResult`:
+
+1. Read the placed piece's actual MuJoCo position via `get_active_piece_position()`.
+2. Compare to expected square center XY from `BoardMapper`.
+3. If XY error > 20mm: mark result as failed, do not update occupancy.
+4. If Z error > 10mm from `table_z + cube_height/2`: mark result as unstable, do not update occupancy.
+5. Snap to identity quat (orientation reset) only after successful reconciliation.
+
+This prevents the chess layer from accepting a move where the piece actually ended up on the wrong square due to physics settling.
 
 ## Tests
 

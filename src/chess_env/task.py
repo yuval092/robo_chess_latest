@@ -3,6 +3,8 @@ import os
 import mujoco
 import numpy as np
 from src.chess_env.simulation import ChessSimulationEnv
+from src.chess_game.board_mapper import BoardMapper
+from src.physical.piece_registry import PieceRegistry, reserve_piece_ids
 from src.utils.config import load_config
 
 class ChessTaskEnv(ChessSimulationEnv):
@@ -17,7 +19,7 @@ class ChessTaskEnv(ChessSimulationEnv):
     pretrained transport weights without requiring piece-grasping physics.
     """
 
-    def __init__(self, force_scenario=None, hide_object=True, debug=False, **kwargs):
+    def __init__(self, force_scenario=None, hide_object=True, show_chess_pieces=False, debug=False, **kwargs):
         """
         Initializes the task environment.
 
@@ -38,9 +40,11 @@ class ChessTaskEnv(ChessSimulationEnv):
         # Load configurations
         self.env_cfg = load_config("env")
         self.physics_cfg = load_config("physics")
+        self.chess_cfg = load_config("chess")
 
         self.force_scenario = force_scenario
         self.hide_object = hide_object
+        self.show_chess_pieces = show_chess_pieces
         self.base_debug = debug
         self.debug = debug
         
@@ -119,6 +123,11 @@ class ChessTaskEnv(ChessSimulationEnv):
         # Overrides for evaluation
         self.force_start_pos = None
         self.force_cube_pos = None
+        self._board_mapper = None
+        self._piece_registry = None
+        self.active_piece_id = None
+        self.active_piece_body_name = None
+        self.active_piece_joint_name = None
 
         # --- Logger Setup ---
         log_cfg = self.env_cfg.get("logging", {})
@@ -165,16 +174,99 @@ class ChessTaskEnv(ChessSimulationEnv):
         }
 
     def get_cube_position(self) -> np.ndarray:
-        """Returns the current 3D world position of the cube."""
+        """Returns the active piece position, or object0 for legacy scripts."""
+        if self.active_piece_joint_name is not None:
+            return self.get_active_piece_position()
         obj_joint_id = self.model.joint("object0:joint").id
         qpos_start = self.model.jnt_qposadr[obj_joint_id]
         return self.data.qpos[qpos_start : qpos_start + 3].copy()
 
     def get_cube_quat(self) -> np.ndarray:
-        """Returns the quaternion orientation of the cube (w, x, y, z)."""
+        """Returns the active piece quaternion, or object0 for legacy scripts."""
+        if self.active_piece_joint_name is not None:
+            return self.get_active_piece_quat()
         obj_joint_id = self.model.joint("object0:joint").id
         qpos_start = self.model.jnt_qposadr[obj_joint_id]
         return self.data.qpos[qpos_start + 3 : qpos_start + 7].copy()
+
+    def set_active_piece(self, piece_id: str) -> None:
+        if self._piece_registry is None:
+            self._piece_registry = PieceRegistry()
+        piece = self._piece_registry.by_id(piece_id)
+        self.active_piece_id = piece.piece_id
+        self.active_piece_body_name = piece.body_name
+        self.active_piece_joint_name = piece.joint_name
+
+    def clear_active_piece(self) -> None:
+        self.active_piece_id = None
+        self.active_piece_body_name = None
+        self.active_piece_joint_name = None
+
+    def get_active_piece_position(self) -> np.ndarray:
+        if self.active_piece_joint_name is None:
+            raise RuntimeError("No active chess piece selected.")
+        joint_id = self.model.joint(self.active_piece_joint_name).id
+        qpos_start = self.model.jnt_qposadr[joint_id]
+        return self.data.qpos[qpos_start : qpos_start + 3].copy()
+
+    def get_active_piece_quat(self) -> np.ndarray:
+        if self.active_piece_joint_name is None:
+            raise RuntimeError("No active chess piece selected.")
+        joint_id = self.model.joint(self.active_piece_joint_name).id
+        qpos_start = self.model.jnt_qposadr[joint_id]
+        return self.data.qpos[qpos_start + 3 : qpos_start + 7].copy()
+
+    def _set_freejoint_pose(self, joint_name: str, xyz: np.ndarray, quat=None) -> None:
+        quat = np.array([1.0, 0.0, 0.0, 0.0]) if quat is None else np.asarray(quat, dtype=float)
+        xyz = np.asarray(xyz, dtype=float)
+        joint_id = self.model.joint(joint_name).id
+        qpos_start = self.model.jnt_qposadr[joint_id]
+        dof_start = self.model.jnt_dofadr[joint_id]
+        self.data.qpos[qpos_start : qpos_start + 3] = xyz
+        self.data.qpos[qpos_start + 3 : qpos_start + 7] = quat
+        self.data.qvel[dof_start : dof_start + 6] = 0.0
+        self.data.qacc[dof_start : dof_start + 6] = 0.0
+
+    def _reserve_position(self, index: int, color: str, piece_type: str) -> np.ndarray:
+        reserve_cfg = self.chess_cfg["promotion_reserve"][color]
+        spacing = self.chess_cfg["reserves"]["promotion_slot_spacing_m"]
+        origin = reserve_cfg["origin_xyz"]
+        piece_type_offset = {"queen": 0, "rook": 8, "bishop": 16, "knight": 24}[piece_type]
+        slot = piece_type_offset + index
+        row = slot // reserve_cfg["cols"]
+        col = slot % reserve_cfg["cols"]
+        return np.array([origin[0] + row * spacing, origin[1] + col * spacing, origin[2]], dtype=float)
+
+    def _hidden_piece_position(self, index: int) -> np.ndarray:
+        row = index // 12
+        col = index % 12
+        return np.array([2.2 + row * 0.05, -0.5 + col * 0.05, self.CUBE_HEIGHT / 2.0])
+
+    def _reset_chess_piece_bodies(self) -> None:
+        if self._board_mapper is None:
+            self._board_mapper = BoardMapper.from_configs()
+        if self._piece_registry is None:
+            self._piece_registry = PieceRegistry()
+
+        hidden_index = 0
+        import chess
+        for piece in self._piece_registry.all_pieces():
+            if self.show_chess_pieces:
+                xyz = self._board_mapper.square_to_piece_xyz(chess.parse_square(piece.initial_square))
+            else:
+                xyz = self._hidden_piece_position(hidden_index)
+                hidden_index += 1
+            self._set_freejoint_pose(piece.joint_name, xyz)
+
+        for piece_id, color, piece_type in reserve_piece_ids():
+            joint_name = f"piece_{piece_id}:joint"
+            if self.show_chess_pieces:
+                reserve_index = int(piece_id.rsplit("_", 1)[1]) - 1
+                xyz = self._reserve_position(reserve_index, color, piece_type)
+            else:
+                xyz = self._hidden_piece_position(hidden_index)
+                hidden_index += 1
+            self._set_freejoint_pose(joint_name, xyz)
 
     def _sample_goal(self):
         """Returns the goal sampled during reset_sim."""
@@ -319,7 +411,8 @@ class ChessTaskEnv(ChessSimulationEnv):
             self.data.qpos[qpos_start + 2] = self.TABLE_Z + (self.CUBE_HEIGHT / 2.0)
             self.data.qpos[qpos_start + 3 : qpos_start + 7] = [1, 0, 0, 0]
             self.data.qvel[dof_start : dof_start + 6] = 0.0
-            
+
+        self._reset_chess_piece_bodies()
         mujoco.mj_forward(self.model, self.data)
         
         # Force torso to optimal height for board reach

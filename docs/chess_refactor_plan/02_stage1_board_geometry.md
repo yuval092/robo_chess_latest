@@ -119,6 +119,25 @@ Update `chess_env/assets/shared.xml` with materials:
 
 Use colors that distinguish cells clearly and still leave the table looking like wood.
 
+### 1.2b Generate Board XML With A Script
+
+Do not write the 64 square visual geoms by hand. Create `scripts/generate_board_xml.py`.
+
+The script must:
+
+1. Load `configs/chess.yaml` and instantiate `BoardMapper`.
+2. Compute all 64 square center world XY coordinates.
+3. Convert each to the local frame of `table0` body:
+   - `table0` is at world `pos="0.88 0.2641 0"`.
+   - Local XY = world XY − [0.88, 0.2641].
+   - Local Z = world Z (since table0.z = 0), so just above table top = `0.4005`.
+4. Assign `chess_light_square_mat` or `chess_dark_square_mat` based on `(rank + file) % 2`.
+5. Write a `<!-- generated board squares -->` XML fragment.
+
+This ensures square centers are exactly consistent with `BoardMapper.square_to_xy`, not hand-calculated.
+
+**Important coordinate note**: The `table0` body is at world `(0.88, 0.2641, 0)`. Geoms declared inside `<body name="table0">` use coordinates relative to this body origin. The plan's example `pos="-0.280 -0.280 0.4006"` is correct: local a1 center is `(0.600 − 0.88, −0.0159 − 0.2641) = (−0.28, −0.28)`, and local Z 0.4005 sits just above the table surface top at local Z 0.400.
+
 ### 1.3 Color Squares On The Table Surface
 
 Preferred implementation:
@@ -146,6 +165,10 @@ Alternative implementation:
 ### 1.4 Add Board Labels For Debug Only
 
 Do not add visible labels in the production scene. If labels are needed for debugging, make them optional in a separate debug XML or script overlay.
+
+## Piece Stability Prerequisite
+
+The square visual geoms have `contype="0" conaffinity="0"` and are collision-free, so they cannot interact with piece physics. However, from Stage 2 onward, 32 pieces will sit as freejoints on the table simultaneously. Freejoint `damping="0.5"` (from `chess.yaml`) must be used for piece joints. Verify that pieces do not drift more than 1mm over 5 simulated seconds with no arm interaction. Add this as a `verify_physics.py` check in Stage 2, but note the damping requirement here so Stage 1 does not create pieces with insufficient damping.
 
 ## Tests
 

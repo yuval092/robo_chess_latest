@@ -123,6 +123,54 @@ n -> chess.KNIGHT
 
 Default promotion should be queen only when the UI explicitly requests "auto queen" or the computer selector chooses it. Human promotion should prompt in the UI.
 
+## Game State Persistence
+
+Add save and load to `ChessService`:
+
+```python
+def save_to_file(self, path: str) -> None:
+    """Write FEN + move history JSON to disk."""
+
+def load_from_file(cls, path: str) -> "ChessService":
+    """Restore from saved file."""
+```
+
+Format:
+```json
+{
+  "fen": "...",
+  "san_history": ["e4", "e5", "Nf3"],
+  "half_move_clock": 4,
+  "full_move_number": 3
+}
+```
+
+This lets the operator resume a game after a MuJoCo crash by restoring `ChessService` from the last saved file and using `resync_physical_to_logical()` in the orchestrator to teleport all pieces back to their correct squares.
+
+**Auto-save**: `GameOrchestrator` should save state after every successful move commit, not just on explicit request.
+
+## Move Undo Support
+
+`python-chess` supports `board.pop()`. Add to `ChessService`:
+
+```python
+def pop(self) -> chess.Move:
+    """Undo the last move on the chess board. Does not trigger physical movement."""
+```
+
+The orchestrator should expose `undo_last_move()` which:
+1. Calls `chess_service.pop()`.
+2. Calls `resync_physical_to_logical()` to teleport all pieces to the chess board state.
+3. Restores `LogicalPieceTracker` from the previous committed state.
+
+This is not exposed in the normal UI game flow but is a recovery tool. The UI may expose it as an optional "Take back" button if requested.
+
+## Engine Move Quality
+
+`choose_engine_move()` selects from `board.legal_moves`. When the current side is in check, `board.legal_moves` already contains only moves that escape check — no special handling is needed. The priority ordering (checkmate → captures by value → promotions → checks → other) correctly handles check escape because check-escape moves will still prefer checkmates.
+
+For promotion handling: when a pawn can promote, `board.legal_moves` produces four legal moves (one per piece type) for that pawn. `choose_engine_move()` should auto-select queen unless a different piece produces an immediate checkmate.
+
 ## Tests
 
 Add `tests/chess_game/test_chess_service.py`.

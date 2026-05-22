@@ -93,6 +93,32 @@ Required checks:
 - Piece tracker and chess board agree.
 - Non-moving pieces are not displaced by crowded-board movement.
 
+### eval_draw_conditions.py
+
+Purpose:
+
+- Verify that the chess layer correctly detects all draw conditions and that the orchestrator exposes them in `GameSnapshot`.
+
+Command:
+
+```bash
+python scripts/eval_draw_conditions.py --case stalemate
+python scripts/eval_draw_conditions.py --case insufficient-material
+python scripts/eval_draw_conditions.py --case fifty-move
+python scripts/eval_draw_conditions.py --case threefold-repetition
+```
+
+Use constructed FEN positions. Use mocked physical executor (no arm moves needed). The draw conditions are pure `python-chess` logic; test them quickly.
+
+Required checks:
+
+- `GameStatus.is_stalemate` becomes true at the right FEN.
+- `GameStatus.is_insufficient_material` true when only kings remain.
+- `GameStatus.can_claim_fifty_moves` true after 50 half-moves with no pawn or capture.
+- `GameStatus.can_claim_threefold_repetition` true after three position repetitions.
+- UI receives `is_game_over=True` and `outcome` text in the snapshot.
+- No further moves are accepted after game over.
+
 ### eval_special_moves.py
 
 Purpose:
@@ -110,7 +136,7 @@ python scripts/eval_special_moves.py --case capture-promotion
 
 Use mocked physical executor by default for fast validation. Add `--real-physics` for full MuJoCo runs.
 
-## verify_physics.py Updates
+## verify_physics.py Updates — Additional Chess Checks
 
 Add checks:
 
@@ -202,18 +228,34 @@ Before calling the refactor complete:
 - FEN, UI board, logical piece tracker, and physical occupancy agree after every successful move.
 - Evaluation scripts exit non-zero on failures.
 
+## Undo / Resync Evaluation
+
+Add to `eval_special_moves.py`:
+
+```bash
+python scripts/eval_special_moves.py --case undo-resync
+```
+
+Test:
+1. Execute one move physically (e2e4).
+2. Call `orchestrator.abort_and_resync()`.
+3. Verify: FEN reverts to starting position, all 32 pieces are physically at starting square centers within 5mm, chess board `fen()` matches starting FEN.
+
 ## Performance Metrics
 
 Track:
 
-- Average physical move duration.
+- Average physical move duration (total, and per-stage: transit/descend/grasp/ascend/place).
 - Per-square reachability success rate.
-- Per-piece move success rate.
-- Crowded-board neighbor displacement p50/p95/max.
+- Per-piece move success rate (by piece type).
+- Crowded-board neighbor displacement p50/p95/max (mm).
 - Capture success rate.
-- Special move success rate.
-- Placement error p50/p95/max.
+- Special move success rate (castling / en passant / promotion separately).
+- Placement error p50/p95/max (mm).
+- Orientation drift before/after orientation-reset teleport.
 - Grasp failure count by piece type and square.
+- `return_to_home` duration.
+- Physics settle time between moves.
 
 Write metrics to stdout and optionally JSON:
 

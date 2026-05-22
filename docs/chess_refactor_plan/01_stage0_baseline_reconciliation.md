@@ -35,6 +35,8 @@ torso_height: 0.3661
 arm_base_xy: [0.56, 0.2641]
 ```
 
+For chess-game refactor stages, `configs/env.yaml` owns robot/table physics and `configs/chess.yaml` owns exact chess board geometry. `env.yaml` `edge_margin` is a movement sampling margin and must not define chess cell size.
+
 Reasoning:
 
 - An 8x8 board with 8cm cells is exactly 64cm x 64cm.
@@ -71,6 +73,14 @@ The current reachability test does not prove the exact-8cm board. Stage 0 must a
 
 ## Implementation Tasks
 
+### 0.0 Verify Red Dot Is Already Fixed
+
+The target0 and object0 red sites have already been addressed in a prior session:
+- Both sites have `rgba="1 0 0 0"` (alpha=0, invisible) in `chess_env/assets/pick_and_place.xml`.
+- `ChessSimulationEnv._render_callback` is overridden with `pass` in `simulation.py`.
+
+Stage 0 must verify these changes are present and the red dot does not appear. Do not redo them, but do confirm they exist before proceeding. The formal task 0.2 below checks this.
+
 ### 0.1 Freeze Baseline Constants
 
 Update `configs/env.yaml` comments to state the tuned physical geometry explicitly:
@@ -106,10 +116,17 @@ pieces:
   cube_half_extent_m: 0.015
   cube_height_m: 0.030
   visual_stl_scale: 0.020
+  freejoint_damping: 0.5        # higher than object0's 0.1; needed for 32 simultaneous pieces
 
 reserves:
   graveyard_slot_spacing_m: 0.045
   promotion_slot_spacing_m: 0.045
+  promotion_pieces_per_type: 8  # worst case: all 8 pawns promote to same type
+
+game:
+  human_color: white
+  auto_computer_reply: true
+  arm_home_xy: [0.680, 0.2641]  # arm returns here after each move, before computer turn
 ```
 
 Use `configs/chess.yaml` for chess mapping and piece layout. Do not use `env.yaml.edge_margin` to derive chess square centers.
@@ -181,6 +198,12 @@ Pass criteria:
 - Red dot no longer appears in the loaded scene.
 - All 64 exact-8cm chess square centers are reachable for transit, descend, and ascend.
 - Max reachability error is at or below 5mm at both `SAFE_Z` and `GRASP_Z`.
+
+## Near-Arm Rank Proximity Warning
+
+`board_min_x = 0.56` equals the robot base X coordinate. The rank-1 chess square center at `x = 0.600` is only 40mm from the arm base. The arm has been verified to reach this range with the high torso setting (`torso_height: 0.3661`), but it is the hardest reach in the entire board. Any arm parameter change that reduces torso height or shifts the arm base backwards will reintroduce the dead zone.
+
+The exact-8cm reachability sweep in task 0.4 is the formal guard against this, but note it explicitly in `configs/chess.yaml` as a warning comment next to `board.center_xy`.
 
 ## Stop Conditions
 

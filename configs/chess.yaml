@@ -1,0 +1,52 @@
+board:
+  cell_size_m: 0.08
+  board_size: 8
+  center_xy: [0.88, 0.2641]   # Near-arm rank centers are only 40mm past arm_x=0.56; verify before changing.
+  width_m: 0.64
+  margin_on_table_m: 0.03
+  orientation:
+    white_side: near_arm
+    file_axis: y
+    rank_axis: x
+  use_env_edge_margin_for_board: false
+
+pieces:
+  cube_half_extent_m: 0.015
+  cube_height_m: 0.030
+  visual_stl_scale: 0.020
+  freejoint_damping: 0.5
+
+reserves:
+  graveyard_slot_spacing_m: 0.045
+  promotion_slot_spacing_m: 0.045
+  promotion_pieces_per_type: 8
+  per_color:
+    queen: 8
+    rook: 8
+    bishop: 8
+    knight: 8
+
+graveyards:
+  white:
+    origin_xyz: [0.30, -0.35, 0.015]
+    rows: 4
+    cols: 4
+  black:
+    origin_xyz: [1.38, 0.88, 0.015]
+    rows: 4
+    cols: 4
+
+promotion_reserve:
+  white:
+    origin_xyz: [0.30, 0.88, 0.015]
+    rows: 8
+    cols: 4
+  black:
+    origin_xyz: [1.38, -0.35, 0.015]
+    rows: 8
+    cols: 4
+
+game:
+  human_color: white
+  auto_computer_reply: true
+  arm_home_xy: [0.680, 0.2641]

@@ -4,11 +4,14 @@ import argparse
 import numpy as np
 import gymnasium as gym
 import mujoco
+import chess
 
 # Ensure src is importable
 sys.path.append(os.getcwd())
 
 from src.chess_env.task import ChessTaskEnv
+from src.chess_game.board_mapper import BoardMapper
+from src.physical.piece_registry import PieceRegistry, reserve_piece_ids
 from src.utils.config import load_config
 
 def test_xml_integrity(debug=False):
@@ -25,6 +28,12 @@ def test_xml_integrity(debug=False):
             except Exception:
                 print(f"  - ERROR: Site '{site}' NOT found.")
                 return False
+        target_site_id = mujoco.mj_name2id(env.model, mujoco.mjtObj.mjOBJ_SITE, "target0")
+        if target_site_id != -1:
+            print("  - ERROR: Fetch target0 red-dot site is still present in loaded chess scene.")
+            env.close()
+            return False
+        print("  - Fetch target0 red-dot site absent.")
         env.close()
         return True
     except Exception as e:
@@ -67,6 +76,167 @@ def test_table_geometry(debug=False):
         print(f"  - ERROR during Table Geometry test: {e}")
         return False
 
+def test_board_visual_geometry(debug=False):
+    print("Testing Board Visual Geometry (64 non-colliding exact-8cm squares)...")
+    try:
+        env = ChessTaskEnv(debug=debug)
+        model = env.model
+        mapper = BoardMapper.from_configs()
+        env_cfg = load_config("env")
+        table_cx, table_cy = env_cfg["table_center_xy"]
+
+        table_body_id = mujoco.mj_name2id(model, mujoco.mjtObj.mjOBJ_BODY, "table0")
+        surface_id = mujoco.mj_name2id(model, mujoco.mjtObj.mjOBJ_GEOM, "table0_surface")
+        if surface_id == -1:
+            print("  - ERROR: table0_surface geom missing.")
+            env.close()
+            return False
+        if model.geom_bodyid[surface_id] != table_body_id:
+            print("  - ERROR: table0_surface is not attached to table0.")
+            env.close()
+            return False
+
+        max_center_error = 0.0
+        for square in chess.SQUARES:
+            square_name = chess.square_name(square)
+            geom_name = f"board_{square_name}_visual"
+            geom_id = mujoco.mj_name2id(model, mujoco.mjtObj.mjOBJ_GEOM, geom_name)
+            if geom_id == -1:
+                print(f"  - ERROR: Missing board square geom {geom_name}.")
+                env.close()
+                return False
+            if model.geom_bodyid[geom_id] != table_body_id:
+                print(f"  - ERROR: {geom_name} is not attached to table0.")
+                env.close()
+                return False
+            if model.geom_contype[geom_id] != 0 or model.geom_conaffinity[geom_id] != 0:
+                print(f"  - ERROR: {geom_name} must be visual-only contype=0 conaffinity=0.")
+                env.close()
+                return False
+
+            expected_xy = mapper.square_to_xy(square)
+            expected_local = np.array([expected_xy[0] - table_cx, expected_xy[1] - table_cy])
+            actual_local = model.geom_pos[geom_id][:2]
+            center_error = float(np.linalg.norm(actual_local - expected_local))
+            max_center_error = max(max_center_error, center_error)
+            if center_error > 0.0002:
+                print(
+                    f"  - ERROR: {geom_name} local XY {actual_local} does not match "
+                    f"BoardMapper {expected_local}."
+                )
+                env.close()
+                return False
+            if not np.allclose(model.geom_size[geom_id], [0.04, 0.04, 0.0005], atol=1e-6):
+                print(f"  - ERROR: {geom_name} has unexpected size {model.geom_size[geom_id]}.")
+                env.close()
+                return False
+
+        print("  - Found 64 board square visual geoms.")
+        print(f"  - Max square center mismatch: {max_center_error*1000:.3f}mm")
+        print("  - Board square geoms are visual-only and table0_surface remains the support geom.")
+        env.close()
+        return True
+    except Exception as e:
+        print(f"  - ERROR during Board Visual Geometry test: {e}")
+        return False
+
+def test_chess_piece_modeling(debug=False):
+    print("Testing Chess Piece Modeling (32 active + 64 reserve bodies)...")
+    try:
+        env = ChessTaskEnv(debug=debug, show_chess_pieces=True, hide_object=True)
+        env.reset()
+        model = env.model
+        registry = PieceRegistry()
+        mapper = BoardMapper.from_configs()
+        damping = load_config("chess")["pieces"]["freejoint_damping"]
+
+        max_start_error = 0.0
+        for piece in registry.all_pieces():
+            body_id = mujoco.mj_name2id(model, mujoco.mjtObj.mjOBJ_BODY, piece.body_name)
+            joint_id = mujoco.mj_name2id(model, mujoco.mjtObj.mjOBJ_JOINT, piece.joint_name)
+            cube_id = mujoco.mj_name2id(model, mujoco.mjtObj.mjOBJ_GEOM, piece.cube_geom_name)
+            visual_id = mujoco.mj_name2id(model, mujoco.mjtObj.mjOBJ_GEOM, piece.visual_geom_name)
+            if min(body_id, joint_id, cube_id, visual_id) == -1:
+                print(f"  - ERROR: Missing model object for {piece.piece_id}.")
+                env.close()
+                return False
+            if model.jnt_type[joint_id] != mujoco.mjtJoint.mjJNT_FREE:
+                print(f"  - ERROR: {piece.joint_name} is not a freejoint.")
+                env.close()
+                return False
+            dof_start = model.jnt_dofadr[joint_id]
+            if not np.allclose(model.dof_damping[dof_start : dof_start + 6], damping):
+                print(f"  - ERROR: {piece.joint_name} damping is not {damping}.")
+                env.close()
+                return False
+            if not np.allclose(model.geom_size[cube_id], [0.015, 0.015, 0.015]):
+                print(f"  - ERROR: {piece.cube_geom_name} has wrong cube size.")
+                env.close()
+                return False
+            if model.geom_contype[visual_id] != 0 or model.geom_conaffinity[visual_id] != 0:
+                print(f"  - ERROR: {piece.visual_geom_name} must be visual-only.")
+                env.close()
+                return False
+
+            qpos_start = model.jnt_qposadr[joint_id]
+            actual = env.data.qpos[qpos_start : qpos_start + 3]
+            expected = mapper.square_to_piece_xyz(chess.parse_square(piece.initial_square))
+            max_start_error = max(max_start_error, float(np.linalg.norm(actual - expected)))
+
+        for piece_id, _, _ in reserve_piece_ids():
+            body_name = f"piece_{piece_id}"
+            if mujoco.mj_name2id(model, mujoco.mjtObj.mjOBJ_BODY, body_name) == -1:
+                print(f"  - ERROR: Missing reserve body {body_name}.")
+                env.close()
+                return False
+
+        if max_start_error > 0.002:
+            print(f"  - ERROR: Active piece start error {max_start_error*1000:.1f}mm exceeds 2mm.")
+            env.close()
+            return False
+
+        print("  - Found all 32 active pieces and 64 reserve pieces.")
+        print(f"  - Max active start error: {max_start_error*1000:.2f}mm")
+        env.close()
+        return True
+    except Exception as e:
+        print(f"  - ERROR during Chess Piece Modeling test: {e}")
+        return False
+
+def test_chess_piece_idle_stability(debug=False):
+    print("Testing Chess Piece Idle Stability (5s visible-board drift check)...")
+    try:
+        env = ChessTaskEnv(debug=debug, show_chess_pieces=True, hide_object=True)
+        env.reset()
+        registry = PieceRegistry()
+
+        starts = {}
+        for piece in registry.all_pieces():
+            joint_id = env.model.joint(piece.joint_name).id
+            qpos_start = env.model.jnt_qposadr[joint_id]
+            starts[piece.piece_id] = env.data.qpos[qpos_start : qpos_start + 3].copy()
+
+        for _ in range(2500):
+            env._mujoco_step(None)
+
+        max_drift = 0.0
+        worst_piece = None
+        for piece in registry.all_pieces():
+            joint_id = env.model.joint(piece.joint_name).id
+            qpos_start = env.model.jnt_qposadr[joint_id]
+            current = env.data.qpos[qpos_start : qpos_start + 3].copy()
+            drift = float(np.linalg.norm(current - starts[piece.piece_id]))
+            if drift > max_drift:
+                max_drift = drift
+                worst_piece = piece.piece_id
+
+        print(f"  - Max active piece drift over 5s: {max_drift*1000:.3f}mm ({worst_piece})")
+        env.close()
+        return max_drift < 0.001
+    except Exception as e:
+        print(f"  - ERROR during Chess Piece Idle Stability test: {e}")
+        return False
+
 def test_static_stability(debug=False):
     print("Testing Static Stability (no-action drift check)...")
     try:
@@ -94,44 +264,34 @@ def test_static_stability(debug=False):
         return False
 
 def test_kinematic_reachability(debug=False):
-    print("Testing Kinematic Reachability (all 64 chess squares)...")
+    print("Testing Kinematic Reachability (all 64 exact-8cm chess squares)...")
     try:
         env = ChessTaskEnv(debug=debug)
         env.reset()  # Critical: ensures torso is raised
         cfg = load_config("env")
         safe_z = cfg["safe_z"]
         grasp_z = cfg["grasp_z"]
-        cx, cy = cfg["table_center_xy"]
-        hx, hy = cfg["table_half_x"], cfg["table_half_y"]
-        margin = cfg.get("edge_margin", 0.02)
-
-        # Build all 64 chess square centers from env config
-        x0 = cx - hx + margin;  x1 = cx + hx - margin
-        y0 = cy - hy + margin;  y1 = cy + hy - margin
-        sq_x = (x1 - x0) / 8;   sq_y = (y1 - y0) / 8
-        squares = [
-            (x0 + (r + 0.5)*sq_x, y0 + (c + 0.5)*sq_y, r, c)
-            for r in range(8) for c in range(8)
-        ]
+        mapper = BoardMapper.from_configs()
+        squares = mapper.all_square_centers()
 
         max_err = 0.0
         worst = None
         THRESHOLD = 0.005  # 5mm
 
-        for (sx, sy, row, col) in squares:
+        for square_name, xy in squares.items():
             for (z, z_name) in [(safe_z, "safe_z"), (grasp_z, "grasp_z")]:
-                target = np.array([sx, sy, z])
+                target = np.array([xy[0], xy[1], z])
                 env._settle_arm_to_start(target)
                 grip_pos = env._utils.get_site_xpos(env.model, env.data, "robot0:grip")
                 err = np.linalg.norm(target - grip_pos)
                 if err > max_err:
                     max_err = err
-                    worst = (row, col, z_name, sx, sy, err)
+                    worst = (square_name, z_name, xy[0], xy[1], err)
 
         print(f"  - Max error across 64 squares × 2 heights: {max_err*1000:.1f}mm")
         if worst:
-            r, c, zn, sx, sy, e = worst
-            print(f"  - Worst: row={r} col={c} ({zn}) pos=({sx:.3f},{sy:.3f}) err={e*1000:.1f}mm")
+            square_name, zn, sx, sy, e = worst
+            print(f"  - Worst: square={square_name} ({zn}) pos=({sx:.3f},{sy:.3f}) err={e*1000:.1f}mm")
 
         if max_err > THRESHOLD:
             print(f"  ERROR: max_err={max_err*1000:.1f}mm exceeds 5mm threshold.")
@@ -212,6 +372,9 @@ def main():
     results = {
         "XML Integrity": test_xml_integrity(debug=args.debug),
         "Table Geometry": test_table_geometry(debug=args.debug),
+        "Board Visual Geometry": test_board_visual_geometry(debug=args.debug),
+        "Chess Piece Modeling": test_chess_piece_modeling(debug=args.debug),
+        "Chess Piece Idle Stability": test_chess_piece_idle_stability(debug=args.debug),
         "Grasp XML Verification": verify_grasp_xml_changes(debug=args.debug),
         "Static Stability": test_static_stability(debug=args.debug),
         "Kinematic Reachability": test_kinematic_reachability(debug=args.debug),

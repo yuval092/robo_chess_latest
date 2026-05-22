@@ -5,6 +5,13 @@
 
         <material name="floor_mat" specular="0" shininess="0.5" reflectance="0" rgba="0.2 0.2 0.2 1"></material>
         <material name="table_mat" specular="0" shininess="0.5" reflectance="0" rgba="0.93 0.93 0.93 1"></material>
+        <material name="wood_table_mat" specular="0" shininess="0.5" reflectance="0" rgba="0.50 0.30 0.14 1"></material>
+        <material name="chess_light_square_mat" specular="0" shininess="0.5" reflectance="0" rgba="0.86 0.78 0.63 1"></material>
+        <material name="chess_dark_square_mat" specular="0" shininess="0.5" reflectance="0" rgba="0.35 0.20 0.11 1"></material>
+        <material name="white_piece_cube_mat" specular="0" shininess="0.5" reflectance="0" rgba="0.92 0.88 0.78 1"></material>
+        <material name="black_piece_cube_mat" specular="0" shininess="0.5" reflectance="0" rgba="0.08 0.08 0.08 1"></material>
+        <material name="white_piece_visual_mat" specular="0" shininess="0.5" reflectance="0" rgba="0.98 0.95 0.85 1"></material>
+        <material name="black_piece_visual_mat" specular="0" shininess="0.5" reflectance="0" rgba="0.02 0.02 0.02 1"></material>
         <material name="block_mat" specular="0" shininess="0.5" reflectance="0" rgba="0.2 0.2 0.2 1"></material>
         <material name="puck_mat" specular="0" shininess="0.5" reflectance="0" rgba="0.2 0.2 0.2 1"></material>
         <material name="robot0:geomMat" shininess="0.03" specular="0.4"></material>
@@ -33,6 +40,12 @@
         <mesh file="wrist_flex_link_collision.stl" name="robot0:wrist_flex_link"></mesh>
         <mesh file="wrist_roll_link_collision.stl" name="robot0:wrist_roll_link"></mesh>
         <mesh file="torso_fixed_link.stl" name="robot0:torso_fixed_link"></mesh>
+        <mesh file="../chess/pawn.stl" name="chess_pawn_mesh"></mesh>
+        <mesh file="../chess/rook.stl" name="chess_rook_mesh"></mesh>
+        <mesh file="../chess/knight.stl" name="chess_knight_mesh"></mesh>
+        <mesh file="../chess/bishop.stl" name="chess_bishop_mesh"></mesh>
+        <mesh file="../chess/queen.stl" name="chess_queen_mesh"></mesh>
+        <mesh file="../chess/king.stl" name="chess_king_mesh"></mesh>
     </asset>
 
     <equality>
