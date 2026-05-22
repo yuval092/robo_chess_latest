@@ -23,11 +23,9 @@ ZONES_START_MARKER = "\t\t<!-- generated zone markers start -->"
 ZONES_END_MARKER = "\t\t<!-- generated zone markers end -->"
 
 BASE_R = 0.022
-DISC_TOP = 0.006
-TAPER_TOP = 0.030
 WAIST_R = 0.010
 BASE_TOP = 0.032
-SEGS = 24
+SEGS = 32
 
 
 def _replace_marked_fragment(text: str, start_marker: str, end_marker: str, fragment: str) -> str:
@@ -274,73 +272,113 @@ def offset_tris(tris, dx, dy, dz=0.0):
     return [tuple((x + dx, y + dy, z + dz) for x, y, z in tri) for tri in tris]
 
 
+def sphere_triangles(center, radius, rings=5, segments=20, z_scale=1.0):
+    cx, cy, cz = center
+    vertices = []
+    for ring in range(rings + 1):
+        phi = math.pi * ring / rings
+        rr = radius * math.sin(phi)
+        z = cz + radius * math.cos(phi) * z_scale
+        vertices.append([(cx + rr * math.cos(2 * math.pi * i / segments),
+                          cy + rr * math.sin(2 * math.pi * i / segments),
+                          z) for i in range(segments)])
+
+    tris = []
+    for ring in range(rings):
+        for i in range(segments):
+            j = (i + 1) % segments
+            a, b = vertices[ring][i], vertices[ring][j]
+            c, d = vertices[ring + 1][i], vertices[ring + 1][j]
+            if ring == 0:
+                tris.append((a, d, c))
+            elif ring == rings - 1:
+                tris.append((a, b, c))
+            else:
+                tris.append((a, b, d))
+                tris.append((a, d, c))
+    return tris
+
+
 def piece_base():
-    tris = frustum_triangles(BASE_R, BASE_R, 0.000, DISC_TOP, SEGS)
-    tris += frustum_triangles(BASE_R, WAIST_R, DISC_TOP, TAPER_TOP, SEGS)
-    tris += frustum_triangles(WAIST_R, WAIST_R, TAPER_TOP, BASE_TOP, SEGS)
+    tris = frustum_triangles(0.019, BASE_R, 0.000, 0.003, SEGS)
+    tris += frustum_triangles(BASE_R, BASE_R, 0.003, 0.006, SEGS)
+    tris += frustum_triangles(BASE_R, 0.018, 0.006, 0.009, SEGS)
+    tris += frustum_triangles(0.018, 0.013, 0.009, 0.024, SEGS)
+    tris += frustum_triangles(0.013, 0.015, 0.024, 0.026, SEGS)
+    tris += frustum_triangles(0.015, 0.012, 0.026, 0.029, SEGS)
+    tris += frustum_triangles(0.012, WAIST_R, 0.029, BASE_TOP, SEGS)
     return tris
 
 
 def pawn_triangles():
     tris = piece_base()
-    tris += frustum_triangles(WAIST_R, 0.007, BASE_TOP, 0.038, 16)
-    tris += frustum_triangles(0.007, 0.015, 0.038, 0.044, 14)
-    tris += frustum_triangles(0.015, 0.015, 0.044, 0.047, 14)
-    tris += cone_triangles(0.015, 0.047, 0.050, 14)
+    tris += frustum_triangles(WAIST_R, 0.007, BASE_TOP, 0.038, 24)
+    tris += frustum_triangles(0.007, 0.010, 0.038, 0.041, 24)
+    tris += sphere_triangles((0.0, 0.0, 0.047), 0.0115, rings=6, segments=24, z_scale=0.9)
     return tris
 
 
 def rook_triangles():
     tris = piece_base()
-    tris += frustum_triangles(WAIST_R, 0.012, BASE_TOP, 0.042, 16)
-    tris += frustum_triangles(0.012, 0.018, 0.042, 0.044, 16)
-    tris += frustum_triangles(0.018, 0.018, 0.044, 0.046, 16)
-    for dx, dy in [(0.013, 0.0), (-0.013, 0.0), (0.0, 0.013), (0.0, -0.013)]:
-        tris += offset_tris(box_triangles((0, 0, 0.049), (0.010, 0.010, 0.006)), dx, dy)
+    tris += frustum_triangles(WAIST_R, 0.013, BASE_TOP, 0.041, 24)
+    tris += frustum_triangles(0.013, 0.017, 0.041, 0.044, 24)
+    tris += frustum_triangles(0.017, 0.017, 0.044, 0.047, 24)
+    tris += frustum_triangles(0.014, 0.014, 0.047, 0.050, 24)
+    for dx, dy in [(0.0125, 0.0), (-0.0125, 0.0), (0.0, 0.0125), (0.0, -0.0125)]:
+        tris += offset_tris(box_triangles((0, 0, 0.053), (0.009, 0.011, 0.006)), dx, dy)
+    for dx, dy in [(0.0088, 0.0088), (0.0088, -0.0088), (-0.0088, 0.0088), (-0.0088, -0.0088)]:
+        tris += offset_tris(box_triangles((0, 0, 0.052), (0.006, 0.006, 0.004)), dx, dy)
     return tris
 
 
 def knight_triangles():
     tris = piece_base()
-    tris += frustum_triangles(WAIST_R, 0.007, BASE_TOP, 0.040, 16)
-    tris += box_triangles((0.009, 0.0, 0.047), (0.026, 0.016, 0.014))
-    tris += box_triangles((0.018, 0.0, 0.042), (0.010, 0.009, 0.006))
-    tris += box_triangles((0.006, 0.0, 0.054), (0.006, 0.006, 0.004))
+    tris += frustum_triangles(WAIST_R, 0.008, BASE_TOP, 0.040, 20)
+    tris += box_triangles((0.004, 0.0, 0.043), (0.012, 0.012, 0.010))
+    tris += box_triangles((0.012, 0.0, 0.050), (0.021, 0.014, 0.014))
+    tris += box_triangles((0.023, 0.0, 0.045), (0.010, 0.009, 0.008))
+    tris += box_triangles((0.004, 0.0, 0.055), (0.006, 0.010, 0.006))
+    tris += box_triangles((0.015, 0.004, 0.058), (0.004, 0.004, 0.005))
+    tris += box_triangles((0.015, -0.004, 0.058), (0.004, 0.004, 0.005))
+    tris += box_triangles((0.018, 0.0, 0.051), (0.003, 0.016, 0.003))
     return tris
 
 
 def bishop_triangles():
     tris = piece_base()
-    tris += frustum_triangles(WAIST_R, 0.008, BASE_TOP, 0.040, 16)
-    tris += frustum_triangles(0.008, 0.011, 0.040, 0.042, 14)
-    tris += frustum_triangles(0.011, 0.008, 0.042, 0.044, 14)
-    tris += frustum_triangles(0.008, 0.004, 0.044, 0.052, 16)
-    tris += cone_triangles(0.004, 0.052, 0.056, 12)
+    tris += frustum_triangles(WAIST_R, 0.008, BASE_TOP, 0.040, 24)
+    tris += frustum_triangles(0.008, 0.012, 0.040, 0.043, 24)
+    tris += frustum_triangles(0.012, 0.010, 0.043, 0.046, 24)
+    tris += sphere_triangles((0.0, 0.0, 0.049), 0.0085, rings=5, segments=24, z_scale=1.1)
+    tris += box_triangles((0.005, 0.0, 0.051), (0.004, 0.020, 0.012))
+    tris += cone_triangles(0.004, 0.056, 0.059, 16)
     return tris
 
 
 def queen_triangles():
     tris = piece_base()
-    tris += frustum_triangles(WAIST_R, 0.008, BASE_TOP, 0.038, 16)
-    tris += frustum_triangles(0.008, 0.014, 0.038, 0.046, 16)
-    tris += frustum_triangles(0.014, 0.017, 0.046, 0.048, 16)
+    tris += frustum_triangles(WAIST_R, 0.008, BASE_TOP, 0.038, 24)
+    tris += frustum_triangles(0.008, 0.014, 0.038, 0.046, 24)
+    tris += frustum_triangles(0.014, 0.017, 0.046, 0.048, 24)
+    tris += frustum_triangles(0.017, 0.015, 0.048, 0.050, 24)
     for i in range(5):
         angle = 2 * math.pi * i / 5
         cx = 0.014 * math.cos(angle)
         cy = 0.014 * math.sin(angle)
-        tris += offset_tris(cone_triangles(0.007, 0.048, 0.054, 10), cx, cy)
-    tris += frustum_triangles(0.004, 0.006, 0.048, 0.051, 10)
-    tris += cone_triangles(0.006, 0.051, 0.054, 10)
+        tris += offset_tris(cone_triangles(0.0045, 0.050, 0.057, 12), cx, cy)
+    tris += sphere_triangles((0.0, 0.0, 0.054), 0.0055, rings=4, segments=16, z_scale=0.9)
     return tris
 
 
 def king_triangles():
     tris = piece_base()
-    tris += frustum_triangles(WAIST_R, 0.008, BASE_TOP, 0.038, 16)
-    tris += frustum_triangles(0.008, 0.013, 0.038, 0.048, 16)
-    tris += frustum_triangles(0.013, 0.008, 0.048, 0.050, 12)
-    tris += box_triangles((0.0, 0.0, 0.054), (0.006, 0.006, 0.008))
-    tris += box_triangles((0.0, 0.0, 0.052), (0.022, 0.006, 0.006))
+    tris += frustum_triangles(WAIST_R, 0.008, BASE_TOP, 0.038, 24)
+    tris += frustum_triangles(0.008, 0.014, 0.038, 0.048, 24)
+    tris += frustum_triangles(0.014, 0.011, 0.048, 0.051, 24)
+    tris += frustum_triangles(0.011, 0.006, 0.051, 0.053, 20)
+    tris += box_triangles((0.0, 0.0, 0.056), (0.005, 0.005, 0.008))
+    tris += box_triangles((0.0, 0.0, 0.055), (0.020, 0.005, 0.004))
+    tris += box_triangles((0.0, 0.0, 0.0585), (0.012, 0.004, 0.003))
     return tris
 
 
