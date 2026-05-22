@@ -367,9 +367,11 @@ class ChessTaskEnv(ChessSimulationEnv):
                 goal_pos = self._sample_board_position()
             self.tube_center_xy = None
             
-            # Support force_start_pos (Home Position override)
+            # Chess mode: always start at HOME_POS (board center); RL/eval: random or forced
             if self.force_start_pos is not None:
                 arm_start_pos = self.force_start_pos.copy()
+            elif self.show_chess_pieces:
+                arm_start_pos = self.HOME_POS.copy()
             else:
                 arm_start_pos = np.array([start_xy[0], start_xy[1], self.SAFE_Z])
                 
@@ -628,11 +630,11 @@ class ChessTaskEnv(ChessSimulationEnv):
         place_z = self.GRASP_Z
         grip_pos = self._utils.get_site_xpos(self.model, self.data, "robot0:grip").copy()
         target_z = grip_pos[2]
-        for _ in range(int(round(max(0.0, target_z - place_z) / 0.001)) + 15):
+        for _ in range(int(round(max(0.0, target_z - place_z) / 0.002)) + 10):
             grip_pos = self._utils.get_site_xpos(self.model, self.data, "robot0:grip")
             if grip_pos[2] <= place_z + 0.001:
                 break
-            target_z = max(place_z, target_z - 0.001)
+            target_z = max(place_z, target_z - 0.002)
             plunge_target = np.array([cube_pos[0], cube_pos[1], target_z])
             
             self._set_action(zero_action)
@@ -824,11 +826,11 @@ class ChessTaskEnv(ChessSimulationEnv):
         place_z = self.GRASP_Z
         grip_pos = self._utils.get_site_xpos(self.model, self.data, "robot0:grip").copy()
         target_z = grip_pos[2]
-        for _ in range(int(round(max(0.0, target_z - place_z) / 0.001)) + 15):
+        for _ in range(int(round(max(0.0, target_z - place_z) / 0.002)) + 10):
             grip_pos = self._utils.get_site_xpos(self.model, self.data, "robot0:grip")
             if grip_pos[2] <= place_z + 0.001:
                 break
-            target_z = max(place_z, target_z - 0.001)
+            target_z = max(place_z, target_z - 0.002)
             plunge_target = np.array([dst_xy[0], dst_xy[1], target_z])
             
             self._set_action(zero_action)
@@ -849,14 +851,14 @@ class ChessTaskEnv(ChessSimulationEnv):
             return result
 
         # ── Phase 4: Release (Linear Ramp Open) ───────────────────────────────────
-        # Ramp from GRASP_RAMP_END (0.010, actual grip position) to OPEN (0.0181) over 80 steps.
-        # Starting from 0.0000 would actively squeeze fingers for the first ~58 steps before opening.
+        # Ramp from GRASP_RAMP_END (0.010, actual grip position) to OPEN (0.0181) over 40 steps.
+        # Starting from 0.0000 would actively squeeze fingers for the first ~29 steps before opening.
         release_target = place_pos.copy()
         ramp_start = self.GRASP_RAMP_END       # 0.010 — actual finger position during grip
         ramp_end   = self.FINGER_OPEN_JOINT    # 0.0181
-        ramp_delta = (ramp_end - ramp_start) / 80
+        ramp_delta = (ramp_end - ramp_start) / 20
 
-        for step in range(80):
+        for step in range(20):
             self.finger_target_joint = min(ramp_end, ramp_start + ramp_delta * step)
             self._set_action(zero_action)
             error = release_target - self._utils.get_site_xpos(self.model, self.data, "robot0:grip")
@@ -866,9 +868,9 @@ class ChessTaskEnv(ChessSimulationEnv):
             if should_render:
                 self.render()
 
-        # Full open settle (30 steps)
+        # Full open settle (15 steps)
         self.finger_target_joint = self.FINGER_OPEN_JOINT
-        for _ in range(30):
+        for _ in range(15):
             self._set_action(zero_action)
             error = release_target - self._utils.get_site_xpos(self.model, self.data, "robot0:grip")
             self.data.mocap_pos[0][:3] += error
@@ -930,14 +932,15 @@ class ChessTaskEnv(ChessSimulationEnv):
         """
         # ROBOT_DOF = 15 is correct for Fetch: 3 slides + 1 torso + 2 head + 7 arm + 2 fingers
         ROBOT_DOF = 15
-        HALT_HOLD_MAX_STEPS = 100
-        ALIGN_TOLERANCE_M = 0.003
-        ALIGN_MAX_STEPS = 200
-        ALIGN_GAIN = 0.8
-        ALIGN_MAX_STEP_M = 0.005
+        HALT_HOLD_MAX_STEPS = 30
+        ALIGN_TOLERANCE_M = 0.004
+        ALIGN_MAX_STEPS = 80
+        ALIGN_GAIN = 1.0
+        ALIGN_MAX_STEP_M = 0.012
 
         # Phase 1: Halt (Driving arm to a dead stop)
         zero_action = np.zeros(4)
+        should_render = (self.render_mode == "human")
         halt_steps = 0
         for _ in range(HALT_HOLD_MAX_STEPS):
             grip_vel = self._utils.get_site_xvelp(self.model, self.data, "robot0:grip")
@@ -945,6 +948,8 @@ class ChessTaskEnv(ChessSimulationEnv):
                 break
             self._set_action(zero_action)
             self._mujoco_step(None)
+            if should_render:
+                self.render()
             halt_steps += 1
 
         # Active velocity zeroing (Robot only, preserves object physics)
@@ -980,6 +985,8 @@ class ChessTaskEnv(ChessSimulationEnv):
                 step_vec = step_vec / np.linalg.norm(step_vec) * ALIGN_MAX_STEP_M
             self.data.mocap_pos[0][:3] += step_vec
             self._mujoco_step(None)
+            if should_render:
+                self.render()
             align_steps = loop_step + 1
 
         if not converged:
@@ -1011,11 +1018,11 @@ class ChessTaskEnv(ChessSimulationEnv):
             if needs_open:
                 self.finger_target_joint = self.FINGER_OPEN_JOINT
                 self._set_gripper_state()
-                self._move_mocap_to(nominal_exit_pos, self.VERTICAL_QUAT, max_steps=100, tolerance=0.003)
+                self._move_mocap_to(nominal_exit_pos, self.VERTICAL_QUAT, max_steps=40, tolerance=0.004)
             elif needs_close:
                 self.finger_target_joint = self.FINGER_CLOSED_JOINT
                 self._set_gripper_state()
-                self._move_mocap_to(nominal_exit_pos, self.VERTICAL_QUAT, max_steps=100, tolerance=0.003)
+                self._move_mocap_to(nominal_exit_pos, self.VERTICAL_QUAT, max_steps=40, tolerance=0.004)
 
             # Finger validation (same as _reset_sim Phase 3)
             l_pos = self._utils.get_joint_qpos(

@@ -1,74 +1,63 @@
-# RoboChess Scripts
+# Scripts
 
-This directory contains the primary entry points for interacting with the RoboChess fine-tuning system.
+This directory contains all runnable scripts for RoboChess: scene generation, evaluation, and visualization.
 
-## Entry Points
+## Generation Scripts
 
-### 1. `train.py`
-Used to start or resume training sessions.
+These scripts produce or update project assets. Run them whenever the relevant configs change.
 
-**Usage:**
+| Script | What it does | Run command |
+|--------|-------------|-------------|
+| `generate_chess_stls.py` | Generates STL meshes for all 6 chess piece types. STLs have a 30×30mm cube-covering base and a distinctive shape per type. | `python scripts/generate_chess_stls.py` |
+| `generate_board_xml.py` | Generates the 64 chess board square geoms into `pick_and_place.xml`. | `python scripts/generate_board_xml.py --write` |
+| `generate_pieces_xml.py` | Generates all piece body XML (active + promotion reserve) into `pick_and_place.xml`. Re-run after changing `chess.yaml`. | `python scripts/generate_pieces_xml.py --write` |
+| `generate_zones_xml.py` | Generates flat zone marker geoms (graveyard + reserve areas) into `pick_and_place.xml`. | `python scripts/generate_zones_xml.py --write` |
+
+### Typical regen workflow
+
 ```bash
-python scripts/train.py [OPTIONS]
+python scripts/generate_chess_stls.py
+python scripts/generate_pieces_xml.py --write
+# if zone positions changed:
+python scripts/generate_zones_xml.py --write
 ```
 
-**Options:**
-- `--envs`: (int) Number of parallel Gymnasium environments to run. Defaults to the value in `configs/training.yaml`.
-- `--fresh`: (flag) If set, ignores existing checkpoints and starts training from the base model weights.
-- `--timesteps`: (int) Override the total number of timesteps to train.
-- `--config`: (str) Path to a specific training configuration file (future support).
-- `--debug`: (flag) Enable verbose debug logging in the environment.
+## Verification Scripts
 
----
+| Script | What it does | Run command |
+|--------|-------------|-------------|
+| `verify_physics.py` | Loads the MuJoCo scene and checks that the arm can reach all 64 squares. Reports HEALTHY / UNHEALTHY. | `python scripts/verify_physics.py` |
+| `eval_chess_reachability.py` | Validates board geometry constants (corner positions, spacing) against expected values from `chess.yaml`. | `python scripts/eval_chess_reachability.py` |
 
-### 2. `eval.py`
-Comprehensive evaluation tool for measuring agent performance across different movement phases.
+## Evaluation Scripts
 
-**Usage:**
-```bash
-python scripts/eval.py [OPTIONS]
-```
+All eval scripts support `--visualize` (human render) and `--delay <seconds>` for slow-motion playback.
 
-**Options:**
-- `--model`: (str) Path to the `.zip` model file. Defaults to `models/latest_model.zip`.
-- `--scenarios`: (list) Comma-separated scenarios (e.g., `transit,descend`) or `all`.
-- `--n-episodes`: (int) Number of episodes to run per scenario. Default: 100.
-- `--visualize`: (flag) If set, opens a MuJoCo window to render the evaluation.
-- `--deterministic`: (flag) Use deterministic actions. Default: True.
-- `--debug`: (flag) Enable verbose debug logging in the environment.
+| Script | What it does | Key flags |
+|--------|-------------|-----------|
+| `eval_chess_piece_move.py` | Evaluates moving a single piece from a given square. Useful for debugging a specific move. | `--from e2 --to e4` |
+| `eval_chess_game_flow.py` | Evaluates complete game flow: opening moves, captures, castling, en passant, promotion. | `--verify-agreement` |
+| `eval_sequence.py` | Runs a scripted sequence of moves and reports per-move success rate. | `--moves e2e3,e7e6,...` |
+| `eval_special_moves.py` | Evaluates all special moves: castling (both sides), en passant, pawn promotion. | `--all` |
+| `eval_stages.py` | Evaluates individual controller stages (transit, ascend, descend, grasp, release) in isolation. | `--stages transit,grasp` |
+| `eval_stress.py` | Stress test: N random legal moves, reports success rate. | `--n-moves 50` |
+| `eval_draw_conditions.py` | Verifies draw detection: 50-move rule, stalemate, threefold repetition. | (no flags needed) |
 
-**Output:**
-Prints a summary table with success rates and average rewards for each scenario.
+## Visualization Scripts
 
----
+| Script | What it does | Run command |
+|--------|-------------|-------------|
+| `visualize.py` | Interactive MuJoCo viewer with ScriptedController. | `python scripts/visualize.py` |
+| `visualize_chess_setup.py` | Static MuJoCo viewer with pieces on starting squares. | `python scripts/visualize_chess_setup.py` |
 
-### 3. `verify_physics.py`
-Diagnostic script to ensure the simulation environment is healthy. It runs checks on:
-- XML model compilation.
-- Static stability (no-action drift check).
-- Gripper kinematic reachability.
-- Teleportation stability (hiding the object correctly).
+## Application
 
-**Usage:**
-```bash
-python scripts/verify_physics.py [OPTIONS]
-```
+| Script | What it does | Run command |
+|--------|-------------|-------------|
+| `run_chess_ui.py` | Starts the Flask web server. Open `http://localhost:5000` in a browser. | `python scripts/run_chess_ui.py` |
 
-**Options:**
-- `--debug`: (flag) Enable verbose physics logging during tests.
+## Physics Testing
 
----
-
-### 4. `visualize.py`
-A simple utility for visual inspection of the agent's behavior. Unlike `eval.py`, this script runs a continuous loop on a single scenario for observation.
-
-**Usage:**
-```bash
-python scripts/visualize.py [OPTIONS]
-```
-
-**Options:**
-- `--model`: (str) Path to the model. Defaults to `models/latest_model.zip`.
-- `--scenario`: The scenario to visualize (e.g., `descend`).
-- `--delay`: (float) Delay in seconds between steps (for slow-motion observation).
-- `--debug`: (flag) Enable verbose debug logging in the environment.
+| Script | What it does | Run command |
+|--------|-------------|-------------|
+| `test_grasp_physics.py` | Interactive test of grasp physics on a single piece. Run after XML or physics param changes to verify the cube can be held without vibration. | `python scripts/test_grasp_physics.py` |

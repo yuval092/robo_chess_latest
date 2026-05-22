@@ -17,7 +17,7 @@ pieces:
   # Visual geoms use pos="0 0 0.017" to sit on top of the cube, just above cube top at +0.015.
   # Piece heights: pawn 18mm, rook 20mm, knight 21mm, bishop 24mm, queen 23mm, king 26mm.
   # No mesh scale attribute is needed.
-  freejoint_damping: 0.5
+  freejoint_damping: 8.0
 
 reserves:
   graveyard_slot_spacing_m: 0.045
@@ -52,4 +52,4 @@ promotion_reserve:
 game:
   human_color: white
   auto_computer_reply: true
-  arm_home_xy: [0.680, 0.2641]
+  arm_home_xy: [0.88, 0.2641]

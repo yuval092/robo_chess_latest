@@ -37,8 +37,8 @@ class ScriptedController:
     TRANSIT_TOLERANCE_M   = 0.004   # 4mm: success threshold for transit
     VERTICAL_TOLERANCE_M  = 0.004   # 4mm: success threshold for descend/ascend
     STEP_GAIN             = 1.0     # Full error applied per step (proportional)
-    MAX_STEP_SIZE_M       = 0.008   # 8mm per physics step max (prevents overshoot)
-    TRANSIT_MAX_STEPS     = 400     # Generous limit for long board diagonals
+    MAX_STEP_SIZE_M       = 0.012   # 12mm per physics step max (prevents overshoot)
+    TRANSIT_MAX_STEPS     = 300     # Sufficient for longest board diagonal at 12mm/step
     VERTICAL_MAX_STEPS    = 200     # Sufficient for 90mm (SAFE_Z → HOVER_Z)
     FLOOR_LIMIT           = 0.400   # Abort transit if grip Z drops below this
     GRASP_VERIFY_DRIFT_MM = 30.0    # Max XY drift for "cube held" check post-grasp
