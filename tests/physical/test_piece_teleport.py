@@ -6,6 +6,7 @@ from src.chess_game.board_mapper import BoardMapper
 from src.physical.occupancy import PhysicalOccupancy
 from src.physical.piece_registry import PieceRegistry
 from src.physical.piece_teleport import PieceTeleporter
+from src.physical.plan_executor import PhysicalPlanExecutor
 
 
 def piece_xyz(uw, piece_id):
@@ -68,3 +69,22 @@ def test_physical_occupancy_rejects_collisions():
         assert "occupied" in str(exc)
     else:
         raise AssertionError("Expected occupied square rejection")
+
+
+def test_plan_executor_reset_board_state_restores_active_piece_occupancy():
+    class FakeTeleporter:
+        def __init__(self):
+            self.squares = []
+
+        def teleport_piece_to_square(self, piece_id, square):
+            self.squares.append((piece_id, square))
+
+    teleporter = FakeTeleporter()
+    occupancy = PhysicalOccupancy(PieceRegistry().starting_square_map())
+    occupancy.set_piece_square("white_pawn_e", "e4")
+
+    executor = PhysicalPlanExecutor(None, teleporter, occupancy)
+    executor.reset_board_state()
+
+    assert occupancy.piece_at_square("e2") == "white_pawn_e"
+    assert ("white_pawn_e", "e2") in teleporter.squares

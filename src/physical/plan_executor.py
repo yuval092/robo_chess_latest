@@ -7,6 +7,7 @@ import numpy as np
 from src.chess_game.move_planner import ArmMoveCommand, PhysicalPlan, RemoveFromBoardCommand, TeleportCommand
 from src.physical.movement_executor import MovementExecutor
 from src.physical.occupancy import PhysicalOccupancy
+from src.physical.piece_registry import PieceRegistry
 from src.physical.piece_teleport import PieceTeleporter
 from src.utils.config import load_config
 
@@ -73,3 +74,18 @@ class PhysicalPlanExecutor:
         home_xy = np.array(load_config("chess")["game"]["arm_home_xy"])
         result = self.controller.run_transit(home_xy)
         return PhysicalExecutionResult(result.success, [("return_to_home", result)], result.crash_reason)
+
+    def reset_board_state(self) -> None:
+        """Reset physical chess pieces and expected occupancy to the standard start."""
+        starting_square_map = PieceRegistry().starting_square_map()
+        if self.env is not None and hasattr(self.env, "_reset_chess_piece_bodies"):
+            self.env._reset_chess_piece_bodies()
+            if hasattr(self.env, "clear_active_piece"):
+                self.env.clear_active_piece()
+        else:
+            for piece_id, square in starting_square_map.items():
+                self.piece_teleporter.teleport_piece_to_square(piece_id, square)
+        self.occupancy.reset(starting_square_map)
+
+    def reset_occupancy(self) -> None:
+        self.reset_board_state()

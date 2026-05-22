@@ -18,3 +18,5 @@ Physical movement is authoritative until a move succeeds. If the robot move fail
 ## Compatibility
 
 Legacy MuJoCo names such as `object0`, `cube`, and `ChessFetchTask-v0` still exist where the environment and older tests depend on them. Public chess-game code uses piece, square, board, game, and physical-move terminology.
+
+`object0` is intentionally retained for now. It is still referenced by legacy simulation helpers, grasp-physics diagnostics, and object-hiding compatibility tests. The chess path uses `active_piece_body_name`, `active_piece_joint_name`, `PieceRegistry`, and `PieceTeleporter` instead of relying on `object0`.

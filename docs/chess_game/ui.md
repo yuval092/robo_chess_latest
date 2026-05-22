@@ -18,3 +18,5 @@ Add `--visualize` to show the MuJoCo renderer while moves execute.
 - `POST /api/let-computer-play`: ask the deterministic move selector to play the current side.
 
 Undo and deferred promotion continuation endpoints are present but intentionally return `501` until those workflows are implemented.
+
+The queued UI backend resets the MuJoCo scene and physical board occupancy on new game requests before recreating logical chess state.

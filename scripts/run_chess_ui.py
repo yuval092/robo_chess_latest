@@ -60,6 +60,11 @@ class QueuedUIBackend:
         try:
             if request.name == "new_game" and env is not None:
                 env.reset()
+                physical_executor = getattr(self._orchestrator, "physical_executor", None)
+                if hasattr(physical_executor, "reset_board_state"):
+                    physical_executor.reset_board_state()
+                elif hasattr(physical_executor, "reset_occupancy"):
+                    physical_executor.reset_occupancy()
             result = getattr(self._orchestrator, request.name)(*request.args, **request.kwargs)
             with self._lock:
                 self._snapshot = result.snapshot if hasattr(result, "snapshot") else result

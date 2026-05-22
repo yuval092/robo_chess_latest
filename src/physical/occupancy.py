@@ -23,6 +23,9 @@ class PhysicalOccupancy:
                 raise ValueError(f"Square {square} is already occupied by {current}")
         self._piece_to_square[piece_id] = square
 
+    def reset(self, starting_square_map: dict[str, str] | None = None) -> None:
+        self._piece_to_square = dict(starting_square_map or {})
+
     def assert_square_empty(self, square: str) -> None:
         current = self.piece_at_square(square)
         if current is not None:
