@@ -140,6 +140,61 @@ def test_board_visual_geometry(debug=False):
         print(f"  - ERROR during Board Visual Geometry test: {e}")
         return False
 
+def test_zone_visual_geometry(debug=False):
+    print("Testing Off-Board Zone Visual Geometry...")
+    try:
+        env = ChessTaskEnv(debug=debug)
+        model = env.model
+        cfg = load_config("chess")
+        zones = [
+            ("zone_white_graveyard", "graveyards", "white", cfg["reserves"]["graveyard_slot_spacing_m"]),
+            ("zone_black_graveyard", "graveyards", "black", cfg["reserves"]["graveyard_slot_spacing_m"]),
+            ("zone_white_reserve", "promotion_reserve", "white", cfg["reserves"]["promotion_slot_spacing_m"]),
+            ("zone_black_reserve", "promotion_reserve", "black", cfg["reserves"]["promotion_slot_spacing_m"]),
+        ]
+        for geom_name, section, color, spacing in zones:
+            geom_id = mujoco.mj_name2id(model, mujoco.mjtObj.mjOBJ_GEOM, geom_name)
+            if geom_id == -1:
+                print(f"  - ERROR: Missing zone geom {geom_name}.")
+                env.close()
+                return False
+            if model.geom_bodyid[geom_id] != 0:
+                print(f"  - ERROR: {geom_name} must be in world coordinates, not inside a body.")
+                env.close()
+                return False
+            if model.geom_contype[geom_id] != 0 or model.geom_conaffinity[geom_id] != 0:
+                print(f"  - ERROR: {geom_name} must be visual-only contype=0 conaffinity=0.")
+                env.close()
+                return False
+            zone_cfg = cfg[section][color]
+            rows = zone_cfg["rows"]
+            cols = zone_cfg["cols"]
+            origin = zone_cfg["origin_xyz"]
+            expected_pos = np.array([
+                origin[0] + (rows - 1) * spacing / 2.0,
+                origin[1] + (cols - 1) * spacing / 2.0,
+                0.002,
+            ])
+            expected_size = np.array([
+                (rows * spacing) / 2.0 + 0.005,
+                (cols * spacing) / 2.0 + 0.005,
+                0.002,
+            ])
+            if not np.allclose(model.geom_pos[geom_id], expected_pos, atol=1e-6):
+                print(f"  - ERROR: {geom_name} pos {model.geom_pos[geom_id]} != {expected_pos}.")
+                env.close()
+                return False
+            if not np.allclose(model.geom_size[geom_id], expected_size, atol=1e-6):
+                print(f"  - ERROR: {geom_name} size {model.geom_size[geom_id]} != {expected_size}.")
+                env.close()
+                return False
+        print("  - Found 4 world-space visual zone markers aligned with configured slots.")
+        env.close()
+        return True
+    except Exception as e:
+        print(f"  - ERROR during Zone Visual Geometry test: {e}")
+        return False
+
 def test_chess_piece_modeling(debug=False):
     print("Testing Chess Piece Modeling (32 active + 64 reserve bodies)...")
     try:
@@ -373,6 +428,7 @@ def main():
         "XML Integrity": test_xml_integrity(debug=args.debug),
         "Table Geometry": test_table_geometry(debug=args.debug),
         "Board Visual Geometry": test_board_visual_geometry(debug=args.debug),
+        "Zone Visual Geometry": test_zone_visual_geometry(debug=args.debug),
         "Chess Piece Modeling": test_chess_piece_modeling(debug=args.debug),
         "Chess Piece Idle Stability": test_chess_piece_idle_stability(debug=args.debug),
         "Grasp XML Verification": verify_grasp_xml_changes(debug=args.debug),

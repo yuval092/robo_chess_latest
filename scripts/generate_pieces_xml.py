@@ -21,11 +21,20 @@ START_MARKER = "\t\t<!-- generated chess pieces start -->"
 END_MARKER = "\t\t<!-- generated chess pieces end -->"
 
 
-def piece_body_xml(piece_id: str, color: str, piece_type: str, xyz, *, initial_square: str | None = None) -> list[str]:
+def piece_body_xml(
+    piece_id: str,
+    color: str,
+    piece_type: str,
+    xyz,
+    *,
+    initial_square: str | None = None,
+    visual_euler: str | None = None,
+) -> list[str]:
     body_name = f"piece_{piece_id}"
     material_prefix = "white" if color == "white" else "black"
     damping = load_config("chess")["pieces"]["freejoint_damping"]
     comment = f" <!-- {initial_square} -->" if initial_square else ""
+    euler_attr = f' euler="{visual_euler}"' if visual_euler else ""
     return [
         f'\t\t<body name="{body_name}" pos="{xyz[0]:.4f} {xyz[1]:.4f} {xyz[2]:.4f}">{comment}',
         f'\t\t\t<joint name="{body_name}:joint" type="free" damping="{damping}"/>',
@@ -34,7 +43,7 @@ def piece_body_xml(piece_id: str, color: str, piece_type: str, xyz, *, initial_s
         f'\t\t\t      friction="2.0 0.005 0.0001" solref="0.002 1" solimp="0.99 0.999 0.001"/>',
         f'\t\t\t<geom name="{body_name}_visual" type="mesh" mesh="chess_{piece_type}_mesh"',
         f'\t\t\t      pos="0 0 0.017" material="{material_prefix}_piece_visual_mat"',
-        f'\t\t\t      contype="0" conaffinity="0" mass="0"/>',
+        f'\t\t\t      contype="0" conaffinity="0" mass="0"{euler_attr}/>',
         f'\t\t\t<site name="{body_name}_site" pos="0 0 0" size="0.005"/>',
         "\t\t</body>",
     ]
@@ -59,15 +68,30 @@ def build_fragment() -> str:
 
     for piece in registry.all_pieces():
         xyz = mapper.square_to_piece_xyz(chess.parse_square(piece.initial_square))
-        lines.extend(piece_body_xml(piece.piece_id, piece.color, piece.piece_type, xyz, initial_square=piece.initial_square))
+        visual_euler = knight_visual_euler(piece.color) if piece.piece_type == "knight" else None
+        lines.extend(
+            piece_body_xml(
+                piece.piece_id,
+                piece.color,
+                piece.piece_type,
+                xyz,
+                initial_square=piece.initial_square,
+                visual_euler=visual_euler,
+            )
+        )
 
     for piece_id, color, piece_type in reserve_piece_ids():
         reserve_index = int(piece_id.rsplit("_", 1)[1]) - 1
         xyz = reserve_position(reserve_index, color, piece_type)
-        lines.extend(piece_body_xml(piece_id, color, piece_type, xyz))
+        visual_euler = knight_visual_euler(color) if piece_type == "knight" else None
+        lines.extend(piece_body_xml(piece_id, color, piece_type, xyz, visual_euler=visual_euler))
 
     lines.append(END_MARKER)
     return "\n".join(lines)
+
+
+def knight_visual_euler(color: str) -> str:
+    return "0 0 1.5707963268" if color == "white" else "0 0 4.7123889804"
 
 
 def update_scene(scene_path: Path) -> None:

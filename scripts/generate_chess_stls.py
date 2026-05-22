@@ -14,7 +14,7 @@ import struct
 PIECE_SPECS = {
     "pawn": (0.006, 0.018, 16),
     "rook": (0.007, 0.020, 16),
-    "knight": (0.006, 0.021, 5),
+    "knight": (0.006, 0.021, 24),
     "bishop": (0.005, 0.024, 18),
     "queen": (0.0065, 0.023, 12),
     "king": (0.006, 0.026, 10),
@@ -50,6 +50,40 @@ def cylinder_triangles(radius: float, height: float, segments: int):
     return triangles
 
 
+def box_triangles(center, size):
+    cx, cy, cz = center
+    sx, sy, sz = (dim / 2.0 for dim in size)
+    v = {
+        "000": (cx - sx, cy - sy, cz - sz),
+        "001": (cx - sx, cy - sy, cz + sz),
+        "010": (cx - sx, cy + sy, cz - sz),
+        "011": (cx - sx, cy + sy, cz + sz),
+        "100": (cx + sx, cy - sy, cz - sz),
+        "101": (cx + sx, cy - sy, cz + sz),
+        "110": (cx + sx, cy + sy, cz - sz),
+        "111": (cx + sx, cy + sy, cz + sz),
+    }
+    return [
+        (v["000"], v["100"], v["110"]), (v["000"], v["110"], v["010"]),
+        (v["001"], v["011"], v["111"]), (v["001"], v["111"], v["101"]),
+        (v["000"], v["001"], v["101"]), (v["000"], v["101"], v["100"]),
+        (v["010"], v["110"], v["111"]), (v["010"], v["111"], v["011"]),
+        (v["000"], v["010"], v["011"]), (v["000"], v["011"], v["001"]),
+        (v["100"], v["101"], v["111"]), (v["100"], v["111"], v["110"]),
+    ]
+
+
+def knight_triangles():
+    triangles = []
+    triangles.extend(cylinder_triangles(0.006, 0.012, 24))
+    neck_offset = (0.0, 0.0, 0.012)
+    for tri in cylinder_triangles(0.003, 0.005, 16):
+        triangles.append(tuple((x + neck_offset[0], y + neck_offset[1], z + neck_offset[2]) for x, y, z in tri))
+    triangles.extend(box_triangles((0.002, 0.0, 0.019), (0.008, 0.006, 0.004)))
+    triangles.extend(box_triangles((0.005, 0.0, 0.018), (0.003, 0.004, 0.002)))
+    return triangles
+
+
 def write_binary_stl(path: Path, name: str, triangles) -> None:
     header = f"RoboChess {name} visual mesh".encode("ascii")[:80].ljust(80, b"\0")
     with path.open("wb") as f:
@@ -71,7 +105,8 @@ def main() -> None:
     out_dir = Path(args.out_dir)
     out_dir.mkdir(parents=True, exist_ok=True)
     for name, (radius, height, segments) in PIECE_SPECS.items():
-        write_binary_stl(out_dir / f"{name}.stl", name, cylinder_triangles(radius, height, segments))
+        triangles = knight_triangles() if name == "knight" else cylinder_triangles(radius, height, segments)
+        write_binary_stl(out_dir / f"{name}.stl", name, triangles)
     print(f"Generated {len(PIECE_SPECS)} STL meshes in {out_dir}")
 
 

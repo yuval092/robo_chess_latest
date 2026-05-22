@@ -28,8 +28,8 @@ def test_all_square_centers_inside_table():
 def test_cell_spacing_is_8cm():
     mapper = BoardMapper.from_configs()
 
-    assert np.isclose(mapper.square_name_to_xy("a2")[0] - mapper.square_name_to_xy("a1")[0], 0.08)
-    assert np.isclose(mapper.square_name_to_xy("b1")[1] - mapper.square_name_to_xy("a1")[1], 0.08)
+    assert np.isclose(mapper.square_name_to_xy("a2")[1] - mapper.square_name_to_xy("a1")[1], 0.08)
+    assert np.isclose(mapper.square_name_to_xy("b1")[0] - mapper.square_name_to_xy("a1")[0], 0.08)
 
 
 def test_board_does_not_use_env_edge_margin():
@@ -47,8 +47,8 @@ def test_a1_h1_a8_h8_positions_match_orientation():
     mapper = BoardMapper.from_configs()
 
     assert np.allclose(mapper.square_name_to_xy("a1"), [0.600, -0.0159])
-    assert np.allclose(mapper.square_name_to_xy("h1"), [0.600, 0.5441])
-    assert np.allclose(mapper.square_name_to_xy("a8"), [1.160, -0.0159])
+    assert np.allclose(mapper.square_name_to_xy("h1"), [1.160, -0.0159])
+    assert np.allclose(mapper.square_name_to_xy("a8"), [0.600, 0.5441])
     assert np.allclose(mapper.square_name_to_xy("h8"), [1.160, 0.5441])
 
 
@@ -63,5 +63,5 @@ def test_nearest_square_roundtrip(square_name):
 def test_near_and_far_rank_centers_match_exact_8cm_geometry():
     mapper = BoardMapper.from_configs()
 
-    assert np.isclose(mapper.square_name_to_xy("d1")[0], 0.600)
-    assert np.isclose(mapper.square_name_to_xy("d8")[0], 1.160)
+    assert np.isclose(mapper.square_name_to_xy("d1")[1], -0.0159)
+    assert np.isclose(mapper.square_name_to_xy("d8")[1], 0.5441)

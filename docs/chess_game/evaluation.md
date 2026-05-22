@@ -13,17 +13,18 @@ python scripts/eval_chess_piece_move.py --piece white_pawn_d --src d2 --dst d4 -
 python scripts/eval_chess_game_flow.py --verify-agreement
 python scripts/eval_draw_conditions.py
 python scripts/eval_special_moves.py --all
+python scripts/generate_zones_xml.py --write
 ```
 
 ## Notes
 
-The mechanically safer default game-flow smoke is:
+The default game-flow smoke is:
 
 ```bash
-python scripts/eval_chess_game_flow.py --moves e2e3,e7e6,g1f3,b8c6 --verify-agreement
+python scripts/eval_chess_game_flow.py --moves e2e4,e7e5,g1f3,b8c6 --verify-agreement
 ```
 
-The adjacent-pawn sequence `e2e4,e7e5,g1f3,b8c6` is legal and passes mocked planning, but real physics can fail while placing `e7e5` next to the pawn on `e4` with `ROTATION_FAILED (kinematic limit)`. Keep it as a regression scenario for future controller work rather than the default health check.
+The adjacent-pawn sequence previously exposed a `ROTATION_FAILED (kinematic limit)` placement issue in the old rank-on-X orientation. After board reorientation, the same sequence passes real MuJoCo agreement checks and is again the canonical health-check sequence.
 
 ## Script Coverage
 
@@ -32,3 +33,4 @@ The adjacent-pawn sequence `e2e4,e7e5,g1f3,b8c6` is legal and passes mocked plan
 - `eval_chess_game_flow.py`: deterministic multi-move execution and board/tracker/occupancy/position agreement.
 - `eval_draw_conditions.py`: stalemate, insufficient material, fifty-move claim, and threefold claim status.
 - `eval_special_moves.py`: castling, en passant, promotion, and capture-promotion physical plans.
+- `generate_zones_xml.py`: regenerates the four floor zone marker geoms from `configs/chess.yaml`.

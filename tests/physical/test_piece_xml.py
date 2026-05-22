@@ -58,6 +58,32 @@ def test_piece_joint_cube_and_visual_properties():
     env.close()
 
 
+def test_each_piece_type_uses_correct_mesh():
+    env = gym.make("ChessFetchTask-v0", render_mode=None, show_chess_pieces=True)
+    env.reset()
+    uw = env.unwrapped
+    registry = PieceRegistry()
+    type_to_mesh = {
+        "pawn": "chess_pawn_mesh",
+        "rook": "chess_rook_mesh",
+        "knight": "chess_knight_mesh",
+        "bishop": "chess_bishop_mesh",
+        "queen": "chess_queen_mesh",
+        "king": "chess_king_mesh",
+    }
+
+    for piece in registry.all_pieces():
+        expected_mesh = type_to_mesh[piece.piece_type]
+        visual_id = mujoco.mj_name2id(uw.model, mujoco.mjtObj.mjOBJ_GEOM, piece.visual_geom_name)
+        mesh_id = uw.model.geom_dataid[visual_id]
+        actual_mesh_name = mujoco.mj_id2name(uw.model, mujoco.mjtObj.mjOBJ_MESH, mesh_id)
+        assert actual_mesh_name == expected_mesh, (
+            f"{piece.piece_id}: expected mesh {expected_mesh}, got {actual_mesh_name}"
+        )
+
+    env.close()
+
+
 def test_show_chess_pieces_reset_places_active_pieces_on_starting_squares():
     env = gym.make("ChessFetchTask-v0", render_mode=None, show_chess_pieces=True)
     env.reset()

@@ -19,19 +19,30 @@ from src.chess_game.board_mapper import BoardMapper
 from src.utils.args import add_common_args, make_env
 
 
-REQUIRED_RANK1_X = 0.600
-REQUIRED_RANK8_X = 1.160
+REQUIRED_RANK1_Y = -0.0159
+REQUIRED_RANK8_Y = 0.5441
+REQUIRED_FILE_A_X = 0.600
+REQUIRED_FILE_H_X = 1.160
 GEOMETRY_TOLERANCE_M = 1e-9
 
 
-def validate_rank_centers(mapper: BoardMapper) -> None:
-    rank1_x = mapper.square_name_to_xy("a1")[0]
-    rank8_x = mapper.square_name_to_xy("a8")[0]
-    print(f"Rank center x: rank1={rank1_x:.3f}m rank8={rank8_x:.3f}m")
-    if not math.isclose(rank1_x, REQUIRED_RANK1_X, abs_tol=GEOMETRY_TOLERANCE_M):
-        raise SystemExit(f"rank1 center x must be {REQUIRED_RANK1_X:.3f}m, got {rank1_x:.6f}m")
-    if not math.isclose(rank8_x, REQUIRED_RANK8_X, abs_tol=GEOMETRY_TOLERANCE_M):
-        raise SystemExit(f"rank8 center x must be {REQUIRED_RANK8_X:.3f}m, got {rank8_x:.6f}m")
+def validate_board_geometry(mapper: BoardMapper) -> None:
+    rank1_y = mapper.square_name_to_xy("a1")[1]
+    rank8_y = mapper.square_name_to_xy("a8")[1]
+    file_a_x = mapper.square_name_to_xy("a1")[0]
+    file_h_x = mapper.square_name_to_xy("h1")[0]
+    print(
+        f"Board geometry: rank1_y={rank1_y:.4f}m rank8_y={rank8_y:.4f}m "
+        f"fileA_x={file_a_x:.3f}m fileH_x={file_h_x:.3f}m"
+    )
+    if not math.isclose(rank1_y, REQUIRED_RANK1_Y, abs_tol=GEOMETRY_TOLERANCE_M):
+        raise SystemExit(f"rank1 center Y must be {REQUIRED_RANK1_Y:.4f}m, got {rank1_y:.6f}m")
+    if not math.isclose(rank8_y, REQUIRED_RANK8_Y, abs_tol=GEOMETRY_TOLERANCE_M):
+        raise SystemExit(f"rank8 center Y must be {REQUIRED_RANK8_Y:.4f}m, got {rank8_y:.6f}m")
+    if not math.isclose(file_a_x, REQUIRED_FILE_A_X, abs_tol=GEOMETRY_TOLERANCE_M):
+        raise SystemExit(f"file-a center X must be {REQUIRED_FILE_A_X:.3f}m, got {file_a_x:.6f}m")
+    if not math.isclose(file_h_x, REQUIRED_FILE_H_X, abs_tol=GEOMETRY_TOLERANCE_M):
+        raise SystemExit(f"file-h center X must be {REQUIRED_FILE_H_X:.3f}m, got {file_h_x:.6f}m")
 
 
 def run_square(square_name: str, square_xy: np.ndarray, args, env, ctrl) -> list[dict]:
@@ -101,7 +112,7 @@ def main() -> None:
     args = parser.parse_args()
 
     mapper = BoardMapper.from_configs()
-    validate_rank_centers(mapper)
+    validate_board_geometry(mapper)
     centers = mapper.all_square_centers()
     if args.squares:
         selected = {name: centers[name] for name in args.squares}

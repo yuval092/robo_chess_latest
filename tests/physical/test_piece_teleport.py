@@ -50,7 +50,7 @@ def test_teleport_piece_to_graveyard_slot():
 
     teleporter.teleport_piece_to_graveyard("white_pawn_e", "slot_03")
 
-    assert np.allclose(piece_xyz(env.unwrapped, "white_pawn_e"), [0.30, -0.35 + 3 * 0.045, 0.015])
+    assert np.allclose(piece_xyz(env.unwrapped, "white_pawn_e"), [0.640, -0.300 + 3 * 0.045, 0.015])
     env.close()
 
 

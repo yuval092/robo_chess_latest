@@ -1,19 +1,22 @@
 board:
   cell_size_m: 0.08
   board_size: 8
-  center_xy: [0.88, 0.2641]   # Near-arm rank centers are only 40mm past arm_x=0.56; verify before changing.
+  center_xy: [0.88, 0.2641]
   width_m: 0.64
   margin_on_table_m: 0.03
   orientation:
-    white_side: near_arm
-    file_axis: y
-    rank_axis: x
+    white_side: low_y
+    file_axis: x
+    rank_axis: y
   use_env_edge_margin_for_board: false
 
 pieces:
-  cube_half_extent_m: 0.015
-  cube_height_m: 0.030
-  visual_stl_scale: 0.020
+  cube_half_extent_m: 0.015    # Physics collision body half-size
+  cube_height_m: 0.030         # Full cube height; piece centre is at table_z + 0.015
+  # STL files in chess_env/stls/chess/ are already in metres.
+  # Visual geoms use pos="0 0 0.017" to sit on top of the cube, just above cube top at +0.015.
+  # Piece heights: pawn 18mm, rook 20mm, knight 21mm, bishop 24mm, queen 23mm, king 26mm.
+  # No mesh scale attribute is needed.
   freejoint_damping: 0.5
 
 reserves:
@@ -28,21 +31,21 @@ reserves:
 
 graveyards:
   white:
-    origin_xyz: [0.30, -0.35, 0.015]
+    origin_xyz: [0.640, -0.300, 0.015]
     rows: 4
     cols: 4
   black:
-    origin_xyz: [1.38, 0.88, 0.015]
+    origin_xyz: [0.640, 0.680, 0.015]
     rows: 4
     cols: 4
 
 promotion_reserve:
   white:
-    origin_xyz: [0.30, 0.88, 0.015]
+    origin_xyz: [0.820, -0.300, 0.015]
     rows: 8
     cols: 4
   black:
-    origin_xyz: [1.38, -0.35, 0.015]
+    origin_xyz: [0.820, 0.680, 0.015]
     rows: 8
     cols: 4
 

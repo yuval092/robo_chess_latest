@@ -26,7 +26,7 @@ from src.physical.piece_teleport import PieceTeleporter
 from src.physical.plan_executor import PhysicalExecutionResult, PhysicalPlanExecutor
 
 
-DEFAULT_MOVES = "e2e3,e7e6,g1f3,b8c6"
+DEFAULT_MOVES = "e2e4,e7e5,g1f3,b8c6"
 POSITION_TOLERANCE_MM = 5.0
 
 

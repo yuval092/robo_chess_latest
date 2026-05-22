@@ -69,8 +69,8 @@ class BoardMapper:
         min_xy = self.board_min_xy
         return np.array(
             [
-                min_xy[0] + (rank_index + 0.5) * self.geometry.cell_size_m,
-                min_xy[1] + (file_index + 0.5) * self.geometry.cell_size_m,
+                min_xy[0] + (file_index + 0.5) * self.geometry.cell_size_m,
+                min_xy[1] + (rank_index + 0.5) * self.geometry.cell_size_m,
             ],
             dtype=float,
         )
@@ -91,8 +91,8 @@ class BoardMapper:
         self.assert_on_board(xy)
         min_xy = self.board_min_xy
         offset = (xy[:2] - min_xy) / self.geometry.cell_size_m
-        rank_index = min(max(int(math.floor(offset[0])), 0), self.geometry.board_size - 1)
-        file_index = min(max(int(math.floor(offset[1])), 0), self.geometry.board_size - 1)
+        file_index = min(max(int(math.floor(offset[0])), 0), self.geometry.board_size - 1)
+        rank_index = min(max(int(math.floor(offset[1])), 0), self.geometry.board_size - 1)
         return chess.square(file_index, rank_index)
 
     def assert_on_board(self, xy: np.ndarray) -> None:
