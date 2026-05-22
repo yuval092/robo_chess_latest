@@ -101,7 +101,11 @@ class ChessTaskEnv(ChessSimulationEnv):
 
         # --- Grasp Stage State ---
         self.grasp_mode = False
-        
+
+        # Debug hook: set to a callable(phase: str) to receive state every physics step
+        self._debug_step_callback = None
+        self._debug_current_phase = "idle"
+
         # Home Position
         home_xy = self.env_cfg.get("home_position_xy", [0.680, 0.2641])
         self.HOME_POS = np.array([home_xy[0], home_xy[1], self.SAFE_Z])
@@ -315,6 +319,11 @@ class ChessTaskEnv(ChessSimulationEnv):
         if z_error > self.CUBE_HELD_Z_LIMIT:
             return False, f"CUBE_DROPPED_Z (err={z_error*1000:.1f}mm > limit={self.CUBE_HELD_Z_LIMIT*1000:.0f}mm)"
         return True, None
+
+    def _mujoco_step(self, action):
+        super()._mujoco_step(action)
+        if self._debug_step_callback is not None:
+            self._debug_step_callback(self._debug_current_phase)
 
     def _settle_arm_to_start(self, arm_start_pos):
         """
@@ -557,6 +566,7 @@ class ChessTaskEnv(ChessSimulationEnv):
         }
 
         # ── Phase 0: Halt & Settle ────────────────────────────────────────────────
+        self._debug_current_phase = "grasp_p0_halt"
         # Zero velocity FIRST. Residual RL momentum causes oscillation if not stopped.
         self.data.qvel[:] = 0.0
         self.data.qacc[:] = 0.0
@@ -564,16 +574,7 @@ class ChessTaskEnv(ChessSimulationEnv):
         self._set_gripper_state()  # Restore finger ctrl after ctrl[:]=0 to keep fingers open
         mujoco.mj_forward(self.model, self.data)
 
-        settle_pos  = self._utils.get_site_xpos(self.model, self.data, "robot0:grip").copy()
-        settle_quat = self.data.mocap_quat[0].copy()
         should_render = (self.render_mode == "human")
-        for _ in range(15):
-            self._set_action(zero_action)                    # resets mocap → body
-            self.data.mocap_pos[0][:3] = settle_pos          # re-lock position
-            self.data.mocap_quat[0][:] = settle_quat         # re-lock rotation
-            self._mujoco_step(None)
-            if should_render:
-                self.render()
 
         # Speed check: arm should be stationary
         grip_vel = self._utils.get_site_xvelp(self.model, self.data, "robot0:grip")
@@ -597,6 +598,7 @@ class ChessTaskEnv(ChessSimulationEnv):
             return result
 
         # ── Phase 1+2: Rotation Abort Check + Perfect Align & Verticalize ────────
+        self._debug_current_phase = "grasp_p12_align"
         # Read cube position and check for dangerous diagonal orientation.
         cube_pos = self.get_cube_position().copy()
         result["pre_grasp_cube_xy"] = cube_pos[:2].copy()
@@ -620,13 +622,13 @@ class ChessTaskEnv(ChessSimulationEnv):
             return result
 
         grip_pos = self._utils.get_site_xpos(self.model, self.data, "robot0:grip").copy()
-        align_z = min(grip_pos[2], self.HOVER_Z)
-        align_target = np.array([cube_pos[0], cube_pos[1], align_z])
+        align_target = np.array([cube_pos[0], cube_pos[1], grip_pos[2]])
         if not self._move_mocap_to(align_target, self.VERTICAL_QUAT, max_steps=100, tolerance=0.001):
             result["reason"] = "ROTATION_FAILED (kinematic limit — arm cannot reach vertical at this position)"
             return result
 
         # ── Phase 3: Plunge (current Z → PLACE_Z) ────────────────────────────────
+        self._debug_current_phase = "grasp_p3_plunge"
         place_z = self.GRASP_Z
         grip_pos = self._utils.get_site_xpos(self.model, self.data, "robot0:grip").copy()
         target_z = grip_pos[2]
@@ -654,7 +656,8 @@ class ChessTaskEnv(ChessSimulationEnv):
             return result
 
         # ── Phase 4: Grasp (Finger Close, Linear Ramp) ───────────────────────────
-        # Ramp finger target from OPEN to a secure-grip value over 150 steps.
+        self._debug_current_phase = "grasp_p4_close"
+        # Ramp finger target from OPEN to a secure-grip value over the configured step budget.
         # Direct jump creates a large impulse; ramping limits contact shock.
         # Track the live cube XY so the arm follows contact motion instead of fighting it.
         self.grasp_mode = True
@@ -691,6 +694,7 @@ class ChessTaskEnv(ChessSimulationEnv):
         result["close_steps_used"] = steps_used
 
         # ── Phase 5: Hold & Verify ────────────────────────────────────────────────
+        self._debug_current_phase = "grasp_p5_hold"
         # Settle to let contact impulses stabilize (prevent ringing).
         # Continue tracking live cube XY and re-asserting vertical quat.
         for _ in range(self.GRASP_HOLD_STEPS):
@@ -733,12 +737,14 @@ class ChessTaskEnv(ChessSimulationEnv):
             return result
 
         # ── Phase 6: Retract (PLACE_Z → HOVER_Z) ──────────────────────────────────
+        self._debug_current_phase = "grasp_p6_retract"
+        retract_step_m = 0.002
         target_z = place_z
-        for _ in range(int(round((self.HOVER_Z - place_z) / 0.001)) + 15):
+        for _ in range(int(round((self.HOVER_Z - place_z) / retract_step_m)) + 3):
             grip_pos = self._utils.get_site_xpos(self.model, self.data, "robot0:grip")
             if grip_pos[2] >= self.HOVER_Z - 0.001:
                 break
-            target_z = min(self.HOVER_Z, target_z + 0.001)
+            target_z = min(self.HOVER_Z, target_z + retract_step_m)
             live_cube = self.get_cube_position()
             target_vec = np.array([live_cube[0], live_cube[1], target_z])
             
@@ -782,26 +788,14 @@ class ChessTaskEnv(ChessSimulationEnv):
 
         # ── Phase 0: Halt & Settle ────────────────────────────────────────────────
         # CRITICAL: Zero the full simulation state ([:]), not just robot DOFs [:15].
+        self._debug_current_phase = "place_p0_halt"
         self.data.qvel[:] = 0.0
         self.data.qacc[:] = 0.0
         self.data.ctrl[:] = 0.0
         self._set_gripper_state()  # Restore finger ctrl after ctrl[:]=0 to prevent squeeze during halt
         mujoco.mj_forward(self.model, self.data)
 
-        # Lock to CURRENT quat, not VERTICAL_QUAT. The arm arrived from RL DESCEND
-        # and may be tilted. Forcing VERTICAL_QUAT instantly while holding the cube
-        # causes a violent physics snap, dropping the piece. Vertical correction
-        # happens gradually in Phase 1+2 via _move_mocap_to.
-        settle_pos  = self._utils.get_site_xpos(self.model, self.data, "robot0:grip").copy()
-        settle_quat = self.data.mocap_quat[0].copy()
         should_render = (self.render_mode == "human")
-        for _ in range(15):
-            self._set_action(zero_action)
-            self.data.mocap_pos[0][:3] = settle_pos
-            self.data.mocap_quat[0][:] = settle_quat
-            self._mujoco_step(None)
-            if should_render:
-                self.render()
 
         grip_vel = self._utils.get_site_xvelp(self.model, self.data, "robot0:grip")
         if float(np.linalg.norm(grip_vel)) > 0.005:
@@ -814,15 +808,16 @@ class ChessTaskEnv(ChessSimulationEnv):
             return result
 
         # ── Phase 1+2: Vertical Correction + XY Align Over Destination ───────────
+        self._debug_current_phase = "place_p12_align"
         # Simultaneously correct wrist orientation and move over destination.
         grip_pos = self._utils.get_site_xpos(self.model, self.data, "robot0:grip").copy()
-        align_z = min(grip_pos[2], self.HOVER_Z)
-        align_target = np.array([dst_xy[0], dst_xy[1], align_z])
+        align_target = np.array([dst_xy[0], dst_xy[1], grip_pos[2]])
         if not self._move_mocap_to(align_target, self.VERTICAL_QUAT, max_steps=100, tolerance=0.001):
             result["reason"] = "ROTATION_FAILED (kinematic limit)"
             return result
 
         # ── Phase 3: Plunge (current Z → PLACE_Z) ────────────────────────────────
+        self._debug_current_phase = "place_p3_plunge"
         place_z = self.GRASP_Z
         grip_pos = self._utils.get_site_xpos(self.model, self.data, "robot0:grip").copy()
         target_z = grip_pos[2]
@@ -851,14 +846,17 @@ class ChessTaskEnv(ChessSimulationEnv):
             return result
 
         # ── Phase 4: Release (Linear Ramp Open) ───────────────────────────────────
-        # Ramp from GRASP_RAMP_END (0.010, actual grip position) to OPEN (0.0181) over 40 steps.
+        self._debug_current_phase = "place_p4_release"
+        # Ramp from GRASP_RAMP_END (0.010, actual grip position) to OPEN (0.0181).
         # Starting from 0.0000 would actively squeeze fingers for the first ~29 steps before opening.
         release_target = place_pos.copy()
         ramp_start = self.GRASP_RAMP_END       # 0.010 — actual finger position during grip
         ramp_end   = self.FINGER_OPEN_JOINT    # 0.0181
-        ramp_delta = (ramp_end - ramp_start) / 20
+        release_ramp_steps = 12
+        release_settle_steps = 8
+        ramp_delta = (ramp_end - ramp_start) / release_ramp_steps
 
-        for step in range(20):
+        for step in range(release_ramp_steps):
             self.finger_target_joint = min(ramp_end, ramp_start + ramp_delta * step)
             self._set_action(zero_action)
             error = release_target - self._utils.get_site_xpos(self.model, self.data, "robot0:grip")
@@ -868,9 +866,9 @@ class ChessTaskEnv(ChessSimulationEnv):
             if should_render:
                 self.render()
 
-        # Full open settle (15 steps)
+        # Full open settle
         self.finger_target_joint = self.FINGER_OPEN_JOINT
-        for _ in range(15):
+        for _ in range(release_settle_steps):
             self._set_action(zero_action)
             error = release_target - self._utils.get_site_xpos(self.model, self.data, "robot0:grip")
             self.data.mocap_pos[0][:3] += error
@@ -883,6 +881,7 @@ class ChessTaskEnv(ChessSimulationEnv):
         self.grasp_mode = False
 
         # ── Phase 5: Verify Placement ─────────────────────────────────────────────
+        self._debug_current_phase = "place_p5_verify"
         cube_pos = self.get_cube_position()
         xy_error = float(np.linalg.norm(cube_pos[:2] - dst_xy[:2])) * 1000
         z_error  = float(abs(cube_pos[2] - (self.TABLE_Z + self.CUBE_HEIGHT / 2.0))) * 1000
@@ -899,12 +898,14 @@ class ChessTaskEnv(ChessSimulationEnv):
             return result
 
         # ── Phase 6: Retract (PLACE_Z → HOVER_Z) ──────────────────────────────────
+        self._debug_current_phase = "place_p6_retract"
+        retract_step_m = 0.002
         target_z = place_z
-        for _ in range(int(round((self.HOVER_Z - place_z) / 0.001)) + 15):
+        for _ in range(int(round((self.HOVER_Z - place_z) / retract_step_m)) + 3):
             grip_pos = self._utils.get_site_xpos(self.model, self.data, "robot0:grip")
             if grip_pos[2] >= self.HOVER_Z - 0.001:
                 break
-            target_z = min(self.HOVER_Z, target_z + 0.001)
+            target_z = min(self.HOVER_Z, target_z + retract_step_m)
             target_vec = np.array([place_pos[0], place_pos[1], target_z])
             
             self._set_action(zero_action)
@@ -939,18 +940,24 @@ class ChessTaskEnv(ChessSimulationEnv):
         ALIGN_MAX_STEP_M = 0.012
 
         # Phase 1: Halt (Driving arm to a dead stop)
+        self._debug_current_phase = "softreset_p1_halt"
         zero_action = np.zeros(4)
         should_render = (self.render_mode == "human")
+        self.data.qvel[:ROBOT_DOF] = 0.0
+        self.data.qacc[:ROBOT_DOF] = 0.0
+        mujoco.mj_forward(self.model, self.data)
         halt_steps = 0
-        for _ in range(HALT_HOLD_MAX_STEPS):
-            grip_vel = self._utils.get_site_xvelp(self.model, self.data, "robot0:grip")
-            if np.linalg.norm(grip_vel) < self.HALT_VEL_THRESHOLD:
-                break
-            self._set_action(zero_action)
-            self._mujoco_step(None)
-            if should_render:
-                self.render()
-            halt_steps += 1
+        grip_vel = self._utils.get_site_xvelp(self.model, self.data, "robot0:grip")
+        if np.linalg.norm(grip_vel) >= self.HALT_VEL_THRESHOLD:
+            for _ in range(HALT_HOLD_MAX_STEPS):
+                grip_vel = self._utils.get_site_xvelp(self.model, self.data, "robot0:grip")
+                if np.linalg.norm(grip_vel) < self.HALT_VEL_THRESHOLD:
+                    break
+                self._set_action(zero_action)
+                self._mujoco_step(None)
+                if should_render:
+                    self.render()
+                halt_steps += 1
 
         # Active velocity zeroing (Robot only, preserves object physics)
         self.data.qvel[:ROBOT_DOF] = 0.0
@@ -967,6 +974,7 @@ class ChessTaskEnv(ChessSimulationEnv):
             )
 
         # Phase 2: Waypoint Alignment (Physics-simulated smooth movement)
+        self._debug_current_phase = "softreset_p2_align"
         converged = False
         align_steps = 0
         for loop_step in range(ALIGN_MAX_STEPS):
@@ -993,6 +1001,7 @@ class ChessTaskEnv(ChessSimulationEnv):
             raise RuntimeError(f"soft_reset ALIGN_FAILED: did not converge to {nominal_exit_pos}")
 
         # Phase 3: State Update
+        self._debug_current_phase = "softreset_p3_state"
         prev_scenario = self.current_scenario
         self.current_scenario = new_scenario
         self.goal_pos = new_goal_pos.copy()
@@ -1010,6 +1019,7 @@ class ChessTaskEnv(ChessSimulationEnv):
         self._utils.set_mocap_quat(self.model, self.data, "robot0:mocap", self.VERTICAL_QUAT)
 
         # Phase 4: Gripper Transition (Scripted finger movement)
+        self._debug_current_phase = "softreset_p4_gripper"
         if not self.grasp_mode:
             needs_open = (new_scenario == "descend" and prev_scenario != "descend")
             needs_close = (new_scenario in {"ascend", "transit"} and prev_scenario == "descend")

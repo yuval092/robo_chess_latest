@@ -37,6 +37,7 @@ class ScriptedController:
     TRANSIT_TOLERANCE_M   = 0.004   # 4mm: success threshold for transit
     VERTICAL_TOLERANCE_M  = 0.004   # 4mm: success threshold for descend/ascend
     STEP_GAIN             = 1.0     # Full error applied per step (proportional)
+    MIN_STEP_SIZE_M       = 0.002   # 2mm floor prevents slow final-approach creep
     MAX_STEP_SIZE_M       = 0.012   # 12mm per physics step max (prevents overshoot)
     TRANSIT_MAX_STEPS     = 300     # Sufficient for longest board diagonal at 12mm/step
     VERTICAL_MAX_STEPS    = 200     # Sufficient for 90mm (SAFE_Z → HOVER_Z)
@@ -102,8 +103,11 @@ class ScriptedController:
 
             # Apply capped proportional step
             step_vec = self.STEP_GAIN * error
-            if np.linalg.norm(step_vec) > self.MAX_STEP_SIZE_M:
-                step_vec = step_vec / np.linalg.norm(step_vec) * self.MAX_STEP_SIZE_M
+            step_norm = float(np.linalg.norm(step_vec))
+            if step_norm > self.MAX_STEP_SIZE_M:
+                step_vec = step_vec / step_norm * self.MAX_STEP_SIZE_M
+            elif 0.0 < step_norm < self.MIN_STEP_SIZE_M:
+                step_vec = step_vec / step_norm * self.MIN_STEP_SIZE_M
 
             env._set_action(np.zeros(4))          # Reset mocap to current body
             env.data.mocap_pos[0][:3] += step_vec  # Apply capped delta
@@ -133,6 +137,7 @@ class ScriptedController:
         Monitors: floor hit (grip Z below FLOOR_LIMIT).
         """
         env = self._env
+        env._debug_current_phase = "transit"
         target = np.array([target_xy[0], target_xy[1], env.SAFE_Z])
 
         def transit_abort(grip_pos):
@@ -157,6 +162,7 @@ class ScriptedController:
         Monitors: tube constraint (XY drift), table hit (grip below surface).
         """
         env = self._env
+        env._debug_current_phase = "descend"
         target = np.array([target_xy[0], target_xy[1], env.HOVER_Z])
         tube_center = np.array([target_xy[0], target_xy[1]])
 
@@ -181,6 +187,7 @@ class ScriptedController:
         Monitors: tube constraint (XY drift), cube drop (if grasp_mode=True).
         """
         env = self._env
+        env._debug_current_phase = "ascend"
         target = np.array([target_xy[0], target_xy[1], env.SAFE_Z])
         tube_center = np.array([target_xy[0], target_xy[1]])
 
