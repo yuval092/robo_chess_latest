@@ -65,6 +65,17 @@
       <div class="error" id="error" role="status" aria-live="polite"></div>
     </aside>
   </main>
+
+  <dialog id="promotion-dialog" aria-labelledby="promotion-title">
+    <h2 id="promotion-title">Promote pawn to…</h2>
+    <div class="promotion-choices">
+      <button data-piece="q" aria-label="Queen">♛ Queen</button>
+      <button data-piece="r" aria-label="Rook">♜ Rook</button>
+      <button data-piece="b" aria-label="Bishop">♝ Bishop</button>
+      <button data-piece="n" aria-label="Knight">♞ Knight</button>
+    </div>
+  </dialog>
+
   <script src="/static/app.js"></script>
 </body>
 </html>

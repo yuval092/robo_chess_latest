@@ -66,9 +66,9 @@ class PieceTeleporter:
 
     @staticmethod
     def _slot_index(slot_id: str) -> int:
-        match = re.search(r"(\d+)$", slot_id)
+        match = re.fullmatch(r"slot_(\d+)", slot_id)
         if match is None:
-            raise ValueError(f"Slot id must end with an integer: {slot_id}")
+            raise ValueError(f"Slot id must be in format 'slot_NN': {slot_id!r}")
         return int(match.group(1))
 
     def _slot_xyz(self, cfg: dict, spacing: float, slot_id: str) -> np.ndarray:

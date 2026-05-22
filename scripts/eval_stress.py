@@ -24,44 +24,38 @@ from src.utils.config import load_config
 
 def get_test_positions(args) -> list:
     """Return list of (name, src_xy, dst_xy) test cases."""
-    cfg = load_config("env")
-    cx, cy = cfg["table_center_xy"]
-    hx, hy = cfg["table_half_x"], cfg["table_half_y"]
-    margin = cfg.get("edge_margin", 0.02)
+    chess_cfg = load_config("chess")
+    board_cx, board_cy = chess_cfg["board"]["center_xy"]
+    cell = chess_cfg["board"]["cell_size_m"]
+    n_cells = chess_cfg["board"]["board_size"]
+    half = n_cells * cell / 2
 
-    min_x, max_x = cx - hx + margin, cx + hx - margin
-    min_y, max_y = cy - hy + margin, cy + hy - margin
+    # Chess square center boundaries: first/last square centres are half-cell inside the board edge
+    board_min_x = board_cx - half + cell / 2
+    board_max_x = board_cx + half - cell / 2
+    board_min_y = board_cy - half + cell / 2
+    board_max_y = board_cy + half - cell / 2
 
-    # Chess square grid boundaries (8×8 on usable board area)
-    sq_x = (max_x - min_x) / 8
-    sq_y = (max_y - min_y) / 8
+    center = np.array([board_cx, board_cy])
 
     if args.grid:
         n = args.grid_size
-        xs = np.linspace(min_x, max_x, n)
-        ys = np.linspace(min_y, max_y, n)
+        xs = np.linspace(board_min_x, board_max_x, n)
+        ys = np.linspace(board_min_y, board_max_y, n)
         positions = []
         for xi, x in enumerate(xs):
             for yi, y in enumerate(ys):
                 positions.append((f"grid_{xi}_{yi}", np.array([x, y])))
-        # Create (name, src, dst) pairs: use center as destination for all
-        center = np.array([cx, cy])
         return [(name, src, center) for name, src in positions]
     else:
-        # 4 corner chess squares + center
-        # Use actual chess square centers (row/col 0 and 7), not board edges
-        near_x = min_x + 0.5 * sq_x   # row 0 center (~0.609m)
-        far_x  = min_x + 7.5 * sq_x   # row 7 center (~1.151m)
-        right_y = min_y + 0.5 * sq_y  # col 0 center
-        left_y  = min_y + 7.5 * sq_y  # col 7 center
+        # 4 corner chess square centres + board centre
         corners = [
-            ("near_right", np.array([near_x, right_y])),
-            ("near_left",  np.array([near_x, left_y])),
-            ("far_right",  np.array([far_x,  right_y])),
-            ("far_left",   np.array([far_x,  left_y])),
-            ("center",     np.array([cx, cy])),
+            ("a1", np.array([board_min_x, board_min_y])),
+            ("a8", np.array([board_min_x, board_max_y])),
+            ("h1", np.array([board_max_x, board_min_y])),
+            ("h8", np.array([board_max_x, board_max_y])),
+            ("center", center),
         ]
-        center = np.array([cx, cy])
         return [(name, src, center) for name, src in corners]
 
 

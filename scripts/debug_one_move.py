@@ -16,6 +16,7 @@ Each line is a JSON object with:
 """
 from __future__ import annotations
 
+import argparse
 import json
 import os
 import sys
@@ -34,9 +35,24 @@ from src.chess_env.controller import ScriptedController
 from src.chess_game.board_mapper import BoardMapper
 from src.physical.piece_registry import PieceRegistry
 
-SRC_SQUARE = "e2"
-DST_SQUARE = "e3"
-SRC_PIECE_ID = "white_pawn_e"
+
+def _parse_args():
+    parser = argparse.ArgumentParser(
+        description="Run one chess move with dense per-step debug logging."
+    )
+    parser.add_argument("--piece", default="white_pawn_e",
+                        help="Piece ID to move (default: white_pawn_e)")
+    parser.add_argument("--src", default="e2",
+                        help="Source square in algebraic notation (default: e2)")
+    parser.add_argument("--dst", default="e3",
+                        help="Destination square in algebraic notation (default: e3)")
+    return parser.parse_args()
+
+
+_args = _parse_args()
+SRC_SQUARE = _args.src
+DST_SQUARE = _args.dst
+SRC_PIECE_ID = _args.piece
 
 ARM_JOINTS = [
     "robot0:shoulder_pan_joint",

@@ -56,11 +56,13 @@ class GameOrchestrator:
         self.last_move: str | None = None
 
     def new_game(self) -> GameSnapshot:
+        if self.is_busy:
+            self.error = "Cannot start a new game while the arm is moving."
+            return self.snapshot()
         self.chess_service = ChessService()
         self.piece_tracker = LogicalPieceTracker()
         self.error = None
         self.last_move = None
-        self.is_busy = False
         return self.snapshot()
 
     def snapshot(self) -> GameSnapshot:

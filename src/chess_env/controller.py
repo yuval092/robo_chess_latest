@@ -223,7 +223,7 @@ class ScriptedController:
 
         return StageResult(
             success=success,
-            steps=result_dict.get("close_steps_used", 0) + 15 + 100, # Approx steps
+            steps=result_dict.get("total_steps_used", result_dict.get("close_steps_used", 0)),
             crash_reason=None if success else result_dict.get("reason", "GRASP_FAILED"),
             final_pos=grip_after.copy(),
             error_mm=dist * 1000
@@ -243,7 +243,7 @@ class ScriptedController:
 
         return StageResult(
             success=success,
-            steps=15 + 100 + 80 + 30 + 50, # Approx steps based on task.py
+            steps=result_dict.get("total_steps_used", 0),
             crash_reason=None if success else result_dict.get("reason", "PLACE_FAILED"),
             final_pos=grip_after.copy(),
             error_mm=0.0

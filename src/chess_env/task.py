@@ -124,7 +124,6 @@ class ChessTaskEnv(ChessSimulationEnv):
         self.RELEASE_SETTLE_STEPS = self.env_cfg.get("release_settle_steps", 8)
         self.GRASP_VERIFY_XY_THRESHOLD = self.env_cfg.get("grasp_verify_xy_threshold", 0.015)
         self.GRASP_VERIFY_Z_THRESHOLD = self.env_cfg.get("grasp_verify_z_threshold", 0.020)
-        self.GRASP_VERIFY_FINGER_THRESHOLD = self.env_cfg.get("grasp_verify_finger_threshold", 0.012)
         self.CUBE_HELD_XY_LIMIT = self.env_cfg.get("cube_held_xy_limit", 0.030)
         self.CUBE_HELD_Z_LIMIT = self.env_cfg.get("cube_held_z_limit", 0.020)
 
@@ -144,14 +143,15 @@ class ChessTaskEnv(ChessSimulationEnv):
         os.makedirs(log_dir, exist_ok=True)
 
         self.logger = logging.getLogger(f"chess_task_{os.getpid()}")
-        self.logger.setLevel(logging.DEBUG) # Always set to DEBUG, let handler filter if needed
         if not self.logger.handlers:
-            handler = logging.FileHandler(os.path.join(log_dir, f"env_{os.getpid()}.log"))
-            handler.setFormatter(logging.Formatter("%(asctime)s - [TASK] - %(message)s"))
-            handler.setLevel(logging.DEBUG)
-            self.logger.addHandler(handler)
-        
-        # Initial level
+            if debug:
+                os.makedirs(log_dir, exist_ok=True)
+                handler = logging.FileHandler(os.path.join(log_dir, f"env_{os.getpid()}.log"))
+                handler.setFormatter(logging.Formatter("%(asctime)s - [TASK] - %(message)s"))
+                handler.setLevel(logging.DEBUG)
+                self.logger.addHandler(handler)
+            else:
+                self.logger.addHandler(logging.NullHandler())
         self.logger.setLevel(logging.DEBUG if debug else logging.INFO)
 
     def _get_obs(self):
@@ -556,16 +556,18 @@ class ChessTaskEnv(ChessSimulationEnv):
         if should_render:
             self.render()
 
-    def _plunge_to_z(self, xy: np.ndarray, target_z: float, step_m: float, should_render: bool) -> np.ndarray:
+    def _plunge_to_z(self, xy: np.ndarray, target_z: float, step_m: float, should_render: bool) -> tuple[np.ndarray, int]:
         grip_pos = self._utils.get_site_xpos(self.model, self.data, "robot0:grip").copy()
         commanded_z = grip_pos[2]
+        steps = 0
         for _ in range(int(round(max(0.0, commanded_z - target_z) / step_m)) + 6):
             grip_pos = self._utils.get_site_xpos(self.model, self.data, "robot0:grip")
             if grip_pos[2] <= target_z + 0.001:
                 break
             commanded_z = max(target_z, commanded_z - step_m)
             self._step_locked_grip(np.array([xy[0], xy[1], commanded_z]), should_render)
-        return self._utils.get_site_xpos(self.model, self.data, "robot0:grip").copy()
+            steps += 1
+        return self._utils.get_site_xpos(self.model, self.data, "robot0:grip").copy(), steps
 
     def _retract_to_hover(
         self,
@@ -575,8 +577,9 @@ class ChessTaskEnv(ChessSimulationEnv):
         should_render: bool,
         *,
         verify_held: bool = False,
-    ) -> str | None:
+    ) -> tuple[str | None, int]:
         commanded_z = start_z
+        steps = 0
         for _ in range(int(round((self.HOVER_Z - start_z) / step_m)) + 3):
             grip_pos = self._utils.get_site_xpos(self.model, self.data, "robot0:grip")
             if grip_pos[2] >= self.HOVER_Z - 0.001:
@@ -584,13 +587,14 @@ class ChessTaskEnv(ChessSimulationEnv):
             commanded_z = min(self.HOVER_Z, commanded_z + step_m)
             xy = xy_provider()
             self._step_locked_grip(np.array([xy[0], xy[1], commanded_z]), should_render)
+            steps += 1
 
             if verify_held:
                 cube_now = self.get_cube_position()
                 grip_now = self._utils.get_site_xpos(self.model, self.data, "robot0:grip")
                 if abs(cube_now[2] - (grip_now[2] - 0.015)) > self.CUBE_HELD_Z_LIMIT:
-                    return "CUBE_DROPPED_DURING_RETRACT"
-        return None
+                    return "CUBE_DROPPED_DURING_RETRACT", steps
+        return None, steps
 
     def _hold_locked_target(self, target_provider, steps: int, should_render: bool) -> None:
         for _ in range(steps):
@@ -683,7 +687,7 @@ class ChessTaskEnv(ChessSimulationEnv):
         # ── Phase 3: Plunge (current Z → PLACE_Z) ────────────────────────────────
         self._debug_current_phase = "grasp_p3_plunge"
         place_z = self.GRASP_Z
-        grip_pos = self._plunge_to_z(cube_pos[:2], place_z, self.GRASP_PLUNGE_STEP_M, should_render)
+        grip_pos, _plunge_steps = self._plunge_to_z(cube_pos[:2], place_z, self.GRASP_PLUNGE_STEP_M, should_render)
         if self.debug:
             self.logger.debug(f"[GRASP] Post-Plunge. Grip at {grip_pos}, Cube at {self.get_cube_position()}")
         if abs(grip_pos[2] - self.GRASP_Z) > 0.008:
@@ -763,7 +767,7 @@ class ChessTaskEnv(ChessSimulationEnv):
 
         # ── Phase 6: Retract (PLACE_Z → HOVER_Z) ──────────────────────────────────
         self._debug_current_phase = "grasp_p6_retract"
-        retract_error = self._retract_to_hover(
+        retract_error, _retract_steps = self._retract_to_hover(
             lambda: self.get_cube_position()[:2],
             place_z,
             self.GRASP_RETRACT_STEP_M,
@@ -775,6 +779,9 @@ class ChessTaskEnv(ChessSimulationEnv):
             return result
 
         result["success"] = True
+        result["total_steps_used"] = (
+            _plunge_steps + result["close_steps_used"] + self.GRASP_HOLD_STEPS + _retract_steps
+        )
         result["post_grasp_cube_pos"] = self.get_cube_position().copy()
         return result
 
@@ -824,7 +831,7 @@ class ChessTaskEnv(ChessSimulationEnv):
         # ── Phase 3: Plunge (current Z → PLACE_Z) ────────────────────────────────
         self._debug_current_phase = "place_p3_plunge"
         place_z = self.GRASP_Z
-        self._plunge_to_z(dst_xy, place_z, self.GRASP_PLUNGE_STEP_M, should_render)
+        _, _plunge_steps = self._plunge_to_z(dst_xy, place_z, self.GRASP_PLUNGE_STEP_M, should_render)
 
         # Verify plunge reached place_z before releasing the cube. If the arm stalled
         # mid-descent and we open fingers here, the cube falls from height.
@@ -876,9 +883,12 @@ class ChessTaskEnv(ChessSimulationEnv):
 
         # ── Phase 6: Retract (PLACE_Z → HOVER_Z) ──────────────────────────────────
         self._debug_current_phase = "place_p6_retract"
-        self._retract_to_hover(lambda: place_pos[:2], place_z, self.GRASP_RETRACT_STEP_M, should_render)
+        _, _retract_steps = self._retract_to_hover(lambda: place_pos[:2], place_z, self.GRASP_RETRACT_STEP_M, should_render)
 
         result["success"] = True
+        result["total_steps_used"] = (
+            _plunge_steps + self.RELEASE_RAMP_STEPS + self.RELEASE_SETTLE_STEPS + _retract_steps
+        )
         return result
 
     def soft_reset(self, new_scenario: str, new_goal_pos: np.ndarray,

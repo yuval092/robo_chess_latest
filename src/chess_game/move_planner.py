@@ -28,14 +28,6 @@ class RemoveFromBoardCommand:
 
 
 @dataclass(frozen=True)
-class PromoteCommand:
-    pawn_piece_id: str
-    promoted_piece_id: str
-    square: str
-    reserve_slot: str
-
-
-@dataclass(frozen=True)
 class PhysicalPlan:
     chess_move_uci: str
     commands: list
@@ -52,32 +44,40 @@ class LogicalPieceTracker:
         self._reserve_to_square: dict[str, str | None] = {
             piece_id: None for piece_id, _, _ in reserve_piece_ids()
         }
+        # Inverse map for O(1) square → piece_id lookups
+        self._square_to_piece: dict[str, str] = {
+            sq: pid for pid, sq in self._piece_to_square.items() if sq is not None
+        }
 
     @classmethod
     def empty(cls) -> "LogicalPieceTracker":
         return cls({})
 
     def piece_id_at(self, square: str) -> str | None:
-        for piece_id, piece_square in self._piece_to_square.items():
-            if piece_square == square:
-                return piece_id
-        for piece_id, piece_square in self._reserve_to_square.items():
-            if piece_square == square:
-                return piece_id
-        return None
+        return self._square_to_piece.get(square)
 
     def set_piece_at(self, square: str, piece_id: str | None) -> None:
-        current = self.piece_id_at(square)
-        if current is not None:
-            if current in self._piece_to_square:
-                self._piece_to_square[current] = None
+        # Evict any existing occupant of this square
+        old_occupant = self._square_to_piece.pop(square, None)
+        if old_occupant is not None:
+            if old_occupant in self._piece_to_square:
+                self._piece_to_square[old_occupant] = None
             else:
-                self._reserve_to_square[current] = None
+                self._reserve_to_square[old_occupant] = None
+
         if piece_id is not None:
+            # Remove piece_id's old square entry from inverse map
+            old_sq = (self._piece_to_square.get(piece_id)
+                      or self._reserve_to_square.get(piece_id))
+            if old_sq is not None:
+                self._square_to_piece.pop(old_sq, None)
+            # Update forward map
             if piece_id in self._reserve_to_square:
                 self._reserve_to_square[piece_id] = square
             else:
                 self._piece_to_square[piece_id] = square
+            # Update inverse map
+            self._square_to_piece[square] = piece_id
 
     def captured_pieces(self, color: str) -> list[str]:
         return list(self._captured[color])
@@ -121,9 +121,15 @@ class LogicalPieceTracker:
 
     def _set_off_board(self, piece_id: str) -> None:
         if piece_id in self._piece_to_square:
+            old_sq = self._piece_to_square[piece_id]
             self._piece_to_square[piece_id] = None
+            if old_sq is not None:
+                self._square_to_piece.pop(old_sq, None)
         elif piece_id in self._reserve_to_square:
+            old_sq = self._reserve_to_square[piece_id]
             self._reserve_to_square[piece_id] = None
+            if old_sq is not None:
+                self._square_to_piece.pop(old_sq, None)
 
 
 class MovePlanner:

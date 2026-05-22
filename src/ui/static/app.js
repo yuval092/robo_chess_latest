@@ -12,6 +12,7 @@ const newGameBtn = document.getElementById("new-game");
 const computerBtn = document.getElementById("computer");
 const refreshBtn = document.getElementById("refresh");
 const flipBoardBtn = document.getElementById("flip-board");
+const promotionDialog = document.getElementById("promotion-dialog");
 
 const pieces = {
   K: "♔", Q: "♕", R: "♖", B: "♗", N: "♘", P: "♙",
@@ -23,6 +24,13 @@ let selected = null;
 let legalTargets = new Set();
 let flipped = false;
 let requestInFlight = false;
+
+// Promotion state
+let pendingPromotion = null; // { src, dst } while dialog is open
+
+// Busy-poll backoff
+let busyPollDelay = 200;
+let busyPollTimer = null;
 
 function boardSquares() {
   const squares = [];
@@ -46,6 +54,14 @@ function legalDests(square) {
     if (move.slice(0, 2) === square) dests.add(move.slice(2, 4));
   }
   return dests;
+}
+
+function isPromotion(src, dst) {
+  const piece = snapshot?.board?.[src];
+  if (!piece) return false;
+  if (piece === "P" && dst[1] === "8") return true;
+  if (piece === "p" && dst[1] === "1") return true;
+  return false;
 }
 
 function renderBoard() {
@@ -113,11 +129,42 @@ async function onSquare(square) {
     renderBoard();
     return;
   }
-  await postJson("/api/move", { src: selected, dst: square });
+
+  const src = selected;
+  const dst = square;
   selected = null;
   legalTargets = new Set();
-  await loadSnapshot();
+
+  if (isPromotion(src, dst)) {
+    pendingPromotion = { src, dst };
+    promotionDialog.showModal();
+    return;
+  }
+
+  await submitMove(src, dst, null);
 }
+
+async function submitMove(src, dst, promotion) {
+  const data = await postJson("/api/move", { src, dst, promotion });
+  if (data) await loadSnapshot();
+}
+
+// Promotion dialog handlers
+promotionDialog.addEventListener("click", async (e) => {
+  const btn = e.target.closest("button[data-piece]");
+  if (!btn || !pendingPromotion) return;
+  const { src, dst } = pendingPromotion;
+  pendingPromotion = null;
+  promotionDialog.close();
+  await submitMove(src, dst, btn.dataset.piece);
+});
+
+promotionDialog.addEventListener("cancel", () => {
+  pendingPromotion = null;
+  selected = null;
+  legalTargets = new Set();
+  renderBoard();
+});
 
 function stateText() {
   const status = snapshot.status || {};
@@ -161,12 +208,23 @@ function renderSnapshot() {
   computerBtn.disabled = Boolean(snapshot.is_busy || requestInFlight);
   refreshBtn.disabled = Boolean(requestInFlight);
   renderBoard();
+
+  if (snapshot.is_busy) scheduleBusyPoll();
+}
+
+function showError(msg) {
+  errorEl.textContent = msg;
 }
 
 async function loadSnapshot() {
-  const response = await fetch("/api/snapshot");
-  snapshot = await response.json();
-  renderSnapshot();
+  try {
+    const response = await fetch("/api/snapshot");
+    if (!response.ok) { showError(`Snapshot error ${response.status}`); return; }
+    snapshot = await response.json();
+    renderSnapshot();
+  } catch (err) {
+    showError(`Network error: ${err.message}`);
+  }
 }
 
 async function postJson(url, payload = {}) {
@@ -179,14 +237,33 @@ async function postJson(url, payload = {}) {
       body: JSON.stringify(payload),
     });
     const data = await response.json();
+    if (!response.ok) {
+      showError(data.error || `Server error ${response.status}`);
+      return null;
+    }
     if (data.snapshot) snapshot = data.snapshot;
     else snapshot = data;
     renderSnapshot();
     return data;
+  } catch (err) {
+    showError(`Network error: ${err.message}`);
+    return null;
   } finally {
     requestInFlight = false;
     if (snapshot) renderSnapshot();
   }
+}
+
+function scheduleBusyPoll() {
+  if (busyPollTimer !== null) return; // already scheduled
+  busyPollTimer = setTimeout(async () => {
+    busyPollTimer = null;
+    if (!snapshot?.is_busy) { busyPollDelay = 200; return; }
+    await loadSnapshot();
+    busyPollDelay = Math.min(1500, Math.round(busyPollDelay * 1.5));
+    if (snapshot?.is_busy) scheduleBusyPoll();
+    else busyPollDelay = 200;
+  }, busyPollDelay);
 }
 
 newGameBtn.addEventListener("click", async () => {
@@ -211,6 +288,3 @@ flipBoardBtn.addEventListener("click", () => {
 });
 
 loadSnapshot();
-setInterval(() => {
-  if (snapshot?.is_busy) loadSnapshot();
-}, 500);

@@ -1,9 +1,12 @@
 import os
+import threading
 import numpy as np
 import mujoco
 import gymnasium_robotics.envs.fetch.pick_and_place as _fpp_module
 from gymnasium_robotics.envs.fetch.pick_and_place import MujocoFetchPickAndPlaceEnv
 from src.utils.config import load_config
+
+_xml_path_lock = threading.Lock()
 
 class ChessSimulationEnv(MujocoFetchPickAndPlaceEnv):
     """
@@ -36,8 +39,7 @@ class ChessSimulationEnv(MujocoFetchPickAndPlaceEnv):
         self.TABLE_SURFACE_Z = self.env_cfg["table_surface_z"]
         self.TABLE_Z         = self.TABLE_SURFACE_Z # Alias for backward compatibility
         self.EDGE_MARGIN     = self.env_cfg["edge_margin"]
-  # Safety margin to avoid edge collisions
-        self.MIN_GOAL_DIST   = self.env_cfg["min_goal_dist"] # Min distance between start and goal
+        self.MIN_GOAL_DIST   = self.env_cfg["min_goal_dist"]
         self.CUBE_HEIGHT     = self.env_cfg.get("cube_height", 0.030) # Height of the chess piece (cube)
         self.MAX_GRIPPER_WIDTH = self.env_cfg.get("max_gripper_width", 0.05)
 
@@ -58,16 +60,17 @@ class ChessSimulationEnv(MujocoFetchPickAndPlaceEnv):
         project_root = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", ".."))
         asset_path = os.path.join(project_root, 'chess_env', 'assets', 'pick_and_place.xml')
 
-        _original_path = _fpp_module.MODEL_XML_PATH
-        _fpp_module.MODEL_XML_PATH = asset_path
-        try:
-            super().__init__(**kwargs)
-            # Adjust the robot's default base position to center it on the larger board
-            init_qpos = self.physics_cfg.get("initial_qpos", [-0.05, 0.00])
-            self.initial_qpos[0] = init_qpos[0]
-            self.initial_qpos[1] = init_qpos[1]
-        finally:
-            _fpp_module.MODEL_XML_PATH = _original_path
+        with _xml_path_lock:
+            _original_path = _fpp_module.MODEL_XML_PATH
+            _fpp_module.MODEL_XML_PATH = asset_path
+            try:
+                super().__init__(**kwargs)
+                # Adjust the robot's default base position to center it on the larger board
+                init_qpos = self.physics_cfg.get("initial_qpos", [-0.05, 0.00])
+                self.initial_qpos[0] = init_qpos[0]
+                self.initial_qpos[1] = init_qpos[1]
+            finally:
+                _fpp_module.MODEL_XML_PATH = _original_path
 
     def _sample_board_position(self):
         """

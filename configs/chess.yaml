@@ -52,4 +52,3 @@ promotion_reserve:
 game:
   human_color: white
   auto_computer_reply: true
-  arm_home_xy: [0.88, 0.2641]

@@ -71,7 +71,7 @@ class PhysicalPlanExecutor:
     def return_to_home(self) -> PhysicalExecutionResult:
         if self.controller is None or self.env is None:
             return PhysicalExecutionResult(True, [], None)
-        home_xy = np.array(load_config("chess")["game"]["arm_home_xy"])
+        home_xy = np.array(load_config("env")["home_position_xy"])
         result = self.controller.run_transit(home_xy)
         return PhysicalExecutionResult(result.success, [("return_to_home", result)], result.crash_reason)
 
