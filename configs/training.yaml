@@ -28,6 +28,6 @@ moving_avg_window: 100
 
 # Optional model path registry for eval/integration scripts.
 deployed_models:
-  transit: null
+  transit: "checkpoints/transit_20260523_164127/best_model_transit.zip"
   descend: null
   ascend: null

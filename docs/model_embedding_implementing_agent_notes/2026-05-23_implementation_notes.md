@@ -37,6 +37,21 @@ Date: 2026-05-23
   wrapper when the dtypes were `float32`.
 - `ModelEmbeddedController._run_stage()` restores the previous `_use_phase9_obs` value instead of always restoring `False`. This preserves caller state if an already wrapped Phase-9 env is passed in.
 - `ModelEmbeddedController.load_model()` raises a clear `ValueError` when a configured model path is missing instead of passing `None` into `SAC.load()`.
+- `ModelEmbeddedController.load_model()` now passes a matching Phase-9 wrapper
+  env into `SAC.load()`. The saved checkpoint uses a HER replay buffer, and
+  Stable-Baselines3 raises `AssertionError: You must pass an environment when
+  using HerReplayBuffer` if the model is loaded without an env.
+- `ModelEmbeddedController.load_available()` was added so transit can be
+  embedded while descend/ascend remain scripted until their specialist models
+  exist.
+- Embedded inference now forces gripper actions the same way training does:
+  closed for transit/ascend and open for descend.
+- Embedded transit uses a 300-step inference budget to match
+  `ScriptedController.TRANSIT_MAX_STEPS`. The Gym training/eval wrapper still
+  has the registered 200-step episode cap.
+- Embedded success checks now call `env._is_success()` so the integration path
+  uses the same per-axis XY/Z threshold as training instead of a stricter 3D
+  Euclidean norm.
 - Evaluation cadence was reduced from 50 episodes every 10K timesteps to 5
   episodes every 50K timesteps. A monitored run stalled for several minutes at
   the first heavy evaluation; the lighter cadence keeps this PC-compatible
@@ -75,6 +90,24 @@ Date: 2026-05-23
     `latest_model_transit.zip`.
   - The run continued beyond 50K, confirming that the earlier evaluation stall
     was resolved.
+- Checkpoint integration pass:
+  - `configs/training.yaml` now points `deployed_models.transit` at
+    `checkpoints/transit_20260523_164127/best_model_transit.zip`.
+  - `scripts/run_chess_ui.py` defaults to `ModelEmbeddedController` with the
+    configured transit model. `--use-scripted-controller` is the opt-out.
+  - UI factory smoke confirmed `ModelEmbeddedController` is constructed and its
+    transit model is loaded.
+  - `python scripts/eval_rl_stages.py --stage transit --model checkpoints/transit_20260523_164127/best_model_transit.zip --n-episodes 20`
+    returned 13/20 success, 0 crashes, 7 timeouts.
+  - `python scripts/eval_stages.py --use-rl-models --stages transit --n-episodes 20 --transit-model checkpoints/transit_20260523_164127/best_model_transit.zip`
+    returned 70% success, 0% crash, 30% timeout.
+  - `python scripts/eval_sequence.py --use-rl-models --chain pick --n-episodes 3 --transit-model checkpoints/transit_20260523_164127/best_model_transit.zip`
+    passed 3/3 at the default center-board source.
+  - `python scripts/eval_chess_game_flow.py --use-rl-models --moves e2e4 --verify-agreement --nonmoving-tolerance-mm 2.0`
+    failed on the first transit with `TIMEOUT`; final grip was near the source
+    square but not stable enough before timeout.
+  - `python -m pytest tests/ui tests/chess_game tests/physical tests/chess_env -q`
+    passed: 78 passed.
 
 ## Notes
 
@@ -82,3 +115,6 @@ Date: 2026-05-23
 - Training is run one stage at a time. No concurrent training sessions were started.
 - `MPLCONFIGDIR=/tmp/matplotlib` avoids the Matplotlib cache warning caused by
   `/home/user/.config/matplotlib` not being writable in this environment.
+- At the time of the checkpoint integration pass, the active training process
+  was still running and had progressed beyond 134K/200K timesteps. It was not
+  stopped.

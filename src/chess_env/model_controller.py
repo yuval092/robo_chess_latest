@@ -15,7 +15,7 @@ import numpy as np
 class ModelEmbeddedController:
     """Wraps specialist SAC models behind the ScriptedController interface."""
 
-    MAX_STEPS = 200
+    MAX_STEPS = 300
 
     def __init__(
         self,
@@ -55,8 +55,10 @@ class ModelEmbeddedController:
             raise ValueError(f"No model path provided for {stage}")
 
         from stable_baselines3 import SAC
+        from training.envs import WRAPPER_MAP
 
-        self._models[stage] = SAC.load(path)
+        load_env = WRAPPER_MAP[stage](self._wrapped_env)
+        self._models[stage] = SAC.load(path, env=load_env)
         print(f"[ModelEmbeddedController] Loaded {stage} model from {path}")
 
     def load_all(self, transit_path: str, descend_path: str, ascend_path: str) -> None:
@@ -64,6 +66,21 @@ class ModelEmbeddedController:
         self.load_model("transit", transit_path)
         self.load_model("descend", descend_path)
         self.load_model("ascend", ascend_path)
+
+    def load_available(
+        self,
+        transit_path: Optional[str] = None,
+        descend_path: Optional[str] = None,
+        ascend_path: Optional[str] = None,
+    ) -> None:
+        """Load provided specialist models and keep scripted fallback for missing stages."""
+        for stage, path in {
+            "transit": transit_path,
+            "descend": descend_path,
+            "ascend": ascend_path,
+        }.items():
+            if path:
+                self.load_model(stage, path)
 
     def run_transit(self, target_xy: np.ndarray):
         """Move arm horizontally to target_xy at SAFE_Z."""
@@ -279,11 +296,10 @@ class ModelEmbeddedController:
         try:
             for step_idx in range(self.MAX_STEPS):
                 grip_pos = env._utils.get_site_xpos(env.model, env.data, "robot0:grip").copy()
-                dist = float(np.linalg.norm(target_pos - grip_pos))
                 grip_vel = env._utils.get_site_xvelp(env.model, env.data, "robot0:grip").copy()
                 speed = float(np.linalg.norm(grip_vel))
 
-                if dist < env.SUCCESS_THRESHOLD and speed < env.env_cfg.get(
+                if bool(env._is_success(grip_pos, target_pos)) and speed < env.env_cfg.get(
                     "stability_vel_threshold", 0.05
                 ):
                     success = True
@@ -292,7 +308,7 @@ class ModelEmbeddedController:
                 obs = env._get_obs()
                 action, _ = model.predict(obs, deterministic=True)
                 action = np.array(action, dtype=np.float32)
-                action[3] = 0.0
+                action[3] = -1.0 if stage in {"transit", "ascend"} else 1.0
 
                 env._set_action(action)
                 env._mujoco_step(action)

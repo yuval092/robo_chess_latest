@@ -10,6 +10,7 @@ sys.path.append(os.getcwd())
 
 import src.chess_env
 from src.chess_env.controller import ScriptedController
+from src.chess_env.model_controller import ModelEmbeddedController
 from src.chess_game.board_mapper import BoardMapper
 from src.chess_game.chess_service import ChessService
 from src.chess_game.move_planner import (
@@ -24,6 +25,7 @@ from src.physical.occupancy import PhysicalOccupancy
 from src.physical.piece_registry import PieceRegistry
 from src.physical.piece_teleport import PieceTeleporter
 from src.physical.plan_executor import PhysicalExecutionResult, PhysicalPlanExecutor
+from src.utils.config import load_config
 
 
 DEFAULT_MOVES = "e2e4,e7e5,g1f3,b8c6"
@@ -223,6 +225,10 @@ def main() -> None:
     parser.add_argument("--delay", type=float, default=0.0)
     parser.add_argument("--drift-limit", type=float, default=0.010)
     parser.add_argument("--nonmoving-tolerance-mm", type=float, default=2.0)
+    parser.add_argument("--use-rl-models", action="store_true", help="Use configured RL movement models where available.")
+    parser.add_argument("--transit-model", type=str, default=None)
+    parser.add_argument("--descend-model", type=str, default=None)
+    parser.add_argument("--ascend-model", type=str, default=None)
     args = parser.parse_args()
 
     moves = [move.strip() for move in args.moves.split(",") if move.strip()]
@@ -250,12 +256,23 @@ def main() -> None:
         env.reset()
         mapper = BoardMapper.from_configs()
         occupancy = PhysicalOccupancy(PieceRegistry().starting_square_map())
-        controller = ScriptedController(
-            env,
-            drift_limit=args.drift_limit,
-            render_fn=env.render if args.visualize else None,
-            render_delay=args.delay,
-        )
+        render_fn = env.render if args.visualize else None
+        if args.use_rl_models:
+            train_cfg = load_config("training")
+            model_paths = train_cfg.get("deployed_models", {})
+            controller = ModelEmbeddedController(env=env, render_fn=render_fn, render_delay=args.delay)
+            controller.load_available(
+                transit_path=args.transit_model or model_paths.get("transit"),
+                descend_path=args.descend_model or model_paths.get("descend"),
+                ascend_path=args.ascend_model or model_paths.get("ascend"),
+            )
+        else:
+            controller = ScriptedController(
+                env,
+                drift_limit=args.drift_limit,
+                render_fn=render_fn,
+                render_delay=args.delay,
+            )
         physical_executor = PhysicalPlanExecutor(
             MovementExecutor(env, controller, mapper, occupancy),
             PieceTeleporter(env, mapper),

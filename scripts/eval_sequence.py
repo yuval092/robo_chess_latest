@@ -37,7 +37,7 @@ def run_sequence_episodes(args, src_xy, dst_xy) -> list:
             render_fn=render_fn,
             render_delay=args.delay,
         )
-        ctrl.load_all(
+        ctrl.load_available(
             transit_path=args.transit_model or model_paths.get("transit"),
             descend_path=args.descend_model or model_paths.get("descend"),
             ascend_path=args.ascend_model or model_paths.get("ascend"),

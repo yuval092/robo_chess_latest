@@ -13,6 +13,7 @@ sys.path.append(os.getcwd())
 import src.chess_env
 from src.chess_env.controller import ScriptedController
 from src.chess_env.environment_generation import regenerate_environment
+from src.chess_env.model_controller import ModelEmbeddedController
 from src.chess_game.board_mapper import BoardMapper
 from src.chess_game.chess_service import ChessService
 from src.chess_game.game_orchestrator import GameOrchestrator
@@ -23,6 +24,7 @@ from src.physical.piece_registry import PieceRegistry
 from src.physical.piece_teleport import PieceTeleporter
 from src.physical.plan_executor import PhysicalPlanExecutor
 from src.ui.app import create_app
+from src.utils.config import load_config
 
 
 @dataclass
@@ -82,12 +84,29 @@ class QueuedUIBackend:
         return result
 
 
-def build_orchestrator(env, visualize: bool, delay: float):
+def build_controller(env, visualize: bool, delay: float, use_rl_models: bool, transit_model: str | None):
+    render_fn = env.render if visualize else None
+    if not use_rl_models:
+        return ScriptedController(env, drift_limit=0.010, render_fn=render_fn, render_delay=delay)
+
+    train_cfg = load_config("training")
+    model_paths = train_cfg.get("deployed_models", {})
+    controller = ModelEmbeddedController(env=env, render_fn=render_fn, render_delay=delay)
+    controller.load_available(transit_path=transit_model or model_paths.get("transit"))
+    return controller
+
+
+def build_orchestrator(
+    env,
+    visualize: bool,
+    delay: float,
+    use_rl_models: bool = True,
+    transit_model: str | None = None,
+):
     registry = PieceRegistry()
     occupancy = PhysicalOccupancy(registry.starting_square_map())
     board_mapper = BoardMapper.from_configs()
-    render_fn = env.render if visualize else None
-    controller = ScriptedController(env, drift_limit=0.010, render_fn=render_fn, render_delay=delay)
+    controller = build_controller(env, visualize, delay, use_rl_models, transit_model)
     movement_executor = MovementExecutor(env, controller, board_mapper, occupancy)
     physical_executor = PhysicalPlanExecutor(
         movement_executor,
@@ -109,6 +128,16 @@ def main():
     parser.add_argument("--port", type=int, default=8000)
     parser.add_argument("--visualize", action="store_true")
     parser.add_argument("--delay", type=float, default=0.0)
+    parser.add_argument(
+        "--use-scripted-controller",
+        action="store_true",
+        help="Use the scripted controller instead of the configured RL transit model.",
+    )
+    parser.add_argument(
+        "--transit-model",
+        default=None,
+        help="Override the configured transit model path.",
+    )
     args = parser.parse_args()
 
     regenerate_environment()
@@ -121,7 +150,13 @@ def main():
         force_scenario="transit",
     )
     env.reset()
-    orchestrator = build_orchestrator(env, args.visualize, args.delay)
+    orchestrator = build_orchestrator(
+        env,
+        args.visualize,
+        args.delay,
+        use_rl_models=not args.use_scripted_controller,
+        transit_model=args.transit_model,
+    )
     backend = QueuedUIBackend(orchestrator)
     app = create_app(backend)
 
