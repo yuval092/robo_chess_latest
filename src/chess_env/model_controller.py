@@ -57,8 +57,17 @@ class ModelEmbeddedController:
         from stable_baselines3 import SAC
         from training.envs import WRAPPER_MAP
 
+        # TrainEnv wrappers modify the unwrapped env's _use_phase9_obs flag and
+        # observation_space as a side-effect of __init__. Save and restore both so
+        # the production scripted pipeline is unaffected after loading.
+        prev_phase9 = self._env._use_phase9_obs
+        prev_obs_space = self._env.observation_space
+
         load_env = WRAPPER_MAP[stage](self._wrapped_env)
         self._models[stage] = SAC.load(path, env=load_env)
+
+        self._env._use_phase9_obs = prev_phase9
+        self._env.observation_space = prev_obs_space
         print(f"[ModelEmbeddedController] Loaded {stage} model from {path}")
 
     def load_all(self, transit_path: str, descend_path: str, ascend_path: str) -> None:
@@ -269,23 +278,33 @@ class ModelEmbeddedController:
         else:
             env.tube_center_xy = None
 
-        l_finger = env._utils.get_joint_qpos(
-            env.model, env.data, "robot0:l_gripper_finger_joint"
-        ).item()
-        expected_finger = (
-            env.FINGER_OPEN_JOINT if stage == "descend" else env.FINGER_CLOSED_JOINT
-        )
-        if abs(l_finger - expected_finger) > 0.003:
-            return StageResult(
-                success=False,
-                steps=0,
-                crash_reason=(
-                    f"PRECONDITION_FINGER (actual={l_finger:.4f}, "
-                    f"expected={expected_finger:.4f})"
-                ),
-                final_pos=env._utils.get_site_xpos(env.model, env.data, "robot0:grip").copy(),
-                error_mm=0.0,
+        # Set finger_target_joint for this stage (only when not in grasp_mode).
+        # In grasp_mode the fingers are held against a piece — leave them as-is
+        # so the actuator keeps gripping through the transit.
+        if not env.grasp_mode:
+            env.finger_target_joint = (
+                env.FINGER_OPEN_JOINT if stage == "descend" else env.FINGER_CLOSED_JOINT
             )
+
+        # Verify finger precondition only when NOT in grasp mode.
+        # When grasp_mode=True, the finger joint is blocked by the held piece and will
+        # read ~0.01 even though FINGER_CLOSED_JOINT=0.000 — this is normal and safe.
+        if not env.grasp_mode:
+            l_finger = env._utils.get_joint_qpos(
+                env.model, env.data, "robot0:l_gripper_finger_joint"
+            ).item()
+            expected_finger = env.finger_target_joint
+            if abs(l_finger - expected_finger) > 0.003:
+                return StageResult(
+                    success=False,
+                    steps=0,
+                    crash_reason=(
+                        f"PRECONDITION_FINGER (actual={l_finger:.4f}, "
+                        f"expected={expected_finger:.4f})"
+                    ),
+                    final_pos=env._utils.get_site_xpos(env.model, env.data, "robot0:grip").copy(),
+                    error_mm=0.0,
+                )
 
         previous_phase9 = env._use_phase9_obs
         env._use_phase9_obs = True

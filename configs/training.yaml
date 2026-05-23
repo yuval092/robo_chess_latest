@@ -2,10 +2,12 @@
 base_model: "archive/rl_system/models/sac-FetchPickAndPlace-v4.zip"
 
 # Parallelism
-num_envs: 4
+num_envs: 2
 
 # Training length
-total_timesteps: 200000
+# NOTE: 200K was too short for the first transit run (model only ~85% success at 100K).
+# Use 1_000_000 for next specialist training sessions (transit/descend/ascend).
+total_timesteps: 1000000
 
 # SAC fine-tuning hyperparameters
 learning_rate: 0.00005
@@ -19,8 +21,10 @@ initial_ent_coef: 0.1
 ent_coef_lr: 0.001
 
 # Evaluation
+# NOTE: 5 eval episodes is too noisy (a 70% model can pass 5/5 by chance).
+# Use 20+ for reliable best-model tracking. eval_freq every 50K steps.
 eval_freq: 50000
-n_eval_episodes: 5
+n_eval_episodes: 20
 
 # Logging
 log_freq: 2000
@@ -28,6 +32,9 @@ moving_avg_window: 100
 
 # Optional model path registry for eval/integration scripts.
 deployed_models:
-  transit: "checkpoints/transit_20260523_164127/best_model_transit.zip"
+  # latest_model is updated after every eval checkpoint — use it so you always get
+  # the most recently evaluated weights. Switch to best_model_transit.zip if a
+  # specific known-good snapshot is needed.
+  transit: "checkpoints/transit_20260523_164127/final_transit.zip"
   descend: null
   ascend: null

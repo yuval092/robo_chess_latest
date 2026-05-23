@@ -118,3 +118,39 @@ Date: 2026-05-23
 - At the time of the checkpoint integration pass, the active training process
   was still running and had progressed beyond 134K/200K timesteps. It was not
   stopped.
+
+## Parallel 2-Env Training Launch
+
+Requested after reading
+`docs/model_embedding_implementing_agent_notes/2026-05-23_diagnostic_and_fixes.md`.
+
+- Updated `configs/training.yaml` to `num_envs: 2` and kept
+  `total_timesteps: 1000000`.
+- Updated `configs/env.yaml` to `drift_curriculum_steps: 250000`, because
+  `1000000 / 2 = 500000` worker steps and the intended half-run curriculum is
+  `250000 * 2 = 500000` aggregate steps.
+- Validated before launch:
+  - `drift_limit_end = 0.008` and `eval_drift_limit = 0.008`.
+  - Each stage wrapper returns Phase-9 observations with shapes `(25,)`,
+    `(3,)`, `(3,)` and `float64` dtype.
+  - Stage goals match production controller expectations: transit/ascend use
+    `SAFE_Z`; descend uses `HOVER_Z`; descend/ascend set `tube_center_xy`.
+  - The archived base SAC model loads against all three wrapped stage envs.
+  - `py_compile` passed for training, wrappers, task, and model controller.
+- Launched all three trainings concurrently with 2 workers each:
+  - Transit: `checkpoints/transit_20260523_185307`
+  - Descend: `checkpoints/descend_20260523_185307`
+  - Ascend: `checkpoints/ascend_20260523_185307`
+- Startup check:
+  - All three printed `Workers=2`, `Timesteps=1,000,000`, loaded
+    `archive/rl_system/models/sac-FetchPickAndPlace-v4.zip`, and wrote
+    TensorBoard event files.
+- Status after the requested monitoring window:
+  - Transit: running at ~18.4K/1M timesteps, rollout success ~7%, rewards
+    improving from about -340 to about -170.
+  - Descend: running at ~19.5K/1M timesteps, rollout success ~14%, rewards
+    improving from about -430 to about -157.
+  - Ascend: running at ~20.7K/1M timesteps, rollout success ~42%, rewards
+    improving from about -460 to about +160.
+- Monitoring was stopped after confirming all three were still running and
+  improving. The training processes were left active.
