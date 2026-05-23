@@ -26,7 +26,7 @@ This file controls the simulation environment geometry, grasp parameters, and re
 | `table_half_x` | `0.35` | Half-extent of table in world X (table is 70cm wide) |
 | `table_half_y` | `0.35` | Half-extent of table in world Y (table is 70cm deep) |
 | `edge_margin` | `0.04` | Margin from table edge used only for movement/eval sampling, not chess geometry |
-| `torso_height` | `0.3661` | Fetch robot torso height; tuned to allow near-row (rank 1/2) reachability |
+| `torso_height` | `0.3700` | Fetch robot torso height; tuned to allow near-row (rank 1/2) reachability |
 
 ### Home Position
 
