@@ -20,7 +20,7 @@ This file controls the simulation environment geometry, grasp parameters, and re
 | `cube_z` | `0.415` | Z position of piece **centre** when resting on table (`table_surface_z + cube_height/2`) |
 | `grasp_z` | `0.430` | Z target for gripper during grasp plunge; exactly at cube top (table_z + cube_height) |
 | `hover_z` | `0.460` | Safe hover height above pieces; 30mm above grasp_z |
-| `safe_z` | `0.550` | Transit altitude; fully clear of all pieces and board |
+| `safe_z` | `0.510` | Transit altitude; lower cruise height for edge reachability while clearing pieces and board |
 | `table_surface_z` | `0.400` | Table surface Z in world coordinates |
 | `table_center_xy` | `[0.88, 0.2641]` | Table physics centre (world XY); also used as arm home position |
 | `table_half_x` | `0.35` | Half-extent of table in world X (table is 70cm wide) |
@@ -39,6 +39,7 @@ This file controls the simulation environment geometry, grasp parameters, and re
 | Key | Value | Description |
 |---|---|---|
 | `grasp_contact_approach_tolerance` | `0.001` | 1mm fine-descent tolerance during plunge |
+| `grasp_align_tolerance` | `0.001` | 1mm tolerance for pre-grasp/place vertical alignment; return-home posture reset keeps starts consistent |
 | `grasp_close_steps` | `24` | Number of simulation steps for actuator-driven finger close |
 | `grasp_ramp_end` | `0.010` | Target joint value for secure grip (10mm) |
 | `empty_grasp_threshold` | `0.011` | Joint value above which gripper is considered empty (no cube contact) |

@@ -48,14 +48,14 @@ def _run_movement_loop(self, target_pos, *, tolerance, max_steps, abort_fn=None)
 | `MIN_STEP_SIZE_M` | 2 mm | Floor to prevent final-approach creep |
 | `MAX_STEP_SIZE_M` | 24 mm | Cap to keep per-step physics stable |
 | `TRANSIT_MAX_STEPS` | 300 | ~3.6m at 12mm/step — sufficient for any board diagonal |
-| `VERTICAL_MAX_STEPS` | 200 | Sufficient for 90mm (SAFE_Z → HOVER_Z) |
+| `VERTICAL_MAX_STEPS` | 200 | Sufficient for 50mm (SAFE_Z → HOVER_Z) |
 | `FLOOR_LIMIT` | 0.400 m | Abort if grip Z drops below table surface |
 
 ---
 
 ## Stage 1: Transit (`run_transit`)
 
-**Purpose:** Move the arm horizontally from its current position to the target XY at safe altitude (SAFE_Z = 0.550 m).
+**Purpose:** Move the arm horizontally from its current position to the target XY at safe altitude (SAFE_Z = 0.510 m).
 
 **Target:** `[target_xy[0], target_xy[1], SAFE_Z]`
 
@@ -199,7 +199,7 @@ After a successful `run_full_move`, `MovementExecutor.move_piece_xy` checks the 
 
 ## Return-to-Home
 
-After every executed plan (human or computer move), `PhysicalPlanExecutor.return_to_home()` is called. It executes a single `run_transit` to the home position (`env.yaml:home_position_xy = [0.88, 0.2641]` — the board centre). This brings the arm to a neutral resting state between moves.
+After every executed plan (human or computer move), `PhysicalPlanExecutor.return_to_home()` is called. It first executes `run_transit` to the home position (`env.yaml:home_position_xy = [0.88, 0.2641]` — the board centre). After that succeeds, `ChessTaskEnv.reset_arm_to_home_posture()` restores the exact reset-time torso/arm/wrist/finger joint posture and mocap pose. This reset is blocked while a piece is held, so it cannot move the fingers during carry. It prevents redundant roll/wrist joints from accumulating a different "twisted" configuration even when the gripper XYZ has returned home.
 
 ---
 

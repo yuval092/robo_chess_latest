@@ -28,6 +28,7 @@ python scripts/generate_zones_xml.py --write
 |--------|-------------|-------------|
 | `verify_physics.py` | Loads the MuJoCo scene and checks that the arm can reach all 64 squares. Reports HEALTHY / UNHEALTHY. | `python scripts/verify_physics.py` |
 | `eval_chess_reachability.py` | Validates board geometry constants (corner positions, spacing) against expected values from `chess.yaml`. | `python scripts/eval_chess_reachability.py` |
+| `eval_all_square_moves.py` | Exhaustively tests physical pick/place reachability from each square to each other square using one piece body; other pieces are moved out of the way. | `python scripts/eval_all_square_moves.py` |
 
 ## Evaluation Scripts
 

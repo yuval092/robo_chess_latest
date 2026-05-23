@@ -22,7 +22,7 @@ This document catalogues known risks in the RoboChess system, their severity, an
 
 **Risk**: The arm's wrist/gripper hits a neighbouring piece while transiting at SAFE_Z.
 
-**Mitigation**: SAFE_Z = 0.550m is 120mm above the table surface (table at 0.400m) and 80mm above the tallest piece (king at ~26mm height + table Z ≈ 0.426m). Transit happens in a straight line at SAFE_Z only after the arm has ascended fully. The gripper-down `vertical_quat` minimises lateral footprint.
+**Mitigation**: SAFE_Z = 0.510m is 110mm above the table surface (table at 0.400m) and remains above the tallest piece height used by the scene model. Transit happens in a straight line at SAFE_Z only after the arm has ascended fully. The gripper-down `vertical_quat` minimises lateral footprint.
 
 **Residual risk**: In very crowded endgames with pieces at the board edge, the gripper body (not just the fingers) could theoretically clip a piece. No explicit collision avoidance planning is done; the straight-line path assumes SAFE_Z is clear.
 
@@ -32,9 +32,9 @@ This document catalogues known risks in the RoboChess system, their severity, an
 
 **Risk**: After placing a piece, the arm's `return_to_home()` call fails (timeout, crash).
 
-**Mitigation**: Home return failure is treated as **non-fatal**. The move has already been committed to the chess board and piece tracker. The error is stored in `GameOrchestrator.error` and surfaced to the UI as a warning, but the game continues. The arm is likely parked somewhere over the board.
+**Mitigation**: Home return first transits to the home XY, then resets the arm to the captured reset-time home joint posture so wrist/roll joints do not remain twisted between moves. A failure is treated as **non-fatal**. The move has already been committed to the chess board and piece tracker. The error is stored in `GameOrchestrator.error` and surfaced to the UI as a warning, but the game continues. The arm is likely parked somewhere over the board.
 
-**Residual risk**: Subsequent moves may fail because the arm is not at home position. The user should use the "Refresh" button and verify the arm position before continuing.
+**Residual risk**: Subsequent moves may fail if either the home transit or the home posture reset fails. The user should use the "Refresh" button and verify the arm position before continuing.
 
 ---
 

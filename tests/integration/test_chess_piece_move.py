@@ -30,6 +30,7 @@ def make_executor(env, registry):
     [
         ("white_pawn_e", "e2", "e4", __import__("chess").E4),
         ("white_knight_g", "g1", "f3", __import__("chess").F3),
+        ("white_queen", "d1", "h5", __import__("chess").H5),
     ],
 )
 def test_move_piece_in_crowded_starting_position(piece_id, src, dst, dst_square):

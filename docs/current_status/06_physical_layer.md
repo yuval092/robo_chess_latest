@@ -40,7 +40,7 @@ Execution stops at the first failing `ArmMoveCommand` and returns `PhysicalExecu
 
 ### return_to_home()
 
-After every move, the orchestrator calls `return_to_home()`. This runs `controller.run_transit(home_xy)` where `home_xy` is loaded from `configs/env.yaml: home_position_xy` (board center: `[0.88, 0.2641]`). If `controller` or `env` is None (headless/test mode), returns success immediately.
+After every move, the orchestrator calls `return_to_home()`. This runs `controller.run_transit(home_xy)` where `home_xy` is loaded from `configs/env.yaml: home_position_xy` (board center: `[0.88, 0.2641]`). If that succeeds and the environment exposes `reset_arm_to_home_posture()`, the executor then restores the captured reset-time torso/arm/wrist/finger joint posture and mocap pose. The reset refuses to run while a piece is held, so it does not move fingers during carry. If `controller` or `env` is None (headless/test mode), returns success immediately.
 
 ### reset_board_state()
 

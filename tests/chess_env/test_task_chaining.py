@@ -2,6 +2,7 @@ import gymnasium as gym
 import numpy as np
 import pytest
 import src.chess_env
+from src.chess_env.waypoints import SAFE_Z
 
 def test_transition_validate():
     env = gym.make("ChessFetchTask-v0", render_mode=None)
@@ -26,7 +27,7 @@ def test_soft_reset_flow():
     uw = env.unwrapped
     uw.current_scenario = "transit"
     nominal_xy = np.array([0.5, 0.5])
-    exit_wp = np.array([0.5, 0.5, 0.550])
+    exit_wp = np.array([0.5, 0.5, SAFE_Z])
     next_goal = np.array([0.5, 0.5, 0.460]) # descend (HOVER_Z)
     
     obs, info = uw.soft_reset(
@@ -52,7 +53,7 @@ def test_soft_reset_finger_validation():
     uw = env.unwrapped
     
     nominal_xy = np.array([0.5, 0.5])
-    exit_wp = np.array([0.5, 0.5, 0.550])
+    exit_wp = np.array([0.5, 0.5, SAFE_Z])
     next_goal = np.array([0.5, 0.5, 0.460]) # HOVER_Z
     
     # This should pass without error with the current physics

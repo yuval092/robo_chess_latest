@@ -94,6 +94,8 @@ class GameOrchestrator:
         return result
 
     def let_computer_play_current_turn(self) -> MoveExecutionResult:
+        if self.chess_service.board.is_game_over(claim_draw=True):
+            return self._rejected(self._game_over_message())
         return self._submit_move(self.chess_service.choose_engine_move)
 
     def run_computer_turn_if_needed(self) -> MoveExecutionResult | None:
@@ -150,3 +152,32 @@ class GameOrchestrator:
             piece = self.chess_service.board.piece_at(square)
             board[chess.square_name(square)] = piece.symbol() if piece else None
         return board
+
+    def _game_over_message(self) -> str:
+        status = self.chess_service.status()
+        if status.outcome == "1-0":
+            result = "White wins"
+        elif status.outcome == "0-1":
+            result = "Black wins"
+        elif status.outcome == "1/2-1/2":
+            result = "Draw"
+        else:
+            result = "Game over"
+
+        if status.is_checkmate:
+            reason = " by checkmate"
+        elif status.is_stalemate:
+            reason = " by stalemate"
+        elif status.is_insufficient_material:
+            reason = " by insufficient material"
+        elif status.is_seventyfive_moves:
+            reason = " by the 75-move rule"
+        elif status.is_fivefold_repetition:
+            reason = " by fivefold repetition"
+        elif status.can_claim_fifty_moves:
+            reason = " by the 50-move rule"
+        elif status.can_claim_threefold_repetition:
+            reason = " by threefold repetition"
+        else:
+            reason = ""
+        return f"Game over: {result}{reason}."

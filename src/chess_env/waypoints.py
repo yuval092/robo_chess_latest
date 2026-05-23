@@ -8,7 +8,7 @@ import numpy as np
 from src.utils.config import load_config
 
 _cfg = load_config("env")
-SAFE_Z  = _cfg["safe_z"]    # 0.550m
+SAFE_Z  = _cfg["safe_z"]    # 0.510m
 GRASP_Z = _cfg["grasp_z"]   # 0.425m
 HOVER_Z = _cfg.get("hover_z", 0.460)
 

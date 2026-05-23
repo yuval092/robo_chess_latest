@@ -7,6 +7,21 @@ from src.chess_game.board_mapper import BoardMapper
 from src.physical.piece_registry import PieceRegistry, reserve_piece_ids
 from src.utils.config import load_config
 
+
+HOME_POSTURE_JOINTS = (
+    "robot0:torso_lift_joint",
+    "robot0:shoulder_pan_joint",
+    "robot0:shoulder_lift_joint",
+    "robot0:upperarm_roll_joint",
+    "robot0:elbow_flex_joint",
+    "robot0:forearm_roll_joint",
+    "robot0:wrist_flex_joint",
+    "robot0:wrist_roll_joint",
+    "robot0:l_gripper_finger_joint",
+    "robot0:r_gripper_finger_joint",
+)
+
+
 class ChessTaskEnv(ChessSimulationEnv):
     """
     Config-driven Reinforcement Learning environment for RoboChess movement.
@@ -112,6 +127,7 @@ class ChessTaskEnv(ChessSimulationEnv):
 
         # Grasp Thresholds
         self.GRASP_CONTACT_APPROACH_TOLERANCE = self.env_cfg.get("grasp_contact_approach_tolerance", 0.001)
+        self.GRASP_ALIGN_TOLERANCE = self.env_cfg.get("grasp_align_tolerance", 0.001)
         self.GRASP_CLOSE_STEPS = self.env_cfg.get("grasp_close_steps", 150)
         self.GRASP_RAMP_END = self.env_cfg.get("grasp_ramp_end", 0.010)
         self.EMPTY_GRASP_THRESHOLD = self.env_cfg.get(
@@ -135,6 +151,10 @@ class ChessTaskEnv(ChessSimulationEnv):
         self.active_piece_id = None
         self.active_piece_body_name = None
         self.active_piece_joint_name = None
+        self._home_posture_qpos = None
+        self._home_posture_mocap_pos = None
+        self._home_posture_mocap_quat = None
+        self._home_posture_grip_pos = None
 
         # --- Logger Setup ---
         log_cfg = self.env_cfg.get("logging", {})
@@ -342,6 +362,65 @@ class ChessTaskEnv(ChessSimulationEnv):
         self.data.ctrl[:] = 0.0
         mujoco.mj_forward(self.model, self.data)
 
+    def _capture_home_posture(self) -> None:
+        """Remember the canonical reset posture used between chess moves."""
+        self._home_posture_qpos = {}
+        for joint_name in HOME_POSTURE_JOINTS:
+            joint = self.model.joint(joint_name)
+            self._home_posture_qpos[joint_name] = float(self.data.qpos[joint.qposadr[0]])
+        self._home_posture_mocap_pos = self.data.mocap_pos[0][:3].copy()
+        self._home_posture_mocap_quat = self.data.mocap_quat[0].copy()
+        self._home_posture_grip_pos = self._utils.get_site_xpos(
+            self.model, self.data, "robot0:grip"
+        ).copy()
+
+    def reset_arm_to_home_posture(self) -> dict:
+        """
+        Restore the exact reset-time home joint posture after returning to home.
+
+        Moving to home by end-effector XYZ alone can leave redundant wrist/roll
+        joints in different configurations. This normalizes those joints once the
+        gripper is safely back at home and no piece is held.
+        """
+        result = {"success": False, "reason": None, "final_error_mm": 0.0}
+
+        if self.grasp_mode:
+            result["reason"] = "HOME_POSTURE_RESET_BLOCKED_HELD_PIECE"
+            return result
+
+        if self._home_posture_qpos is None:
+            result["reason"] = "HOME_POSTURE_NOT_CAPTURED"
+            return result
+
+        self._debug_current_phase = "home_posture_reset"
+        self.current_scenario = "transit"
+        self.tube_center_xy = None
+        self.goal_pos = self.HOME_POS.copy()
+        self.goal = self.goal_pos.copy()
+        self.finger_target_joint = self.FINGER_CLOSED_JOINT
+        self.grasp_mode = False
+
+        for joint_name, qpos in self._home_posture_qpos.items():
+            joint = self.model.joint(joint_name)
+            self.data.qpos[joint.qposadr[0]] = qpos
+            self.data.qvel[joint.dofadr[0]] = 0.0
+            self.data.qacc[joint.dofadr[0]] = 0.0
+
+        self.data.mocap_pos[0][:3] = self._home_posture_mocap_pos
+        self.data.mocap_quat[0][:] = self._home_posture_mocap_quat
+        l_id = mujoco.mj_name2id(self.model, mujoco.mjtObj.mjOBJ_ACTUATOR, "robot0:l_gripper_finger_joint")
+        r_id = mujoco.mj_name2id(self.model, mujoco.mjtObj.mjOBJ_ACTUATOR, "robot0:r_gripper_finger_joint")
+        self.data.ctrl[l_id] = self.FINGER_CLOSED_JOINT
+        self.data.ctrl[r_id] = self.FINGER_CLOSED_JOINT
+        mujoco.mj_forward(self.model, self.data)
+
+        final_grip = self._utils.get_site_xpos(self.model, self.data, "robot0:grip").copy()
+        result["final_error_mm"] = float(np.linalg.norm(final_grip - self._home_posture_grip_pos) * 1000.0)
+        result["success"] = result["final_error_mm"] < 0.1
+        if not result["success"]:
+            result["reason"] = f"HOME_POSTURE_RESET_FAILED ({result['final_error_mm']:.3f}mm)"
+        return result
+
     def _reset_sim(self):
         """
         Executes a complex reset sequence with scripted gripper transitions:
@@ -471,6 +550,9 @@ class ChessTaskEnv(ChessSimulationEnv):
         if abs(l_pos - self.finger_target_joint) > 0.0005:
             self.logger.error(f"Reset Failed: Finger joint at {l_pos:.6f}, target {self.finger_target_joint:.6f} (Scenario: {self.current_scenario})")
             return False 
+
+        if np.linalg.norm(arm_start_pos - self.HOME_POS) < 1e-9:
+            self._capture_home_posture()
         
         if self.debug:
             obj_pos_now = self.data.qpos[qpos_start : qpos_start + 3]
@@ -680,8 +762,18 @@ class ChessTaskEnv(ChessSimulationEnv):
 
         grip_pos = self._utils.get_site_xpos(self.model, self.data, "robot0:grip").copy()
         align_target = np.array([cube_pos[0], cube_pos[1], grip_pos[2]])
-        if not self._move_mocap_to(align_target, self.VERTICAL_QUAT, max_steps=100, tolerance=0.001):
-            result["reason"] = "ROTATION_FAILED (kinematic limit — arm cannot reach vertical at this position)"
+        if not self._move_mocap_to(
+            align_target,
+            self.VERTICAL_QUAT,
+            max_steps=150,
+            tolerance=self.GRASP_ALIGN_TOLERANCE,
+        ):
+            final_pos = self._utils.get_site_xpos(self.model, self.data, "robot0:grip").copy()
+            align_error_mm = float(np.linalg.norm(final_pos - align_target) * 1000.0)
+            result["reason"] = (
+                "ROTATION_FAILED "
+                f"(align error {align_error_mm:.1f}mm > {self.GRASP_ALIGN_TOLERANCE*1000:.0f}mm)"
+            )
             return result
 
         # ── Phase 3: Plunge (current Z → PLACE_Z) ────────────────────────────────
@@ -824,8 +916,18 @@ class ChessTaskEnv(ChessSimulationEnv):
         # Simultaneously correct wrist orientation and move over destination.
         grip_pos = self._utils.get_site_xpos(self.model, self.data, "robot0:grip").copy()
         align_target = np.array([dst_xy[0], dst_xy[1], grip_pos[2]])
-        if not self._move_mocap_to(align_target, self.VERTICAL_QUAT, max_steps=100, tolerance=0.001):
-            result["reason"] = "ROTATION_FAILED (kinematic limit)"
+        if not self._move_mocap_to(
+            align_target,
+            self.VERTICAL_QUAT,
+            max_steps=150,
+            tolerance=self.GRASP_ALIGN_TOLERANCE,
+        ):
+            final_pos = self._utils.get_site_xpos(self.model, self.data, "robot0:grip").copy()
+            align_error_mm = float(np.linalg.norm(final_pos - align_target) * 1000.0)
+            result["reason"] = (
+                "ROTATION_FAILED "
+                f"(align error {align_error_mm:.1f}mm > {self.GRASP_ALIGN_TOLERANCE*1000:.0f}mm)"
+            )
             return result
 
         # ── Phase 3: Plunge (current Z → PLACE_Z) ────────────────────────────────

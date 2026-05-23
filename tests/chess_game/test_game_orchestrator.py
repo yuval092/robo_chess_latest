@@ -28,9 +28,9 @@ class FakePhysicalExecutor:
         return FakePhysicalResult(True)
 
 
-def make_orchestrator(executor=None, *, auto=False, human_color="white"):
+def make_orchestrator(executor=None, *, auto=False, human_color="white", service=None):
     return GameOrchestrator(
-        ChessService(),
+        service or ChessService(),
         executor or FakePhysicalExecutor(),
         LogicalPieceTracker(),
         auto_computer_reply=auto,
@@ -109,3 +109,17 @@ def test_auto_computer_reply_runs_after_human_success():
     assert result.physical_success
     assert len(executor.plans) == 2
     assert len(orchestrator.chess_service.san_history()) == 2
+
+
+def test_computer_turn_rejects_finished_game_without_physical_move():
+    service = ChessService("7k/6Q1/6K1/8/8/8/8/8 b - - 0 1")
+    executor = FakePhysicalExecutor(success=True)
+    orchestrator = make_orchestrator(executor, service=service)
+
+    result = orchestrator.let_computer_play_current_turn()
+
+    assert not result.accepted
+    assert not result.physical_success
+    assert "White wins" in result.error
+    assert result.snapshot.status.is_checkmate
+    assert executor.plans == []

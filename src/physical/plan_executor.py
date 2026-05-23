@@ -73,7 +73,16 @@ class PhysicalPlanExecutor:
             return PhysicalExecutionResult(True, [], None)
         home_xy = np.array(load_config("env")["home_position_xy"])
         result = self.controller.run_transit(home_xy)
-        return PhysicalExecutionResult(result.success, [("return_to_home", result)], result.crash_reason)
+        command_results = [("return_to_home", result)]
+        if not result.success:
+            return PhysicalExecutionResult(False, command_results, result.crash_reason)
+
+        if hasattr(self.env, "reset_arm_to_home_posture"):
+            posture_result = self.env.reset_arm_to_home_posture()
+            if not posture_result.get("success", False):
+                return PhysicalExecutionResult(False, command_results, posture_result.get("reason"))
+
+        return PhysicalExecutionResult(True, command_results, None)
 
     def reset_board_state(self) -> None:
         """Reset physical chess pieces and expected occupancy to the standard start."""

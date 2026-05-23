@@ -278,6 +278,18 @@ h1 {
   color: #7a4e0f;
 }
 
+.state-pill[data-state="white-wins"],
+.state-pill[data-state="black-wins"] {
+  background: rgba(24, 116, 90, 0.2);
+  color: #0f5f49;
+}
+
+.state-pill[data-state="draw"],
+.state-pill[data-state="game-over"] {
+  background: rgba(40, 48, 43, 0.12);
+  color: #3e4741;
+}
+
 .state-pill[data-state="busy"] {
   background: rgba(40, 48, 43, 0.12);
   color: #3e4741;

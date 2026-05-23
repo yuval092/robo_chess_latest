@@ -56,6 +56,47 @@ function legalDests(square) {
   return dests;
 }
 
+function isGameOver() {
+  return Boolean(snapshot?.status?.is_game_over);
+}
+
+function resultLabel(status) {
+  if (status.outcome === "1-0") return "White wins";
+  if (status.outcome === "0-1") return "Black wins";
+  if (status.outcome === "1/2-1/2") return "Draw";
+  if (status.is_checkmate && status.turn === "black") return "White wins";
+  if (status.is_checkmate && status.turn === "white") return "Black wins";
+  if (status.is_game_over) return "Game over";
+  return null;
+}
+
+function terminalReason(status) {
+  if (status.is_checkmate) return "Checkmate";
+  if (status.is_stalemate) return "Stalemate";
+  if (status.is_insufficient_material) return "Draw by insufficient material";
+  if (status.is_seventyfive_moves) return "Draw by the 75-move rule";
+  if (status.is_fivefold_repetition) return "Draw by fivefold repetition";
+  if (status.can_claim_fifty_moves) return "Draw by the 50-move rule";
+  if (status.can_claim_threefold_repetition) return "Draw by threefold repetition";
+  if (status.is_game_over) return "Game over";
+  return null;
+}
+
+function stateKey() {
+  const status = snapshot.status || {};
+  if (snapshot.is_busy || requestInFlight) return "busy";
+  if (status.is_game_over) {
+    if (status.outcome === "1-0") return "white-wins";
+    if (status.outcome === "0-1") return "black-wins";
+    if (status.outcome === "1/2-1/2") return "draw";
+    if (status.is_checkmate && status.turn === "black") return "white-wins";
+    if (status.is_checkmate && status.turn === "white") return "black-wins";
+    return "game-over";
+  }
+  if (status.is_check) return "check";
+  return "ready";
+}
+
 function isPromotion(src, dst) {
   const piece = snapshot?.board?.[src];
   if (!piece) return false;
@@ -84,7 +125,7 @@ function renderBoard() {
       button.classList.add("last");
     }
     button.dataset.square = square;
-    button.disabled = Boolean(snapshot?.is_busy || requestInFlight);
+    button.disabled = Boolean(snapshot?.is_busy || requestInFlight || isGameOver());
     const piece = pieces[snapshot?.board?.[square]] || "";
     if (piece) {
       const pieceEl = document.createElement("span");
@@ -102,7 +143,7 @@ function renderBoard() {
 }
 
 async function onSquare(square) {
-  if (!snapshot || snapshot.is_busy || requestInFlight) return;
+  if (!snapshot || snapshot.is_busy || requestInFlight || isGameOver()) return;
   const piece = snapshot.board[square];
   if (!selected) {
     if (!piece) return;
@@ -169,11 +210,23 @@ promotionDialog.addEventListener("cancel", () => {
 function stateText() {
   const status = snapshot.status || {};
   if (snapshot.is_busy || requestInFlight) return "Busy";
+  if (status.is_game_over) return resultLabel(status) || "Game over";
   if (status.is_checkmate) return "Checkmate";
   if (status.is_stalemate) return "Stalemate";
   if (status.is_game_over) return "Game over";
   if (status.is_check) return "Check";
   return "Ready";
+}
+
+function statusLine() {
+  const status = snapshot.status || {};
+  if (status.is_game_over) {
+    const reason = terminalReason(status);
+    const result = resultLabel(status);
+    if (reason && result && reason !== result) return `${reason} · ${result}`;
+    return result || reason || "Game over";
+  }
+  return `${stateText()} · ${snapshot.turn === "white" ? "White" : "Black"} to move`;
 }
 
 function renderHistory() {
@@ -195,17 +248,18 @@ function renderHistory() {
 }
 
 function renderSnapshot() {
-  turnEl.textContent = snapshot.turn === "white" ? "White" : "Black";
+  const terminal = isGameOver();
+  turnEl.textContent = terminal ? "Game over" : (snapshot.turn === "white" ? "White" : "Black");
   stateEl.textContent = stateText();
-  stateEl.dataset.state = stateEl.textContent.toLowerCase().replaceAll(" ", "-");
-  sublineEl.textContent = snapshot.error || `${stateEl.textContent} · ${snapshot.turn === "white" ? "White" : "Black"} to move`;
+  stateEl.dataset.state = stateKey();
+  sublineEl.textContent = snapshot.error || statusLine();
   lastMoveEl.textContent = snapshot.last_move || "-";
   legalCountEl.textContent = String((snapshot.legal_moves || []).length);
   fenEl.textContent = snapshot.fen || "-";
   renderHistory();
   errorEl.textContent = snapshot.error || "";
   newGameBtn.disabled = Boolean(snapshot.is_busy || requestInFlight);
-  computerBtn.disabled = Boolean(snapshot.is_busy || requestInFlight);
+  computerBtn.disabled = Boolean(snapshot.is_busy || requestInFlight || terminal);
   refreshBtn.disabled = Boolean(requestInFlight);
   renderBoard();
 
