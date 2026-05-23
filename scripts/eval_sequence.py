@@ -26,8 +26,25 @@ def run_sequence_episodes(args, src_xy, dst_xy) -> list:
     hide_object = args.chain not in ("pick", "full_move")
     env = make_env(args, force_scenario="transit", hide_object=hide_object)
     render_fn = env.render if args.visualize else None
-    ctrl = ScriptedController(env, drift_limit=args.drift_limit,
-                              render_fn=render_fn, render_delay=args.delay)
+    if args.use_rl_models:
+        from src.chess_env.model_controller import ModelEmbeddedController
+        from src.utils.config import load_config
+
+        train_cfg = load_config("training")
+        model_paths = train_cfg.get("deployed_models", {})
+        ctrl = ModelEmbeddedController(
+            env=env,
+            render_fn=render_fn,
+            render_delay=args.delay,
+        )
+        ctrl.load_all(
+            transit_path=args.transit_model or model_paths.get("transit"),
+            descend_path=args.descend_model or model_paths.get("descend"),
+            ascend_path=args.ascend_model or model_paths.get("ascend"),
+        )
+    else:
+        ctrl = ScriptedController(env, drift_limit=args.drift_limit,
+                                  render_fn=render_fn, render_delay=args.delay)
     inner = env.unwrapped
     results = []
 
@@ -104,6 +121,14 @@ def main():
                         help="Source XY: two space-separated floats")
     parser.add_argument("--dst-xy", type=str, default="1.00 0.40",
                         help="Destination XY: two space-separated floats")
+    parser.add_argument(
+        "--use-rl-models",
+        action="store_true",
+        help="Use RL models instead of the scripted controller",
+    )
+    parser.add_argument("--transit-model", type=str, default=None)
+    parser.add_argument("--descend-model", type=str, default=None)
+    parser.add_argument("--ascend-model", type=str, default=None)
     parser = add_common_args(parser)
     args = parser.parse_args()
 

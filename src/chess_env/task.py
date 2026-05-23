@@ -34,7 +34,17 @@ class ChessTaskEnv(ChessSimulationEnv):
     pretrained transport weights without requiring piece-grasping physics.
     """
 
-    def __init__(self, force_scenario=None, hide_object=True, show_chess_pieces=False, debug=False, **kwargs):
+    def __init__(
+        self,
+        force_scenario=None,
+        hide_object=True,
+        show_chess_pieces=False,
+        debug=False,
+        drift_curriculum_steps=None,
+        force_drift_limit=None,
+        fixed_drift=False,
+        **kwargs,
+    ):
         """
         Initializes the task environment.
 
@@ -44,9 +54,6 @@ class ChessTaskEnv(ChessSimulationEnv):
             debug (bool): Enables verbose per-step state logging.
         """
         # Consume legacy params to avoid gym warnings
-        kwargs.pop('drift_curriculum_steps', None)
-        kwargs.pop('force_drift_limit', None)
-        kwargs.pop('fixed_drift', None)
         kwargs.pop('sample_debug_freq', None)
         kwargs.pop('total_curriculum_steps', None)
         kwargs.pop('num_envs', None)
@@ -62,6 +69,11 @@ class ChessTaskEnv(ChessSimulationEnv):
         self.show_chess_pieces = show_chess_pieces
         self.base_debug = debug
         self.debug = debug
+        self.drift_curriculum_steps = (
+            drift_curriculum_steps or self.env_cfg.get("drift_curriculum_steps", 62_500)
+        )
+        self.force_drift_limit = force_drift_limit
+        self.fixed_drift = fixed_drift
         
         # Initialization Debug
         if debug:
@@ -74,6 +86,7 @@ class ChessTaskEnv(ChessSimulationEnv):
         self.episode_steps = 0
         self.total_env_steps = 0
         self.episode_number = 0
+        self._use_phase9_obs = False
 
         # Initialize base simulation
         super().__init__(debug=debug, **kwargs)
@@ -98,8 +111,10 @@ class ChessTaskEnv(ChessSimulationEnv):
         self.HOVER_Z = self.env_cfg.get("hover_z", 0.460)
         self.SAFE_Z = self.env_cfg["safe_z"]
         self.SUCCESS_THRESHOLD = self.env_cfg["success_threshold"]
-        self.DRIFT_LIMIT_END = self.env_cfg["drift_limit_end"]
-        self.current_drift_limit = self.env_cfg["drift_limit_end"]  # Fixed; no curriculum
+        self.DRIFT_LIMIT_START = self.env_cfg.get("drift_limit_start", 0.100)
+        self.DRIFT_LIMIT_END = self.env_cfg.get("drift_limit_end", 0.010)
+        self.DRIFT_CURRICULUM_STEPS = self.drift_curriculum_steps
+        self.current_drift_limit = self._get_current_drift_limit()
         self.FLOOR_LIMIT = self.env_cfg["floor_limit"]
         self.HIDDEN_OBJECT_POS = np.array(self.env_cfg["hidden_object_pos"])
         self.MAX_SETTLE_STEPS = self.physics_cfg["max_settle_steps"]
@@ -176,6 +191,9 @@ class ChessTaskEnv(ChessSimulationEnv):
 
     def _get_obs(self):
         """Returns a minimal physics-state dict for status/debugging."""
+        if self._use_phase9_obs:
+            return self._build_phase9_observation()
+
         grip_pos = self._utils.get_site_xpos(self.model, self.data, "robot0:grip").copy().astype(np.float32)
         grip_vel = self._utils.get_site_xvelp(self.model, self.data, "robot0:grip").copy().astype(np.float32)
         l_finger = np.float32(self._utils.get_joint_qpos(
@@ -199,6 +217,48 @@ class ChessTaskEnv(ChessSimulationEnv):
             "l_finger": l_finger,
             "goal_pos": goal_pos,
             "scenario_id": scenario_id,
+        }
+
+    def _build_phase9_observation(self):
+        """
+        Constructs the 25-dimensional Phase-9 observation vector.
+
+        This matches FetchPickAndPlace-v4's MultiInputPolicy observation layout.
+        The "Holding Object" trick sets object_pos to grip_pos so transferred
+        policies behave as if the gripper is already carrying the object.
+        """
+        (
+            grip_pos,
+            _object_pos,
+            _object_rel_pos,
+            _gripper_state,
+            _object_rot,
+            _object_velp,
+            _object_velr,
+            grip_velp,
+            _gripper_vel,
+        ) = self.generate_mujoco_observations()
+
+        fake_object_pos = grip_pos.copy()
+        goal = self.goal if (hasattr(self, "goal") and self.goal is not None) else np.zeros(3)
+        rel_to_goal = goal.astype(np.float64) - grip_pos
+
+        obs_vec = np.concatenate([
+            grip_pos,
+            fake_object_pos,
+            rel_to_goal,
+            np.zeros(2),
+            np.zeros(3),
+            np.zeros(3),
+            np.zeros(3),
+            grip_velp,
+            np.zeros(2),
+        ]).astype(np.float64)
+
+        return {
+            "observation": obs_vec,
+            "achieved_goal": grip_pos.astype(np.float64),
+            "desired_goal": goal.astype(np.float64),
         }
 
     def get_cube_position(self) -> np.ndarray:
@@ -1156,17 +1216,148 @@ class ChessTaskEnv(ChessSimulationEnv):
         return self._get_obs(), info
 
     def compute_reward(self, achieved_goal, desired_goal, info):
-        """Stub: scripted system does not use reward."""
-        return 0.0
+        """
+        Dense reward for RL training.
+
+        Scripted control bypasses Gym step/reward entirely; this is used by SB3
+        and remains vectorized for HER-compatible callers.
+        """
+        achieved_goal = np.asarray(achieved_goal, dtype=np.float64)
+        desired_goal = np.asarray(desired_goal, dtype=np.float64)
+        scalar = achieved_goal.ndim == 1
+        if scalar:
+            achieved_goal = achieved_goal[None]
+            desired_goal = desired_goal[None]
+
+        dist = np.linalg.norm(achieved_goal - desired_goal, axis=1)
+        reward = -self.env_cfg.get("dist_reward_weight", 1.0) * dist
+
+        z_err = np.abs(achieved_goal[:, 2] - desired_goal[:, 2])
+        reward -= self.env_cfg.get("z_reward_weight", 1.5) * z_err
+
+        xy_err = np.linalg.norm(achieved_goal[:, :2] - desired_goal[:, :2], axis=1)
+        reward -= self.env_cfg.get("xy_reward_weight", 2.0) * xy_err
+
+        return float(reward[0]) if scalar else reward
+
+    def _get_current_drift_limit(self) -> float:
+        """Computes the active tube radius, applying curriculum if enabled."""
+        if self.force_drift_limit is not None:
+            return float(self.force_drift_limit)
+        if self.fixed_drift or self.drift_curriculum_steps is None:
+            return float(self.DRIFT_LIMIT_END)
+
+        progress = min(self.total_env_steps / self.DRIFT_CURRICULUM_STEPS, 1.0)
+        limit = self.DRIFT_LIMIT_START - (
+            self.DRIFT_LIMIT_START - self.DRIFT_LIMIT_END
+        ) * progress
+        return float(limit)
 
     def step(self, action):
         """
-        Minimal physics step. The ScriptedController drives the arm via
-        _move_mocap_to; this step() satisfies the Gymnasium interface only.
+        Full RL training step. ScriptedController bypasses this method and
+        drives the arm through _mujoco_step() directly.
         """
-        zero = np.zeros(4)
-        zero[3] = -1.0
-        self._set_action(zero)
-        self._mujoco_step(zero)
+        self.total_env_steps += 1
+        self.episode_steps += 1
+
+        if self.current_scenario == "descend":
+            self.finger_target_joint = self.FINGER_OPEN_JOINT
+        else:
+            self.finger_target_joint = self.FINGER_CLOSED_JOINT
+
+        action_copy = np.asarray(action, dtype=np.float32).copy()
+        action_copy = np.clip(action_copy, self.action_space.low, self.action_space.high)
+        action_copy[3] = -1.0
+        self._set_action(action_copy)
+        self._mujoco_step(action_copy)
+
         obs = self._get_obs()
-        return obs, 0.0, False, False, {"is_success": 0.0, "scenario": self.current_scenario}
+        grip_pos = obs["achieved_goal"]
+        if obs["observation"].shape[0] >= 23:
+            grip_vel = obs["observation"][20:23]
+        else:
+            grip_vel = obs["grip_vel"]
+
+        terminated = False
+        crash_reason = None
+
+        l_finger = self._utils.get_joint_qpos(
+            self.model, self.data, "robot0:l_gripper_finger_joint"
+        ).item()
+        if abs(l_finger - self.finger_target_joint) > 0.003:
+            terminated = True
+            crash_reason = (
+                f"FINGER_FAULT (actual={l_finger:.4f}, "
+                f"target={self.finger_target_joint:.4f})"
+            )
+
+        if not terminated:
+            current_drift_limit = self._get_current_drift_limit()
+            self.current_drift_limit = current_drift_limit
+
+            if self.current_scenario == "transit":
+                if grip_pos[2] < self.FLOOR_LIMIT:
+                    terminated = True
+                    crash_reason = f"FLOOR_HIT (z={grip_pos[2]:.4f})"
+
+            elif self.current_scenario in {"descend", "ascend"}:
+                if self.tube_center_xy is not None:
+                    drift = float(np.linalg.norm(grip_pos[:2] - self.tube_center_xy))
+                    if drift > current_drift_limit:
+                        terminated = True
+                        crash_reason = (
+                            f"TUBE_BREACH (drift={drift*1000:.1f}mm > "
+                            f"limit={current_drift_limit*1000:.1f}mm)"
+                        )
+                if not terminated and grip_pos[2] < self.TABLE_SURFACE_Z:
+                    terminated = True
+                    crash_reason = f"TABLE_HIT (z={grip_pos[2]:.4f})"
+
+        if terminated and crash_reason:
+            reward = float(self.env_cfg.get("crash_penalty", -500.0))
+            success = 0.0
+        else:
+            reward = self.compute_reward(grip_pos, self.goal_pos, {})
+
+            dist = float(np.linalg.norm(grip_pos - self.goal_pos))
+            speed = float(np.linalg.norm(grip_vel))
+            if dist < self.env_cfg.get("braking_dist", 0.010):
+                reward -= self.env_cfg.get("braking_reward_weight", 0.15) * speed
+
+            reward -= self.env_cfg.get("jitter_penalty_weight", 0.003) * float(
+                np.linalg.norm(action_copy[:3]) ** 2
+            )
+
+            floor_prox_thresh = self.env_cfg.get("floor_proximity_threshold", 0.025)
+            if grip_pos[2] < self.FLOOR_LIMIT + floor_prox_thresh:
+                reward += float(self.env_cfg.get("floor_penalty", -0.5))
+
+            is_near = bool(self._is_success(grip_pos, self.goal_pos))
+            is_stable = float(np.linalg.norm(grip_vel)) < float(
+                self.env_cfg.get("stability_vel_threshold", 0.02)
+            )
+            success = 1.0 if (is_near and is_stable) else 0.0
+
+            if success:
+                terminated = True
+                reward += float(self.env_cfg.get("success_bonus", 500.0))
+
+        info = {
+            "is_success": success,
+            "scenario": self.current_scenario,
+            "crash_reason": crash_reason,
+        }
+
+        if self.debug and terminated:
+            outcome = (
+                f"CRASH ({crash_reason})"
+                if crash_reason
+                else ("SUCCESS" if success else "TIMEOUT")
+            )
+            self.logger.debug(
+                f"[EP {self.episode_number} END] Scenario={self.current_scenario} "
+                f"Outcome={outcome} Reward={reward:.2f}"
+            )
+
+        return obs, float(reward), terminated, False, info

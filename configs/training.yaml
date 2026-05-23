@@ -1,0 +1,33 @@
+# Base pretrained model (FetchPickAndPlace-v4 transfer weights)
+base_model: "archive/rl_system/models/sac-FetchPickAndPlace-v4.zip"
+
+# Parallelism
+num_envs: 4
+
+# Training length
+total_timesteps: 200000
+
+# SAC fine-tuning hyperparameters
+learning_rate: 0.00005
+batch_size: 512
+target_entropy: -4.0
+learning_starts: 10000
+buffer_size: 300000
+
+# Entropy reset on model load
+initial_ent_coef: 0.1
+ent_coef_lr: 0.001
+
+# Evaluation
+eval_freq: 50000
+n_eval_episodes: 5
+
+# Logging
+log_freq: 2000
+moving_avg_window: 100
+
+# Optional model path registry for eval/integration scripts.
+deployed_models:
+  transit: null
+  descend: null
+  ascend: null

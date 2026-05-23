@@ -22,8 +22,26 @@ def evaluate_stage(stage: str, args) -> dict:
     """Run N episodes of a single stage and collect accuracy statistics."""
     env = make_env(args, force_scenario=stage)
     render_fn = env.render if args.visualize else None
-    ctrl = ScriptedController(env, drift_limit=args.drift_limit,
-                              render_fn=render_fn, render_delay=args.delay)
+    if args.use_rl_models:
+        from src.chess_env.model_controller import ModelEmbeddedController
+        from src.utils.config import load_config
+
+        train_cfg = load_config("training")
+        model_paths = train_cfg.get("deployed_models", {})
+        ctrl = ModelEmbeddedController(
+            env=env,
+            render_fn=render_fn,
+            render_delay=args.delay,
+        )
+        stage_model_args = {
+            "transit": args.transit_model,
+            "descend": args.descend_model,
+            "ascend": args.ascend_model,
+        }
+        ctrl.load_model(stage, stage_model_args[stage] or model_paths.get(stage))
+    else:
+        ctrl = ScriptedController(env, drift_limit=args.drift_limit,
+                                  render_fn=render_fn, render_delay=args.delay)
     inner = env.unwrapped
 
     successes = 0
@@ -94,6 +112,14 @@ def main():
         "--stages", type=str, default="transit,descend,ascend",
         help="Comma-separated list of stages to evaluate"
     )
+    parser.add_argument(
+        "--use-rl-models",
+        action="store_true",
+        help="Use RL models instead of the scripted controller",
+    )
+    parser.add_argument("--transit-model", type=str, default=None)
+    parser.add_argument("--descend-model", type=str, default=None)
+    parser.add_argument("--ascend-model", type=str, default=None)
     parser = add_common_args(parser)
     args = parser.parse_args()
 
