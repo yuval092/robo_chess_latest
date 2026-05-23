@@ -2,9 +2,23 @@
 
 ## Overview
 
-`ModelEmbeddedController` is a drop-in replacement for `ScriptedController` during the movement
-phases. It uses the same interface (`run_transit`, `run_descend`, `run_ascend`) and returns the
-same `StageResult` type, so `GameOrchestrator` and the eval scripts need minimal changes.
+`ModelEmbeddedController` is a drop-in replacement for `ScriptedController`. It must expose the
+**full interface** of `ScriptedController` because callers rely on the high-level methods:
+
+- `movement_executor.py:53` calls `self.controller.run_full_move(src_xy, dst_xy)`
+- `plan_executor.py:75` calls `self.controller.run_transit(home_xy)` (home return)
+
+The RL models only replace the three movement stages (`run_transit`, `run_descend`, `run_ascend`).
+Grasp, place, scenario transitions, and the high-level sequence methods (`run_full_move`,
+`run_pick_sequence`, `run_place_sequence`) delegate to the internal `scripted_controller`
+for scripted phases and call `self.run_transit / run_descend / run_ascend` (i.e. the RL version)
+for movement phases — exactly like `ScriptedController`'s own chain does.
+
+> **Why not inherit?** Inheriting from `ScriptedController` and overriding only the three movement
+> methods would be simpler, but creates coupling to the parent's internal `_run_movement_loop`.
+> The standalone approach is cleaner: `run_full_move` / `run_pick_sequence` / `run_place_sequence`
+> are just thin wrappers that call `self.run_transit`, `self.run_descend`, `self.run_ascend`,
+> `self.run_grasp`, `self.run_place`, and `self.transition` — all of which are defined here.
 
 Grasp, place, and scenario transitions are **always scripted** — the RL models only handle movement.
 
@@ -61,7 +75,12 @@ class ModelEmbeddedController:
     MAX_STEPS = 200
 
     def __init__(self, env, render_fn: Optional[Callable] = None, render_delay: float = 0.0):
-        self._env = env
+        # env may be the wrapped or unwrapped env. Unwrap to the innermost ChessTaskEnv.
+        self._wrapped_env = env  # Keep the original (may have TimeLimit) for step-counter reset
+        inner = env
+        while hasattr(inner, "env"):
+            inner = inner.env
+        self._env = inner  # Always the raw ChessTaskEnv
         self._render_fn = render_fn
         self._render_delay = render_delay
 
@@ -117,13 +136,26 @@ class ModelEmbeddedController:
     # ── Passthrough to Scripted (grasp, place, transition) ────────────────────
 
     def transition(self, new_scenario: str, new_goal_pos, nominal_exit_pos, nominal_xy=None):
-        """Delegate to the env's scripted soft_reset logic."""
-        return self._env.soft_reset(
+        """Delegate to the env's scripted soft_reset logic. Returns the info dict."""
+        # soft_reset returns (obs, info); callers only use info
+        _, info = self._env.soft_reset(
             new_scenario=new_scenario,
             new_goal_pos=new_goal_pos,
             nominal_exit_pos=nominal_exit_pos,
             nominal_xy=nominal_xy,
         )
+        # Also reset TimeLimit counter so stages don't share the same episode budget
+        curr = self._wrapped_env
+        while hasattr(curr, "env"):
+            if hasattr(curr, "_elapsed_steps"):
+                curr._elapsed_steps = 0
+                break
+            curr = curr.env
+        else:
+            # curr is now the innermost env — check it too (matches ScriptedController)
+            if hasattr(curr, "_elapsed_steps"):
+                curr._elapsed_steps = 0
+        return info
 
     def execute_grasp(self):
         """Delegate to the scripted grasp pipeline."""
@@ -132,6 +164,124 @@ class ModelEmbeddedController:
     def execute_place(self, dst_xy):
         """Delegate to the scripted place pipeline."""
         return self._env.execute_place(dst_xy)
+
+    # ── High-level sequence runners (REQUIRED by movement_executor.py) ────────
+    # These mirror ScriptedController exactly, calling self.run_transit/descend/ascend
+    # (the RL-augmented versions) and the scripted grasp/place/transition.
+
+    def run_grasp(self) -> "StageResult":
+        """Execute the scripted grasp pipeline. Returns StageResult."""
+        from src.chess_env.controller import StageResult
+        env = self._env
+        grip_before = env._utils.get_site_xpos(env.model, env.data, "robot0:grip").copy()
+        result_dict = env.execute_grasp()
+        success = result_dict.get("success", False)
+        grip_after = env._utils.get_site_xpos(env.model, env.data, "robot0:grip").copy()
+        return StageResult(
+            success=success,
+            steps=result_dict.get("total_steps_used", result_dict.get("close_steps_used", 0)),
+            crash_reason=None if success else result_dict.get("reason", "GRASP_FAILED"),
+            final_pos=grip_after.copy(),
+            error_mm=float(np.linalg.norm(grip_after - grip_before)) * 1000,
+        )
+
+    def run_place(self, dst_xy: np.ndarray) -> "StageResult":
+        """Execute the scripted place pipeline. Returns StageResult."""
+        from src.chess_env.controller import StageResult
+        env = self._env
+        grip_before = env._utils.get_site_xpos(env.model, env.data, "robot0:grip").copy()
+        result_dict = env.execute_place(dst_xy)
+        success = result_dict.get("success", False)
+        grip_after = env._utils.get_site_xpos(env.model, env.data, "robot0:grip").copy()
+        return StageResult(
+            success=success,
+            steps=result_dict.get("total_steps_used", 0),
+            crash_reason=None if success else result_dict.get("reason", "PLACE_FAILED"),
+            final_pos=grip_after.copy(),
+            error_mm=0.0,
+        )
+
+    def run_pick_sequence(self, src_xy: np.ndarray) -> "SequenceResult":
+        """Execute: transit → descend → grasp → ascend at src_xy."""
+        from src.chess_env.controller import SequenceResult
+        from src.chess_env.waypoints import SAFE_Z, HOVER_Z
+        results = []
+
+        result = self.run_transit(src_xy)
+        results.append(("transit", result))
+        if not result.success:
+            return SequenceResult(False, results, "transit", None)
+
+        nom_exit = np.array([src_xy[0], src_xy[1], SAFE_Z])
+        self.transition("descend", np.array([src_xy[0], src_xy[1], HOVER_Z]), nom_exit, src_xy)
+
+        result = self.run_descend(src_xy)
+        results.append(("descend", result))
+        if not result.success:
+            return SequenceResult(False, results, "descend", None)
+
+        result = self.run_grasp()
+        results.append(("grasp", result))
+        if not result.success:
+            return SequenceResult(False, results, "grasp", None)
+
+        nom_exit_hover = np.array([src_xy[0], src_xy[1], HOVER_Z])
+        self.transition("ascend", np.array([src_xy[0], src_xy[1], SAFE_Z]), nom_exit_hover, src_xy)
+
+        result = self.run_ascend(src_xy)
+        results.append(("ascend", result))
+        if not result.success:
+            return SequenceResult(False, results, "ascend", None)
+
+        return SequenceResult(True, results, None, None)
+
+    def run_place_sequence(self, dst_xy: np.ndarray) -> "SequenceResult":
+        """Execute: transit → descend → place → ascend at dst_xy."""
+        from src.chess_env.controller import SequenceResult
+        from src.chess_env.waypoints import SAFE_Z, HOVER_Z
+        results = []
+
+        result = self.run_transit(dst_xy)
+        results.append(("transit", result))
+        if not result.success:
+            return SequenceResult(False, results, "transit", None)
+
+        nom_exit = np.array([dst_xy[0], dst_xy[1], SAFE_Z])
+        self.transition("descend", np.array([dst_xy[0], dst_xy[1], HOVER_Z]), nom_exit, dst_xy)
+
+        result = self.run_descend(dst_xy)
+        results.append(("descend", result))
+        if not result.success:
+            return SequenceResult(False, results, "descend", None)
+
+        result = self.run_place(dst_xy)
+        results.append(("place", result))
+        if not result.success:
+            return SequenceResult(False, results, "place", None)
+
+        nom_exit_hover = np.array([dst_xy[0], dst_xy[1], HOVER_Z])
+        self.transition("ascend", np.array([dst_xy[0], dst_xy[1], SAFE_Z]), nom_exit_hover, dst_xy)
+
+        result = self.run_ascend(dst_xy)
+        results.append(("ascend", result))
+        if not result.success:
+            return SequenceResult(False, results, "ascend", None)
+
+        return SequenceResult(True, results, None, None)
+
+    def run_full_move(self, src_xy: np.ndarray, dst_xy: np.ndarray) -> "SequenceResult":
+        """Full pick-and-place: pick from src_xy, place at dst_xy. Called by MovementExecutor."""
+        from src.chess_env.controller import SequenceResult
+        pick = self.run_pick_sequence(src_xy)
+        if not pick.success:
+            return pick
+        place = self.run_place_sequence(dst_xy)
+        return SequenceResult(
+            success=place.success,
+            stage_results=pick.stage_results + place.stage_results,
+            failed_at=place.failed_at,
+            grasp_quality=place.grasp_quality,
+        )
 
     # ── Internal Stage Runner ─────────────────────────────────────────────────
 
@@ -164,47 +314,64 @@ class ModelEmbeddedController:
         env.goal = target_pos.copy()
         env.current_scenario = stage
 
-        # Enable Phase-9 observation for inference
+        # tube_center_xy MUST be set before _check_crash for descend/ascend;
+        # transit leaves it None (uses FLOOR_LIMIT instead).
+        if stage in {"descend", "ascend"}:
+            env.tube_center_xy = target_pos[:2].copy()
+
+        # Verify finger state is correct before handing off to RL
+        l_finger = env._utils.get_joint_qpos(env.model, env.data, "robot0:l_gripper_finger_joint").item()
+        expected_finger = env.FINGER_OPEN_JOINT if stage == "descend" else env.FINGER_CLOSED_JOINT
+        if abs(l_finger - expected_finger) > 0.003:
+            return StageResult(
+                success=False, steps=0,
+                crash_reason=f"PRECONDITION_FINGER (actual={l_finger:.4f}, expected={expected_finger:.4f})",
+                final_pos=env._utils.get_site_xpos(env.model, env.data, "robot0:grip").copy(),
+                error_mm=0.0,
+            )
+
+        # Enable Phase-9 observation for inference — restored in finally block
         env._use_phase9_obs = True
 
         crash_reason = None
         success = False
         step_idx = 0
 
-        for step_idx in range(self.MAX_STEPS):
-            grip_pos = env._utils.get_site_xpos(env.model, env.data, "robot0:grip").copy()
-            dist = float(np.linalg.norm(target_pos - grip_pos))
-            grip_vel = env._utils.get_site_xvelp(env.model, env.data, "robot0:grip").copy()
-            speed = float(np.linalg.norm(grip_vel))
+        try:
+            for step_idx in range(self.MAX_STEPS):
+                grip_pos = env._utils.get_site_xpos(env.model, env.data, "robot0:grip").copy()
+                dist = float(np.linalg.norm(target_pos - grip_pos))
+                grip_vel = env._utils.get_site_xvelp(env.model, env.data, "robot0:grip").copy()
+                speed = float(np.linalg.norm(grip_vel))
 
-            # Success: close enough AND arm is stable (not just passing through)
-            if dist < env.SUCCESS_THRESHOLD and speed < env.env_cfg.get("stability_vel_threshold", 0.05):
-                success = True
-                break
+                # Success: close enough AND arm is stable (not just passing through)
+                if dist < env.SUCCESS_THRESHOLD and speed < env.env_cfg.get("stability_vel_threshold", 0.05):
+                    success = True
+                    break
 
-            # Get Phase-9 observation and predict action
-            obs = env._get_obs()
-            action, _ = model.predict(obs, deterministic=True)
-            action = np.array(action, dtype=np.float32)
-            action[3] = 0.0  # Suppress gripper — finger_target_joint controls it
+                # Get Phase-9 observation and predict action
+                obs = env._get_obs()
+                action, _ = model.predict(obs, deterministic=True)
+                action = np.array(action, dtype=np.float32)
+                action[3] = 0.0  # Suppress gripper — finger_target_joint controls it
 
-            # Apply action
-            env._set_action(action)
-            env._mujoco_step(action)
+                # Apply action
+                env._set_action(action)
+                env._mujoco_step(action)
 
-            if self._render_fn is not None:
-                self._render_fn()
-                if self._render_delay > 0:
-                    time.sleep(self._render_delay)
+                if self._render_fn is not None:
+                    self._render_fn()
+                    if self._render_delay > 0:
+                        time.sleep(self._render_delay)
 
-            # Crash check (simplified; full checks happen in step() during training)
-            grip_pos = env._utils.get_site_xpos(env.model, env.data, "robot0:grip").copy()
-            crash_reason = self._check_crash(env, stage, grip_pos)
-            if crash_reason:
-                break
-
-        # Restore original observation mode after inference
-        env._use_phase9_obs = False
+                # Crash check (simplified; full checks happen in step() during training)
+                grip_pos = env._utils.get_site_xpos(env.model, env.data, "robot0:grip").copy()
+                crash_reason = self._check_crash(env, stage, grip_pos)
+                if crash_reason:
+                    break
+        finally:
+            # Always restore — even if an exception is raised mid-inference
+            env._use_phase9_obs = False
 
         grip_pos = env._utils.get_site_xpos(env.model, env.data, "robot0:grip").copy()
         dist = float(np.linalg.norm(target_pos - grip_pos))
@@ -279,18 +446,11 @@ The flag toggle (`env._use_phase9_obs = True` before, `= False` after) ensures:
 
 ## 5. Fingerprint Validation Before Inference
 
-Before handing control to the RL model, the controller should verify the arm is in the
-correct state. Add this to `_run_stage()` before the loop:
+The finger state check is already integrated into `_run_stage()` above (before the inference
+loop). It verifies the arm is in the correct state before handing control to the RL model:
+- **descend**: expects `FINGER_OPEN_JOINT` (arm must be open to descend and grasp)
+- **transit / ascend**: expects `FINGER_CLOSED_JOINT`
 
-```python
-# Verify finger state matches scenario expectation
-l_finger = env._utils.get_joint_qpos(env.model, env.data, "robot0:l_gripper_finger_joint").item()
-expected = env.FINGER_OPEN_JOINT if stage == "descend" else env.FINGER_CLOSED_JOINT
-if abs(l_finger - expected) > 0.003:
-    return StageResult(
-        success=False, steps=0,
-        crash_reason=f"PRECONDITION_FINGER (actual={l_finger:.4f}, expected={expected:.4f})",
-        final_pos=env._utils.get_site_xpos(env.model, env.data, "robot0:grip").copy(),
-        error_mm=0.0
-    )
-```
+If the precondition fails, `_run_stage()` returns an immediate `StageResult` with
+`crash_reason="PRECONDITION_FINGER"` and `success=False`. This surfaces upstream so the
+caller can log and abort rather than running an RL episode in a broken state.

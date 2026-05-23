@@ -123,9 +123,16 @@ class SuccessRateEvalCallback(EvalCallback):
 
     def _on_step(self) -> bool:
         result = super()._on_step()
+        # NOTE: EvalCallback stores success flags in `self.evaluations_results` in modern SB3.
+        # The older `self._is_success_buffer` was renamed. Use `self.last_mean_reward` as a
+        # proxy or check `self.evaluations_successes`. The safest approach is to read from
+        # `self.locals["infos"]` if needed, or use `self.evaluations_successes[-1]` after
+        # EvalCallback has run. We use the parent's internal buffer name here:
+        success_buf = getattr(self, "_is_success_buffer", None) or \
+                      (self.evaluations_successes[-1] if getattr(self, "evaluations_successes", None) else None)
         if self.eval_freq > 0 and self.n_calls % self.eval_freq == 0:
-            if self._is_success_buffer:
-                latest = float(np.mean(self._is_success_buffer))
+            if success_buf is not None:
+                latest = float(np.mean(success_buf))
                 self.last_mean_success = latest
 
                 os.makedirs(self.save_path, exist_ok=True)
@@ -204,8 +211,12 @@ class SACTrainer:
         print(f"[SACTrainer] Save dir:   {save_dir}")
 
         # ── Curriculum Steps (per worker) ─────────────────────────────────
-        target_curriculum_total = self.env_cfg.get("drift_curriculum_steps", 62_500) * self.num_envs
-        drift_curriculum_steps_per_worker = target_curriculum_total // self.num_envs
+        # env.yaml: drift_curriculum_steps is the PER-WORKER step count.
+        # With 8 workers the total drift steps = 8 × drift_curriculum_steps.
+        # The archive used `target_curriculum_total: 500000` and computed
+        # per_worker = total // num_envs. We store per-worker directly to avoid
+        # the circular divide-and-multiply pattern.
+        drift_curriculum_steps_per_worker = self.env_cfg.get("drift_curriculum_steps", 62_500)
 
         # ── Training Environments ─────────────────────────────────────────
         train_env = SubprocVecEnv([
@@ -237,13 +248,19 @@ class SACTrainer:
         callbacks = CallbackList([DetailedLoggingCallback(), cb_eval])
 
         # ── Load Model ────────────────────────────────────────────────────
+        # NOTE: hyperparameter overrides must go through custom_objects, not
+        # top-level kwargs. SAC.load() restores internal state (including the
+        # replay buffer) from the zip, and only reads custom_objects as overrides.
+        # Passing buffer_size as a plain kwarg has no effect on the loaded buffer.
         model = SAC.load(
             model_path,
             env=train_env,
-            learning_rate=float(self.cfg.get("learning_rate", 5e-5)),
-            batch_size=self.cfg.get("batch_size", 512),
-            target_entropy=float(self.cfg.get("target_entropy", -4.0)),
-            buffer_size=self.cfg.get("buffer_size", 300_000),
+            custom_objects={
+                "learning_rate":  float(self.cfg.get("learning_rate", 5e-5)),
+                "batch_size":     self.cfg.get("batch_size", 512),
+                "target_entropy": float(self.cfg.get("target_entropy", -4.0)),
+                "buffer_size":    self.cfg.get("buffer_size", 300_000),
+            },
             verbose=1,
         )
         model.tensorboard_log = f"logs/{self.stage}_{timestamp}/tensorboard/"

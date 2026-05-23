@@ -51,10 +51,13 @@ def step(self, action):
     self._mujoco_step(action_copy)
 
     # ── 3. Observe ────────────────────────────────────────────────────────
+    # step() is ONLY called by SB3 training, which wraps the env with a
+    # Phase-9 training wrapper that sets _use_phase9_obs = True before
+    # any call.  The extraction below relies on the Phase-9 layout.
     obs = self._get_obs()
-    # Extract from Phase-9 obs vector
-    grip_pos = obs["achieved_goal"]  # indices 0-2 of observation = grip_pos
-    grip_vel = obs["observation"][20:23]  # indices 20-22 = grip_velp
+    # Phase-9 layout: achieved_goal = grip_pos; obs[20:23] = grip_velp
+    grip_pos = obs["achieved_goal"]
+    grip_vel = obs["observation"][20:23]
 
     terminated = False
     crash_reason = None

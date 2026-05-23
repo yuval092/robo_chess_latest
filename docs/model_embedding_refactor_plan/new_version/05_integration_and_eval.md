@@ -233,45 +233,61 @@ Use this as a task list when executing the plan:
 
 ### Phase 1: Environment Changes (edit `src/chess_env/task.py`)
 - [ ] Add `_build_phase9_observation()` method
-- [ ] Add `_use_phase9_obs` flag and modify `_get_obs()` to branch on it
+- [ ] Add `_use_phase9_obs = False` flag to `__init__`; modify `_get_obs()` to branch on it
 - [ ] Add `drift_curriculum_steps`, `force_drift_limit`, `fixed_drift` parameters to `__init__`
-   - Remove the `kwargs.pop()` stubs for these
-   - Add `DRIFT_LIMIT_START`, `DRIFT_CURRICULUM_STEPS` constants
+   - Remove the `kwargs.pop()` stubs for these three
+   - Add `force_start_pos = None` (referenced in existing `_reset_sim` but never initialised)
+   - Add `DRIFT_LIMIT_START`, `DRIFT_LIMIT_END`, `DRIFT_CURRICULUM_STEPS` instance constants
    - Add `_get_current_drift_limit()` helper method
-- [ ] Replace `step()` stub with full RL implementation
+- [ ] Replace `step()` stub with full RL implementation (see `02_reward_and_step.md`)
 - [ ] Replace `compute_reward()` stub with multi-component reward
-- [ ] Verify `env.yaml` has all required reward/curriculum keys (add if missing)
+- [ ] Verify `env.yaml` has all required reward/curriculum keys (add if missing):
+   `dist_reward_weight`, `z_reward_weight`, `xy_reward_weight`, `braking_reward_weight`,
+   `braking_dist`, `jitter_penalty_weight`, `floor_penalty`, `floor_proximity_threshold`,
+   `stability_vel_threshold`, `success_bonus`, `crash_penalty`,
+   `drift_limit_start`, `drift_limit_end`, `drift_curriculum_steps`
 
 ### Phase 2: Training Package
 - [ ] Create `training/__init__.py`
-- [ ] Create `training/envs/__init__.py` (factory functions)
-- [ ] Create `training/envs/transit_env.py` (`TransitTrainEnv`)
+- [ ] Create `training/envs/__init__.py` (factory functions `make_train_env`, `make_eval_env`)
+- [ ] Create `training/envs/transit_env.py` (`TransitTrainEnv` — observation-space wrapper only)
 - [ ] Create `training/envs/ascend_env.py` (`AscendTrainEnv`)
 - [ ] Create `training/envs/descend_env.py` (`DescendTrainEnv`)
 - [ ] Create `training/callbacks.py` (`DetailedLoggingCallback`, `SuccessRateEvalCallback`)
+   - Verify SB3 version for correct success-buffer attribute name
 - [ ] Create `training/trainer.py` (`SACTrainer`)
-- [ ] Create `configs/training.yaml`
+   - Confirm `custom_objects` path for hyperparameter overrides in `SAC.load()`
+- [ ] Create `configs/training.yaml` (copy from `archive/rl_system/training.yaml` as base)
+   - Ensure `drift_curriculum_steps` key is per-worker (not total)
 
 ### Phase 3: Training Script
 - [ ] Create `scripts/train_rl.py` (CLI entry point)
-- [ ] Test with `--stage transit --envs 1 --timesteps 5000 --fixed-drift` (smoke test)
+- [ ] Smoke test: `python scripts/train_rl.py --stage transit --envs 1 --timesteps 5000 --fixed-drift`
+   - Confirm env creates without error, 5000 steps complete, model saves
 
 ### Phase 4: Controller
 - [ ] Create `src/chess_env/model_controller.py` (`ModelEmbeddedController`)
-- [ ] Verify `StageResult` is importable from `src.chess_env.controller`
+   - Must expose: `run_transit`, `run_descend`, `run_ascend`, `run_grasp`, `run_place`
+   - Must expose: `run_pick_sequence`, `run_place_sequence`, **`run_full_move`** (called by `movement_executor.py`)
+   - Must expose: `transition`, `execute_grasp`, `execute_place`
+   - `_run_stage()` must set `env.tube_center_xy` for descend/ascend before the loop
+   - `_run_stage()` must restore `env._use_phase9_obs = False` in a try/finally
+- [ ] Verify `StageResult` and `SequenceResult` are importable from `src.chess_env.controller`
+- [ ] Write a smoke integration test: create env, create controller, call `run_full_move` with scripted fallback (no models loaded)
 
 ### Phase 5: Eval Integration
-- [ ] Update `scripts/eval_stages.py` to accept `--use-rl-models`
+- [ ] Update `scripts/eval_stages.py` to accept `--use-rl-models`, `--transit-model`, `--descend-model`, `--ascend-model`
 - [ ] Update `scripts/eval_sequence.py` to accept `--use-rl-models`
-- [ ] Create `scripts/eval_rl_stages.py` (standalone RL eval)
+- [ ] Create `scripts/eval_rl_stages.py` (standalone RL eval using `step()` loop)
 
 ### Phase 6: Train and Evaluate
-- [ ] Train transit model: `python scripts/train_rl.py --stage transit --envs 8`
+- [ ] Train transit: `python scripts/train_rl.py --stage transit --envs 8`
 - [ ] Eval transit: `python scripts/eval_rl_stages.py --stage transit --model checkpoints/.../best_model_transit.zip --n-episodes 50`
-- [ ] Train descend model, eval
-- [ ] Train ascend model, eval
-- [ ] Full integration eval: `python scripts/eval_stages.py --use-rl-models --stages transit,descend,ascend`
+- [ ] Train descend, eval
+- [ ] Train ascend, eval
+- [ ] Integration eval: `python scripts/eval_stages.py --use-rl-models --stages transit,descend,ascend`
 - [ ] Full chain eval: `python scripts/eval_sequence.py --use-rl-models --chain full_move`
+- [ ] Full game eval: `python scripts/eval_chess_game_flow.py --use-rl-models`
 
 ---
 
@@ -279,10 +295,14 @@ Use this as a task list when executing the plan:
 
 | Problem | Likely Cause | Fix |
 |---|---|---|
-| Model predicts crazy actions | Observation mismatch | Check `_use_phase9_obs = True` before inference |
-| `observation` shape is `(7,)` not `(25,)` | Phase-9 mode not enabled | Set `env._use_phase9_obs = True` |
+| Model predicts crazy actions | Observation mismatch | Confirm `_use_phase9_obs = True` before `env._get_obs()` in `_run_stage` |
+| `observation` shape is `(7,)` not `(25,)` | Phase-9 mode not enabled | Set `env._use_phase9_obs = True` before inference |
+| `run_full_move` not found on controller | `ModelEmbeddedController` incomplete | Add `run_full_move` / `run_pick_sequence` / `run_place_sequence` |
+| `tube_center_xy` is None during descend/ascend crash check | `_run_stage` didn't set it | Add `env.tube_center_xy = target_pos[:2].copy()` in `_run_stage` for descend/ascend |
 | SubprocVecEnv hangs on Windows | Multiprocessing without guard | Run via `scripts/train_rl.py` (has `__main__` guard) |
-| Drift limit always `0.010` (no curriculum) | `drift_curriculum_steps=None` not read | Verify `kwargs.pop()` was removed from `__init__` |
-| No crash detected during training | `step()` returns `terminated=False` always | Verify `tube_center_xy` is set in `_reset_sim` |
-| Model loads but always crashes on drift | `eval_drift_limit` too tight | Check `env.yaml` `eval_drift_limit: 0.005` |
-| `SAC.load()` crashes on obs space mismatch | Wrapper obs space not set | Ensure `WRAPPER_MAP[stage](env)` is applied before `SAC.load()` |
+| Drift limit always `0.010` (no curriculum) | `kwargs.pop()` still active | Remove the `kwargs.pop()` stubs in `__init__` |
+| No crash detected during training | `tube_center_xy` not set in `_reset_sim` | Confirmed set for descend/ascend; transit sets it `None` |
+| Model always crashes on drift at eval time | `eval_drift_limit` too tight | Try `eval_drift_limit: 0.010` instead of `0.005` |
+| `SAC.load()` crashes on obs space mismatch | Wrapper obs space not set | Apply `WRAPPER_MAP[stage](env)` before `SAC.load(env=...)` |
+| Hyperparameter overrides ignored in `SAC.load()` | Wrong kwarg path | Use `custom_objects={...}` not top-level kwargs |
+| `_is_success_buffer` AttributeError | SB3 version rename | Use `getattr(self, "_is_success_buffer", None)` with fallback to `evaluations_successes[-1]` |

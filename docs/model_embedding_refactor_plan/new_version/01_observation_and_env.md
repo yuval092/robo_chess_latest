@@ -253,7 +253,7 @@ def __init__(
     hide_object=True,
     show_chess_pieces=False,
     debug=False,
-    drift_curriculum_steps=None,   # NEW: int — total steps for curriculum
+    drift_curriculum_steps=None,   # NEW: int — per-worker steps for curriculum
     force_drift_limit=None,        # NEW: float — override drift limit for eval
     fixed_drift=False,             # NEW: bool — skip curriculum, use DRIFT_LIMIT_END immediately
     **kwargs
@@ -264,12 +264,18 @@ def __init__(
     self.force_drift_limit = force_drift_limit
     self.fixed_drift = fixed_drift
     
+    # force_start_pos: optional XYZ override for the arm start in _reset_sim.
+    # Referenced in the existing _reset_sim() but never initialised — set to None here.
+    self.force_start_pos = None
+
     # Curriculum state (read in step())
     self.DRIFT_LIMIT_START = self.env_cfg.get("drift_limit_start", 0.100)
-    # DRIFT_LIMIT_END already loaded from env.yaml
+    self.DRIFT_LIMIT_END   = self.env_cfg.get("drift_limit_end", 0.010)
+    # drift_curriculum_steps is per-worker (not total). With 8 workers,
+    # total wall-clock drift steps = 8 × DRIFT_CURRICULUM_STEPS.
     self.DRIFT_CURRICULUM_STEPS = (
         drift_curriculum_steps or
-        self.env_cfg.get("drift_curriculum_steps", 62_500)  # 500k total / 8 workers
+        self.env_cfg.get("drift_curriculum_steps", 62_500)
     )
 ```
 

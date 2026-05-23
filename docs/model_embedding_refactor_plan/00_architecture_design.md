@@ -1,5 +1,13 @@
 # Model-Embedding Refactor: Architectural Design
 
+> **⚠ SUPERSEDED** — This document (and `01_stage_1_hybrid_controller.md`,
+> `02_stage_2_training_envs.md`, `03_stage_3_training_scripts.md`) is the **original draft**.
+> The authoritative, corrected plan lives in `new_version/`. Do not implement from these files.
+> Key problems with this draft: (a) training envs override `_reset_sim` incorrectly, causing
+> double-reset; (b) no Phase-9 / Holding Object observation trick — model will see wrong obs;
+> (c) uses VecNormalize which breaks pretrained weight matching; (d) missing `run_full_move`
+> in the controller.
+
 ## Overview
 This document outlines the architectural design for embedding three specialized Reinforcement Learning (RL) models (Transit, Ascend, and Descend) into the RoboChess project. The models will replace the corresponding scripted movement stages of the robotic arm, while retaining the robust, scripted procedures for grasping, releasing, and settling.
 
