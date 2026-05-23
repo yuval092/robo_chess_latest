@@ -12,7 +12,7 @@ All heights are in metres above the table surface (which sits at Z = 0.400 m in 
 
 | Constant | Value | Description |
 |----------|-------|-------------|
-| `SAFE_Z` | 0.510 m | Cruise altitude for horizontal transit. Keeps the arm lower for better reachability while still clearing standing chess pieces. |
+| `SAFE_Z` | 0.530 m | Cruise altitude for horizontal transit. Keeps the arm lower for better reachability while still clearing standing chess pieces. |
 | `HOVER_Z` | 0.460 m | Stop height after descend; start height for grasp. Arm is above the piece but close enough to begin contact approach. |
 | `GRASP_Z` | 0.430 m | Finger contact height. Grip reaches 18.5 mm into the piece (cube top is at 0.415 m; GRASP_Z = 0.430 m). |
 

@@ -22,7 +22,7 @@ This document catalogues known risks in the RoboChess system, their severity, an
 
 **Risk**: The arm's wrist/gripper hits a neighbouring piece while transiting at SAFE_Z.
 
-**Mitigation**: SAFE_Z = 0.510m is 110mm above the table surface (table at 0.400m) and remains above the tallest piece height used by the scene model. Transit happens in a straight line at SAFE_Z only after the arm has ascended fully. The gripper-down `vertical_quat` minimises lateral footprint.
+**Mitigation**: SAFE_Z = 0.530m is 110mm above the table surface (table at 0.400m) and remains above the tallest piece height used by the scene model. Transit happens in a straight line at SAFE_Z only after the arm has ascended fully. The gripper-down `vertical_quat` minimises lateral footprint.
 
 **Residual risk**: In very crowded endgames with pieces at the board edge, the gripper body (not just the fingers) could theoretically clip a piece. No explicit collision avoidance planning is done; the straight-line path assumes SAFE_Z is clear.
 

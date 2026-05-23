@@ -136,7 +136,7 @@ All positions are in the **world frame** of the MuJoCo model. Key reference poin
 - Table surface: Z = 0.400 m
 - Piece cube centre (resting): Z = 0.400 + 0.015 = 0.415 m
 - HOVER_Z: 0.460 m (45 mm above table, 45 mm above piece centre)
-- SAFE_Z: 0.510 m (110 mm above table)
+- SAFE_Z: 0.530 m (110 mm above table)
 - Board centre: X = 0.880 m, Y = 0.2641 m
 - Board extent: X ∈ [0.560, 1.200] m, Y ∈ [-0.076, 0.604] m (table edges)
 - Board cells: X ∈ [0.600, 1.160] m, Y ∈ [-0.016, 0.544] m (first/last square centres)

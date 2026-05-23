@@ -55,7 +55,7 @@ def _run_movement_loop(self, target_pos, *, tolerance, max_steps, abort_fn=None)
 
 ## Stage 1: Transit (`run_transit`)
 
-**Purpose:** Move the arm horizontally from its current position to the target XY at safe altitude (SAFE_Z = 0.510 m).
+**Purpose:** Move the arm horizontally from its current position to the target XY at safe altitude (SAFE_Z = 0.530 m).
 
 **Target:** `[target_xy[0], target_xy[1], SAFE_Z]`
 

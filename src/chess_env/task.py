@@ -400,6 +400,38 @@ class ChessTaskEnv(ChessSimulationEnv):
         self.finger_target_joint = self.FINGER_CLOSED_JOINT
         self.grasp_mode = False
 
+        should_render = (self.render_mode == "human")
+        l_id = mujoco.mj_name2id(self.model, mujoco.mjtObj.mjOBJ_ACTUATOR, "robot0:l_gripper_finger_joint")
+        r_id = mujoco.mj_name2id(self.model, mujoco.mjtObj.mjOBJ_ACTUATOR, "robot0:r_gripper_finger_joint")
+
+        # Snapshot current state so we can interpolate smoothly to target
+        start_qpos = {
+            joint_name: float(self.data.qpos[self.model.joint(joint_name).qposadr[0]])
+            for joint_name in self._home_posture_qpos
+        }
+        start_mocap_pos = self.data.mocap_pos[0][:3].copy()
+        start_mocap_quat = self.data.mocap_quat[0].copy()
+
+        N_STEPS = 10
+        for i in range(N_STEPS):
+            t = (i + 1) / N_STEPS
+            for joint_name, target in self._home_posture_qpos.items():
+                joint = self.model.joint(joint_name)
+                self.data.qpos[joint.qposadr[0]] = start_qpos[joint_name] + t * (target - start_qpos[joint_name])
+                self.data.qvel[joint.dofadr[0]] = 0.0
+
+            mocap_pos = start_mocap_pos + t * (self._home_posture_mocap_pos - start_mocap_pos)
+            mocap_quat = start_mocap_quat + t * (self._home_posture_mocap_quat - start_mocap_quat)
+            mocap_quat /= np.linalg.norm(mocap_quat)
+            self.data.mocap_pos[0][:3] = mocap_pos
+            self.data.mocap_quat[0][:] = mocap_quat
+            self.data.ctrl[l_id] = self.FINGER_CLOSED_JOINT
+            self.data.ctrl[r_id] = self.FINGER_CLOSED_JOINT
+            mujoco.mj_forward(self.model, self.data)
+            if should_render:
+                self.render()
+
+        # Final snap to exact targets and zero residual dynamics
         for joint_name, qpos in self._home_posture_qpos.items():
             joint = self.model.joint(joint_name)
             self.data.qpos[joint.qposadr[0]] = qpos
@@ -408,8 +440,6 @@ class ChessTaskEnv(ChessSimulationEnv):
 
         self.data.mocap_pos[0][:3] = self._home_posture_mocap_pos
         self.data.mocap_quat[0][:] = self._home_posture_mocap_quat
-        l_id = mujoco.mj_name2id(self.model, mujoco.mjtObj.mjOBJ_ACTUATOR, "robot0:l_gripper_finger_joint")
-        r_id = mujoco.mj_name2id(self.model, mujoco.mjtObj.mjOBJ_ACTUATOR, "robot0:r_gripper_finger_joint")
         self.data.ctrl[l_id] = self.FINGER_CLOSED_JOINT
         self.data.ctrl[r_id] = self.FINGER_CLOSED_JOINT
         mujoco.mj_forward(self.model, self.data)
