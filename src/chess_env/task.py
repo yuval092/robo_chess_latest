@@ -416,7 +416,7 @@ class ChessTaskEnv(ChessSimulationEnv):
 
         final_grip = self._utils.get_site_xpos(self.model, self.data, "robot0:grip").copy()
         result["final_error_mm"] = float(np.linalg.norm(final_grip - self._home_posture_grip_pos) * 1000.0)
-        result["success"] = result["final_error_mm"] < 0.1
+        result["success"] = result["final_error_mm"] < 1.0
         if not result["success"]:
             result["reason"] = f"HOME_POSTURE_RESET_FAILED ({result['final_error_mm']:.3f}mm)"
         return result

@@ -39,7 +39,7 @@ class ScriptedController:
     STEP_GAIN             = 1.0     # Full error applied per step (proportional)
     MIN_STEP_SIZE_M       = 0.002   # 2mm floor prevents slow final-approach creep
     MAX_STEP_SIZE_M       = 0.024   # 24mm per physics step max; keeps edge-square reachability stable
-    TRANSIT_MAX_STEPS     = 300     # Sufficient for longest board diagonal at 12mm/step
+    TRANSIT_MAX_STEPS     = 300     # Sufficient for longest board diagonal; ~50 steps to reach equilibrium from any board square
     VERTICAL_MAX_STEPS    = 200     # Sufficient for 50mm (SAFE_Z → HOVER_Z)
     FLOOR_LIMIT           = 0.400   # Abort transit if grip Z drops below this
     GRASP_VERIFY_DRIFT_MM = 30.0    # Max XY drift for "cube held" check post-grasp
