@@ -318,9 +318,15 @@ class ModelEmbeddedController:
                 grip_vel = env._utils.get_site_xvelp(env.model, env.data, "robot0:grip").copy()
                 speed = float(np.linalg.norm(grip_vel))
 
-                if bool(env._is_success(grip_pos, target_pos)) and speed < env.env_cfg.get(
-                    "stability_vel_threshold", 0.05
-                ):
+                if stage == "descend":
+                    d_xy = float(np.linalg.norm(grip_pos[:2] - target_pos[:2]))
+                    d_z = float(abs(grip_pos[2] - target_pos[2]))
+                    z_tol = env.env_cfg.get("descend_success_z_tolerance", 0.015)
+                    is_near = d_xy < env.SUCCESS_THRESHOLD and d_z < z_tol
+                else:
+                    is_near = bool(env._is_success(grip_pos, target_pos))
+
+                if is_near and speed < env.env_cfg.get("stability_vel_threshold", 0.02):
                     success = True
                     break
 
