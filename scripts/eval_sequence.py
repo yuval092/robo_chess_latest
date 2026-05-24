@@ -66,7 +66,12 @@ def run_sequence_episodes(args, src_xy, dst_xy) -> list:
             goal_descend = np.array([src_xy[0], src_xy[1], HOVER_Z])
             ctrl.transition("descend", goal_descend, nom_exit, src_xy)
             d = ctrl.run_descend(src_xy)
-            a = ctrl.run_ascend(src_xy) if d.success else None
+            a = None
+            if d.success:
+                nom_exit_hover = np.array([src_xy[0], src_xy[1], HOVER_Z])
+                goal_ascend = np.array([src_xy[0], src_xy[1], SAFE_Z])
+                ctrl.transition("ascend", goal_ascend, nom_exit_hover, src_xy)
+                a = ctrl.run_ascend(src_xy)
             
             result = SequenceResult(
                 success=d.success and (a is not None and a.success),

@@ -2,12 +2,11 @@
 base_model: "archive/rl_system/models/sac-FetchPickAndPlace-v4.zip"
 
 # Parallelism
-num_envs: 2
+num_envs: 4
 
 # Training length
-# NOTE: 200K was too short for the first transit run (model only ~85% success at 100K).
-# Use 1_000_000 for next specialist training sessions (transit/descend/ascend).
-total_timesteps: 1000000
+# Use 600K for specialist training sessions (transit/descend/ascend).
+total_timesteps: 600000
 
 # SAC fine-tuning hyperparameters
 learning_rate: 0.00005
@@ -36,5 +35,5 @@ deployed_models:
   # the most recently evaluated weights. Switch to best_model_transit.zip if a
   # specific known-good snapshot is needed.
   transit: "checkpoints/transit_20260523_164127/final_transit.zip"
-  descend: null
-  ascend: null
+  descend: "checkpoints/descend_20260523_222907/final_descend.zip"
+  ascend: "checkpoints/ascend_20260523_222849/best_model_ascend.zip"

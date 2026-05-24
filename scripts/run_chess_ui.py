@@ -84,7 +84,15 @@ class QueuedUIBackend:
         return result
 
 
-def build_controller(env, visualize: bool, delay: float, use_rl_models: bool, transit_model: str | None):
+def build_controller(
+    env,
+    visualize: bool,
+    delay: float,
+    use_rl_models: bool,
+    transit_model: str | None,
+    descend_model: str | None,
+    ascend_model: str | None,
+):
     render_fn = env.render if visualize else None
     if not use_rl_models:
         return ScriptedController(env, drift_limit=0.010, render_fn=render_fn, render_delay=delay)
@@ -92,7 +100,11 @@ def build_controller(env, visualize: bool, delay: float, use_rl_models: bool, tr
     train_cfg = load_config("training")
     model_paths = train_cfg.get("deployed_models", {})
     controller = ModelEmbeddedController(env=env, render_fn=render_fn, render_delay=delay)
-    controller.load_available(transit_path=transit_model or model_paths.get("transit"))
+    controller.load_available(
+        transit_path=transit_model or model_paths.get("transit"),
+        descend_path=descend_model or model_paths.get("descend"),
+        ascend_path=ascend_model or model_paths.get("ascend"),
+    )
     return controller
 
 
@@ -102,11 +114,21 @@ def build_orchestrator(
     delay: float,
     use_rl_models: bool = True,
     transit_model: str | None = None,
+    descend_model: str | None = None,
+    ascend_model: str | None = None,
 ):
     registry = PieceRegistry()
     occupancy = PhysicalOccupancy(registry.starting_square_map())
     board_mapper = BoardMapper.from_configs()
-    controller = build_controller(env, visualize, delay, use_rl_models, transit_model)
+    controller = build_controller(
+        env,
+        visualize,
+        delay,
+        use_rl_models,
+        transit_model,
+        descend_model,
+        ascend_model,
+    )
     movement_executor = MovementExecutor(env, controller, board_mapper, occupancy)
     physical_executor = PhysicalPlanExecutor(
         movement_executor,
@@ -131,12 +153,22 @@ def main():
     parser.add_argument(
         "--use-scripted-controller",
         action="store_true",
-        help="Use the scripted controller instead of the configured RL transit model.",
+        help="Use the scripted controller instead of the configured RL movement models.",
     )
     parser.add_argument(
         "--transit-model",
         default=None,
         help="Override the configured transit model path.",
+    )
+    parser.add_argument(
+        "--descend-model",
+        default=None,
+        help="Override the configured descend model path.",
+    )
+    parser.add_argument(
+        "--ascend-model",
+        default=None,
+        help="Override the configured ascend model path.",
     )
     args = parser.parse_args()
 
@@ -156,6 +188,8 @@ def main():
         args.delay,
         use_rl_models=not args.use_scripted_controller,
         transit_model=args.transit_model,
+        descend_model=args.descend_model,
+        ascend_model=args.ascend_model,
     )
     backend = QueuedUIBackend(orchestrator)
     app = create_app(backend)

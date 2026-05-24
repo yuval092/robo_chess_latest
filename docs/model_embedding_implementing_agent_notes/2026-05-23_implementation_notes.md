@@ -154,3 +154,48 @@ Requested after reading
     improving from about -460 to about +160.
 - Monitoring was stopped after confirming all three were still running and
   improving. The training processes were left active.
+
+## Ascend/Descend Model Integration
+
+Performed after ascend and descend training completed.
+
+- Integrated trained specialist models into `configs/training.yaml`:
+  - `transit`: `checkpoints/transit_20260523_164127/final_transit.zip`
+  - `descend`: `checkpoints/descend_20260523_222907/final_descend.zip`
+  - `ascend`: `checkpoints/ascend_20260523_222849/best_model_ascend.zip`
+- Chose `best_model_ascend.zip` instead of `final_ascend.zip` because direct
+  eval showed the final checkpoint regressed:
+  - `final_ascend.zip`: 39/50 success, 0 crashes, 11 timeouts.
+  - `best_model_ascend.zip`: 49/50 success, 1 tube breach, 0 timeouts.
+- Chose `final_descend.zip` because direct eval was clean:
+  - `final_descend.zip`: 50/50 success, 0 crashes, 0 timeouts.
+- Updated `scripts/run_chess_ui.py` so the UI path loads transit, descend, and
+  ascend models by default. Added `--descend-model` and `--ascend-model`
+  overrides alongside the existing `--transit-model`.
+- Fixed `scripts/eval_sequence.py --chain vertical` to run the same
+  descend-to-ascend transition used by production chains before calling
+  `run_ascend()`.
+
+Verification after integration:
+
+- UI factory smoke confirmed `ModelEmbeddedController` loads all three model
+  slots.
+- `python scripts/eval_stages.py --use-rl-models --stages transit,descend,ascend --n-episodes 30`
+  - Transit: 93.3% success, 0% crash, 6.7% timeout.
+  - Descend: 100% success, 0% crash, 0% timeout.
+  - Ascend: 93.3% success, 6.7% crash, 0% timeout; crashes were strict 8mm
+    tube breaches at 8.3mm and 8.4mm.
+- `python scripts/eval_sequence.py --use-rl-models --chain vertical --n-episodes 20`
+  passed 20/20.
+- `python scripts/eval_sequence.py --use-rl-models --chain pick --n-episodes 10`
+  passed 10/10.
+- `python scripts/eval_sequence.py --use-rl-models --chain full_move --n-episodes 10`
+  passed 10/10.
+- `python scripts/eval_chess_game_flow.py --use-rl-models --moves e2e4 --verify-agreement --nonmoving-tolerance-mm 2.0`
+  passed.
+- `python scripts/eval_chess_game_flow.py --use-rl-models --moves e2e4,e7e5,g1f3 --verify-agreement --nonmoving-tolerance-mm 2.0`
+  passed.
+- `python scripts/eval_chess_game_flow.py --use-rl-models --verify-agreement --nonmoving-tolerance-mm 2.0`
+  passed the default four-move flow: `e2e4,e7e5,g1f3,b8c6`.
+- `python -m pytest tests/ui tests/chess_game tests/physical tests/chess_env -q`
+  passed: 78 passed.
