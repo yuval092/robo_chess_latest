@@ -31,9 +31,7 @@ moving_avg_window: 100
 
 # Optional model path registry for eval/integration scripts.
 deployed_models:
-  # latest_model is updated after every eval checkpoint — use it so you always get
-  # the most recently evaluated weights. Switch to best_model_transit.zip if a
-  # specific known-good snapshot is needed.
-  transit: "checkpoints/transit_20260523_164127/final_transit.zip"
-  descend: "checkpoints/descend_20260523_222907/final_descend.zip"
+  # Selected by repeated direct eval on 2026-05-24.
+  transit: "checkpoints/transit_20260524_084201/latest_model_transit.zip"
+  descend: "checkpoints/descend_20260523_222907/latest_model_descend.zip"
   ascend: "checkpoints/ascend_20260523_222849/best_model_ascend.zip"
