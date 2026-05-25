@@ -75,24 +75,34 @@ robo-chess-visualize = "src.cli.visualize:main"
 
 **Why `scripts*` is NOT included**: `scripts/` contains both production tools (UI, generate) and training-dependent tools (`train_rl.py`, `diagnostics/eval_rl_stages_direct.py`). Packaging the whole directory would include modules that import `training/`, which is intentionally excluded from the distribution — creating broken entry points in a wheel install.
 
-**Solution — `src/cli/`**: Move the production CLI implementations into packaged modules under `src/cli/`. Do **not** make `src/cli` import from `scripts/`, because `scripts/` is excluded from the installed distribution.
+**Why `stable-baselines3` and `huggingface_hub` are in main `dependencies`**: RL inference is the default production path (Guiding Principle #7). If a future scripted-only install profile is needed, move those libs to a separate optional extra and guard RL imports explicitly — but pick one strategy and do not duplicate them in both `dependencies` and `optional-dependencies`.
 
-Recommended ownership after this stage:
+**Solution — `src/cli/`**: Move the production CLI implementations into packaged modules under `src/cli/`. The key architectural rule is:
+
+> `src/cli/` modules must contain the **real implementation logic**. `scripts/` wrappers are thin one-liners that call `src.cli.X.main()`.
+
+This is necessary because `scripts/` is excluded from the installed distribution. If `src/cli/` merely forwarded to `scripts/`, installed entry points (`robo-chess-ui`, etc.) would fail with `ModuleNotFoundError` outside the repo.
+
+**File ownership after this stage:**
 
 ```text
-src/cli/run_chess_ui.py      # real packaged UI entry point implementation
-src/cli/generate_scene.py    # real packaged asset-generation CLI implementation
-src/cli/visualize.py         # real packaged visualization CLI implementation
-scripts/run_chess_ui.py      # repo-local dev wrapper importing src.cli.run_chess_ui
-scripts/generate_scene.py    # repo-local dev wrapper importing src.cli.generate_scene
-scripts/visualize.py         # repo-local dev wrapper importing src.cli.visualize
+src/cli/run_chess_ui.py      # real UI entry point implementation (moved from scripts/)
+src/cli/generate_scene.py    # real asset-generation CLI implementation (moved from scripts/)
+src/cli/visualize.py         # real visualization CLI implementation (moved from scripts/)
+scripts/run_chess_ui.py      # thin dev wrapper: from src.cli.run_chess_ui import main; main()
+scripts/generate_scene.py    # thin dev wrapper: from src.cli.generate_scene import main; main()
+scripts/visualize.py         # thin dev wrapper: from src.cli.visualize import main; main()
 ```
 
-The dev wrappers in `scripts/` should contain only a short import and `main()` call, so direct execution from the repo root still works while installed entry points depend only on packaged `src.*` modules.
+The dev wrappers in `scripts/` should contain only:
+```python
+"""Dev-only wrapper — calls src.cli.<module>.main()."""
+from src.cli.<module> import main
+if __name__ == "__main__":
+    main()
+```
 
-`scripts/` remains a development-only directory — runnable from the repo root via `python scripts/X.py` but not distributed as installable modules.
-
-`stable-baselines3` and `huggingface_hub` are listed in main `dependencies` because RL inference is the default production path. If a future scripted-only install profile is needed, split that into a separate optional extra and guard RL imports explicitly.
+Direct execution from the repo root still works (`python scripts/run_chess_ui.py`) while installed entry points depend only on packaged `src.*` modules. All other `eval_*` scripts, `train_rl.py`, and diagnostic tools remain in `scripts/` only (they are not production entry points).
 
 **After creating this file, install the package once:**
 ```bash
@@ -105,7 +115,7 @@ This makes `from src.chess_game.X import Y` work in any terminal, regardless of 
 
 ## 2.4 Remove All `sys.path` Hacks from Scripts
 
-**Affected files** (15 scripts):
+**Affected files** (15+ scripts):
 - `scripts/analyze_debug_log.py`
 - `scripts/debug_one_move.py`
 - `scripts/eval_chess_game_flow.py`
@@ -116,11 +126,11 @@ This makes `from src.chess_game.X import Y` work in any terminal, regardless of 
 - `scripts/eval_special_moves.py`
 - `scripts/eval_stages.py`
 - `scripts/eval_stress.py`
+- `scripts/eval_targeted.py`
 - `scripts/run_chess_ui.py`
 - `scripts/verify_physics.py`
 - `scripts/visualize.py`
-- `scripts/generate_scene.py` (new file — must not have the hack)
-- `scripts/debug_one_move.py`
+- `scripts/generate_scene.py` (new file from Stage 1 — must not have the hack)
 
 **Action**: In each file, remove the following lines entirely:
 
@@ -237,17 +247,26 @@ python -c "from src.chess_env.controller import ScriptedController; print('OK')"
 python -c "from src.utils.io import load_config; print('OK')"
 python -c "from src.chess_env.model_controller import ModelEmbeddedController; print('OK')"
 
-# 4. training/ is NOT in the installed package distribution (dev-only)
+# 4. src/cli/ modules contain real implementations (not just imports from scripts/)
+python -c "from src.cli.run_chess_ui import main; print('OK')"
+python -c "from src.cli.generate_scene import main; print('OK')"
+python -c "from src.cli.visualize import main; print('OK')"
+
+# 5. training/ is NOT in the installed package distribution (dev-only)
 python -c "import pkg_resources; d = pkg_resources.get_distribution('robo-chess'); print([p for p in d.files if 'training' in str(p)])"
 # Must return [] (no training/ files in the installed distribution)
 
-# 5. Scripts runnable as modules
+# 6. Scripts runnable as modules
 python -m scripts.eval_stages --help
 python -m scripts.generate_scene --help
 
-# 6. Full test suite
+# 7. Full test suite
 python -m pytest tests/ -v
 
-# 7. Scripts still run directly
+# 8. Scripts still run directly
 python scripts/eval_stages.py --help
+
+# 9. stable-baselines3 not duplicated in both deps and optional-dependencies
+grep -c "stable-baselines3" pyproject.toml
+# Must return 1 (appears exactly once)
 ```

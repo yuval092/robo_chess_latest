@@ -11,7 +11,7 @@ The following structural changes must be documented:
 | Change | Introduced in | Affects documents |
 |---|---|---|
 | `archive/` deleted | Stage 1 | `00_overview.md` |
-| 5 unused XML assets deleted | Stage 1 | `04_scene_generation.md` |
+| 3 unused XML demo scenes deleted | Stage 1 | `04_scene_generation.md` |
 | `visualize_chess_setup.py` merged into `visualize.py` | Stage 1 | `10_evaluation.md` |
 | 4 generate_*.py merged into `generate_scene.py` | Stage 1 | `10_evaluation.md` |
 | `models.py` merged into `chess_service.py` | Stage 1 | `05_chess_logic.md` |
@@ -24,7 +24,6 @@ The following structural changes must be documented:
 | Docstrings added everywhere | Stage 4 | All files (no doc change needed) |
 | PEP8 pass complete | Stage 5 | No structural change |
 | `task_execution.py` extracted from `task.py` | Stage 6 | `03_mujoco_environment.md`, `01_arm_control.md` |
-| `NoOpPhysicalExecutor` added to `plan_executor.py` | Stage 6 | `06_physical_layer.md` |
 | `GameOrchestrator.create_headless()` added | Stage 6 | `05_chess_logic.md` |
 | `QueuedUIBackend` moved to `src/ui/queued_backend.py` | Stage 6 | `07_ui.md` |
 | `unwrap_env()` utility added | Stage 6 | `03_mujoco_environment.md` |
@@ -32,20 +31,37 @@ The following structural changes must be documented:
 | `eval_special_moves.py` refactored with argparse | Stage 7 | `10_evaluation.md` |
 | `eval_game_logic.py` added (new script) | Stage 7 | `10_evaluation.md` |
 | `test_grasp_physics.py` renamed to `eval_grasp_physics.py` | Stage 7 | `10_evaluation.md` |
-| `regenerate_environment()` called on `import src.chess_env` | Stage 8 | `04_scene_generation.md` |
+| `ensure_environment_generated()` called in `ChessSimulationEnv.__init__` | Stage 8 | `04_scene_generation.md` |
 | All STL geometry constants named | Stage 8 | `04_scene_generation.md` |
+| `NoOpPhysicalExecutor` added to `src/physical/noop_executor.py` | Stage 6 | `06_physical_layer.md` |
+| `ModelRegistry` extracted to `src/chess_env/model_registry.py` | Stage 6 | `03_mujoco_environment.md` |
+| `transfer_obs.py` created; `model_controller.py` training import removed | Stage 10 | `03_mujoco_environment.md` |
+| `configs/deployed_models.yaml` split from `training.yaml` | Stage 3 | `08_configuration.md` |
+| `scripts/diagnostics/` directory added | Stage 1 | `10_evaluation.md` |
+| `eval_rl_stages.py` moved to `scripts/diagnostics/eval_rl_stages_direct.py` | Stage 1 | `10_evaluation.md` |
 
 ---
 
 ## 9.2 Document-by-Document Update Instructions
+
+### `scripts/README.md`
+
+Update or create `scripts/README.md` to reflect the current state after the refactor:
+- Remove references to `visualize_chess_setup.py`, `test_grasp_physics.py`, and the four `generate_*.py` files.
+- Add `generate_scene.py` with its sub-commands (`board`, `pieces`, `zones`, `stls`, `all`).
+- Add `eval_all_cells_rl.py` with its modes (`pawn`, `key`, `full`).
+- Add `validate_deployed_models.py`.
+- Document the `scripts/diagnostics/` subdirectory and its purpose.
+- Update `eval_stages.py` documentation: RL models are the default, `--use-scripted-only` is the opt-in.
 
 ### `docs/current_status/00_overview.md`
 
 **Update the file map section**:
 - Remove `archive/` from the directory tree.
 - Add `pyproject.toml` to the project root listing.
-- Update `src/utils/` section: replace `config.py` + `logger.py` with `io.py`.
-- Update `scripts/` section to reflect merged and renamed scripts.
+- Update `src/utils/` section: add `io.py` as the canonical import (shims still present).
+- Update `scripts/` section to reflect merged, renamed, and new scripts.
+- Add `scripts/diagnostics/` subdirectory.
 
 **Update the "Architecture Diagram"**:
 - No structural change to the architecture itself.
@@ -63,7 +79,7 @@ This allows all `src.*` imports to work from any directory without path hacks.
 
 ## Regenerating Scene Assets
 
-Assets are auto-generated on every `import src.chess_env`. To regenerate manually:
+Assets are auto-generated when `ChessSimulationEnv` is constructed (not on import). To regenerate manually:
 ```bash
 python scripts/generate_scene.py all
 ```
@@ -74,7 +90,7 @@ python scripts/generate_scene.py all
 ### `docs/current_status/04_scene_generation.md`
 
 **Update Section 1 (Overview)**:
-- Note that `regenerate_environment()` is called automatically on `import src.chess_env` (via `__init__.py`).
+- Note that scene is regenerated lazily by `ensure_environment_generated()` in `ChessSimulationEnv.__init__` — `import src.chess_env` writes no files.
 - Remove the manual run instructions as the primary path; keep as "to regenerate manually".
 
 **Update Section 2 (STL Generation)**:
@@ -82,7 +98,8 @@ python scripts/generate_scene.py all
 - Remove any mention of raw float literals.
 
 **Update the XML asset list**:
-- Remove `push.xml`, `reach.xml`, `slide.xml`, `robot.xml`, `shared.xml` from the file listing. They no longer exist.
+- Remove `push.xml`, `reach.xml`, and `slide.xml` from the file listing. They no longer exist.
+- Keep `robot.xml` and `shared.xml` documented as required includes used by `pick_and_place.xml`.
 
 ---
 
@@ -117,11 +134,11 @@ plans without running the simulation. Used by eval scripts and tests.
 ```markdown
 ## 8. NoOpPhysicalExecutor
 
-`NoOpPhysicalExecutor` (in `src/physical/plan_executor.py`) is a testing stub that
+`NoOpPhysicalExecutor` (in `src/physical/noop_executor.py`) is a testing stub that
 accepts all plans and reports success without calling any simulation code.
 
 ```python
-from src.physical.plan_executor import NoOpPhysicalExecutor
+from src.physical.noop_executor import NoOpPhysicalExecutor
 executor = NoOpPhysicalExecutor()
 result = executor.execute(plan)   # always succeeds
 ```
@@ -168,10 +185,10 @@ Add the new keys introduced in Stage 3:
 **Update Section 2 (chess.yaml)**:
 Add the new keys:
 ```markdown
-| `board.required_cell_size_m` | `0.08` | Validation: cell size must equal this |
-| `board.required_board_width_m` | `0.64` | Validation: board width must equal this |
-| `board.required_table_margin_m` | `0.03` | Validation: minimum board-to-edge margin |
-| `board.geometry_tolerance_m` | `1e-9` | Floating-point tolerance for geometry checks |
+| `board.validation.required_cell_size_m` | `0.08` | Validation: cell size must equal this |
+| `board.validation.required_board_width_m` | `0.64` | Validation: board width must equal this |
+| `board.validation.required_table_margin_m` | `0.03` | Validation: minimum board-to-edge margin |
+| `board.validation.geometry_tolerance_m` | `1e-9` | Floating-point tolerance for geometry checks |
 | `reachability_expected.*` | see below | Expected board geometry for reachability eval |
 ```
 

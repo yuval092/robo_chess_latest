@@ -20,8 +20,9 @@ After Stage 1 (file cleanup), the scripts folder contains:
 | `eval_draw_conditions.py` | ✗ No argparse | No main guard; path hack |
 | `eval_sequence.py` | ✓ Has argparse + main | Path hack |
 | `eval_special_moves.py` | ✗ No argparse | No main guard; path hack |
-| `eval_stages.py` | ✓ Has argparse + main | Path hack; currently scripted-only default — fix in 7.9 |
+| `eval_stages.py` | ✓ Has argparse + main | Path hack; currently scripted-only default — fix in 7.10 |
 | `eval_stress.py` | ✓ Has argparse + main | Path hack |
+| `eval_targeted.py` | ✓ Has argparse + main | sys.path hack; loads from `training.yaml["deployed_models"]` — fix to use `deployed_models.yaml` after Stage 3.13 |
 | `generate_scene.py` | NEW — created in Stage 1 | Clean |
 | `run_chess_ui.py` | ✓ Has argparse + main | Path hack; QueuedUIBackend moved in Stage 6 |
 | `train_rl.py` | ✓ Has argparse + main | Training-only; no issues |
@@ -386,7 +387,7 @@ Apply the same change to `eval_chess_piece_move.py` and `eval_all_square_moves.p
 `eval_all_cells_rl.py` (created 2026-05-24) already defaults to RL models. Verify it has a module docstring and documents its three modes:
 
 - `pawn` — 48 pawn-move source/destination pairs (48 × 3 reps = 144 episodes)
-- `key` — corners, edges, center squares (216 pairs × 3 reps = 648 episodes)  
+- `key` — corners, edges, center squares (216 pairs × 3 reps = 648 episodes)
 - `full` — every possible source/destination pair on the board (5944 episodes)
 
 Add `--help` output verification to the checklist.
@@ -410,13 +411,50 @@ Different script categories have different quality requirements:
 
 | Category | Examples | argparse | main() guard | Exit code 1 | CI-blocking |
 |---|---|---|---|---|---|
-| `eval_*` | `eval_stages.py`, `eval_all_cells_rl.py` | Required | Required | Required | Yes |
+| `eval_*` | `eval_stages.py`, `eval_all_cells_rl.py`, `eval_targeted.py` | Required | Required | Required | Yes |
 | `diagnostics/*` | `diagnose_transit_full.py`, `eval_rl_stages_direct.py` | Preferred | Required | Preferred | No |
 | `generate_*` | `generate_scene.py` | Required | Required | Required | Yes |
 | `run_*` | `run_chess_ui.py` | Required | Required | n/a | No |
 | `train_*.py` | `train_rl.py` | Required | Required | n/a | No |
 
 The Stage 7 validation checklist applies `--help` checks only to `eval_*` scripts; diagnostic scripts under `scripts/diagnostics/` are excluded from CI-blocking checks.
+
+---
+
+## 7.14 Update `eval_targeted.py`
+
+`eval_targeted.py` is a targeted square evaluation script that runs RL models against specific problem squares. After Stage 2 removes the sys.path hack, and after Stage 3.13 creates `deployed_models.yaml`, this script needs one more update.
+
+**Action**:
+
+1. **sys.path hack**: Already handled in Stage 2. Verify it is gone:
+   ```bash
+   grep "sys.path" scripts/eval_targeted.py
+   # Must return nothing
+   ```
+
+2. **Config loading update**: After Stage 3.13 splits `training.yaml` into `training.yaml` + `deployed_models.yaml`, update `eval_targeted.py` to load deployed models from the correct config:
+   ```python
+   # Before (loads from training.yaml which no longer has deployed_models section)
+   cfg = load_config("training")
+   models = cfg["deployed_models"]
+
+   # After
+   models = load_config("deployed_models")
+   ```
+
+3. **Module docstring**: If missing, add:
+   ```python
+   """Targeted RL evaluation for specific problem squares identified in earlier diagnostics."""
+   ```
+
+4. **Exit code**: Verify `main()` calls `raise SystemExit(1)` when any evaluation fails. If not, add it.
+
+5. **Smoke test**:
+   ```bash
+   python scripts/eval_targeted.py --help
+   # Must show argparse help without error
+   ```
 
 ---
 
@@ -475,4 +513,11 @@ python -m pytest tests/ -v
 # 12. All eval_* scripts (not diagnostics) show --help without error
 for f in scripts/eval_*.py; do python "$f" --help > /dev/null && echo "$f: OK"; done
 # Diagnostics are excluded from this CI-blocking check
+
+# 13. eval_targeted.py loads from deployed_models.yaml (not training.yaml)
+grep "deployed_models\|training" scripts/eval_targeted.py | head -10
+# Should reference load_config("deployed_models"), not load_config("training")
+
+# 14. eval_targeted.py --help works
+python scripts/eval_targeted.py --help
 ```

@@ -96,7 +96,19 @@ class GameOrchestrator:
     def let_computer_play_current_turn(self) -> MoveExecutionResult:
         if self.chess_service.board.is_game_over(claim_draw=True):
             return self._rejected(self._game_over_message())
-        return self._submit_move(self.chess_service.choose_engine_move)
+        result = self._submit_move(self.chess_service.choose_engine_move)
+        # If the opponent's turn is also computer-controlled, chain immediately.
+        # This handles pressing "Let computer play" on the human's own turn — the
+        # computer plays that turn, then the opponent's reply follows automatically.
+        if (
+            result.accepted
+            and result.physical_success
+            and self.auto_computer_reply
+            and not self.chess_service.board.is_game_over()
+            and self._turn_color_name() != self.human_color
+        ):
+            return self.let_computer_play_current_turn()
+        return result
 
     def run_computer_turn_if_needed(self) -> MoveExecutionResult | None:
         if self._turn_color_name() == self.human_color or self.chess_service.board.is_game_over():

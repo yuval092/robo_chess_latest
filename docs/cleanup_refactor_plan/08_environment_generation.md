@@ -4,32 +4,46 @@
 
 ---
 
-## 8.1 Auto-Generation at Startup
+## 8.1 Auto-Generation at Environment Construction
 
-**Current situation**: `run_chess_ui.py` calls `regenerate_environment()` before creating the gymnasium environment. However, if a developer runs eval scripts or tests directly, they might use a stale XML. The scene XML must always be up-to-date before any simulation runs.
+**Why NOT on import**: Calling `regenerate_environment()` inside `__init__.py` fires on every `import src.chess_env`, which causes:
+- Static analyzers, linters, and package metadata tools to write files on import.
+- Tests that only exercise game logic (no MuJoCo) to trigger XML writes unnecessarily.
+- Relative-path writes that break when the import happens outside the repo root.
+- Read-only deployments or installed wheels that cannot write package asset files.
 
-**Action**: Add a `regenerate_environment()` call at the top of `src/chess_env/__init__.py`, so it fires automatically whenever the package is imported:
+**Correct approach**: Call generation lazily, from `ChessSimulationEnv.__init__`, just before MuJoCo loads the XML. This fires exactly when a MuJoCo env is actually constructed — never during pure-logic tests or imports.
+
+**Action**: Add `ensure_environment_generated()` to `environment_generation.py`:
 
 ```python
-"""Gymnasium environment registration for ChessFetchTask-v0."""
-from gymnasium.envs.registration import register
+_PROJECT_ROOT = Path(__file__).resolve().parents[2]   # .../src/chess_env → .../robo_chess_latest
+DEFAULT_SCENE_PATH = _PROJECT_ROOT / "chess_env/assets/pick_and_place.xml"
+DEFAULT_STL_DIR    = _PROJECT_ROOT / "chess_env/stls/chess"
 
-from src.chess_env.environment_generation import regenerate_environment
 
-# Regenerate scene XML and STL meshes every time the environment package is imported.
-# This is fast (<100ms) and ensures the scene always matches the current configuration.
-regenerate_environment()
+def ensure_environment_generated(scene_path: Path = DEFAULT_SCENE_PATH) -> None:
+    """Regenerate board/pieces/zones XML if the scene XML is stale or missing.
 
-register(
-    id="ChessFetchTask-v0",
-    entry_point="src.chess_env.task:ChessTaskEnv",
-    max_episode_steps=200,
-)
+    Uses absolute paths so this is safe to call from any working directory.
+    No-op when content already matches the current config.
+    """
+    _update_scene_if_stale(scene_path)
 ```
 
-**Why**: This guarantees that no script or test can accidentally run against a stale scene. The regeneration is idempotent and cheap.
+Then in `src/chess_env/simulation.py`, `ChessSimulationEnv.__init__`:
+```python
+from src.chess_env.environment_generation import ensure_environment_generated
 
-**Validation**: Modify `chess.yaml` temporarily (e.g., change a graveyard origin), `import src.chess_env`, verify XML is updated, revert change.
+class ChessSimulationEnv(...):
+    def __init__(self, ...):
+        ensure_environment_generated()   # idempotent; writes only if stale
+        super().__init__(...)            # MuJoCo loads XML after this
+```
+
+`src/chess_env/__init__.py` must not call `regenerate_environment()`. Remove any such call if present.
+
+**Validation**: Modify `chess.yaml` temporarily (e.g., change a graveyard origin), construct `gym.make("ChessFetchTask-v0")`, verify XML is updated, revert change. Verify that `import src.chess_env` alone (without constructing an env) does NOT write any files.
 
 ---
 
@@ -50,22 +64,22 @@ This module generates all runtime assets for the MuJoCo chess simulation:
 
 2.  **Board XML** (``build_board_fragment`` / ``update_board_scene``): A
     ``<worldbody>`` fragment containing the flat visual geom for the 8×8 board,
-    injected between ``<!-- BOARD_START -->`` and ``<!-- BOARD_END -->`` markers
-    in ``pick_and_place.xml``.
+    injected between ``<!-- generated board squares start -->`` and
+    ``<!-- generated board squares end -->`` markers in ``pick_and_place.xml``.
 
 3.  **Pieces XML** (``build_pieces_fragment`` / ``update_pieces_scene``): A
     ``<worldbody>`` fragment containing one free-jointed body per chess piece
-    (active + reserve), injected between ``<!-- PIECES_START -->`` and
-    ``<!-- PIECES_END -->`` markers.
+    (active + reserve), injected between ``<!-- generated chess pieces start -->``
+    and ``<!-- generated chess pieces end -->`` markers.
 
 4.  **Zones XML** (``build_zones_fragment`` / ``update_zones_scene``): A
     ``<worldbody>`` fragment containing floor geoms for the graveyard and
-    promotion-reserve zones, injected between ``<!-- ZONES_START -->`` and
-    ``<!-- ZONES_END -->`` markers.
+    promotion-reserve zones, injected between ``<!-- generated zone markers start -->``
+    and ``<!-- generated zone markers end -->`` markers.
 
 All generation is driven by ``configs/chess.yaml`` and ``configs/env.yaml``
 so that changing a config value automatically propagates to the scene on the
-next import of ``src.chess_env``.
+next env construction.
 """
 ```
 
@@ -81,8 +95,8 @@ next import of ``src.chess_env``.
 # ---------------------------------------------------------------------------
 # STL geometry constants — all dimensions in metres
 # These define the procedural mesh geometry for each piece type.
-# Changing these values requires re-running regenerate_stls() (done automatically
-# on import via regenerate_environment()).
+# Changing these values requires re-running STL generation explicitly:
+#   python scripts/generate_scene.py stls
 # ---------------------------------------------------------------------------
 
 # Shared
@@ -254,40 +268,62 @@ Add a comment near the top of `chess_env/assets/pick_and_place.xml` (after the X
   RoboChess scene file for Fetch Pick-and-Place environment.
 
   The following marker pairs are automatically managed by
-  src/chess_env/environment_generation.py — do NOT edit content
+  src/chess_env/environment_generation.py. Do NOT edit generated content
   between them manually, as it will be overwritten on the next run:
 
-    <!-- BOARD_START --> ... <!-- BOARD_END -->
+    generated board squares start/end
       Chess board visual geom (8x8 grid of dark/light squares)
 
-    <!-- PIECES_START --> ... <!-- PIECES_END -->
+    generated chess pieces start/end
       All chess piece bodies (32 active + 64 reserve), each with a freejoint,
       collision box, and visual mesh.
 
-    <!-- ZONES_START --> ... <!-- ZONES_END -->
+    generated zone markers start/end
       Floor geoms for graveyard and promotion-reserve zones.
 
   To update manually: python scripts/generate_scene.py all
 -->
 ```
 
+Do not place literal `<!-- ... -->` marker comments inside this explanatory XML comment; XML comments cannot contain nested comment delimiters. The actual marker comments remain only at the generated section boundaries.
+
 ---
 
-## 8.6 Verify `regenerate_environment()` is Idempotent
+## 8.6 Verify `ensure_environment_generated()` is Idempotent
 
-Running `regenerate_environment()` twice must produce identical XML output. Add an assertion in the test suite:
+Calling `ensure_environment_generated()` twice must produce identical XML output. Add an assertion in the test suite:
 
 ```python
 # tests/chess_env/test_environment_generation.py
-def test_regenerate_is_idempotent(tmp_path):
-    """Running regenerate_environment twice produces identical XML."""
-    # Already tested implicitly; add explicit check:
-    from src.chess_env.environment_generation import regenerate_environment, DEFAULT_SCENE_PATH
-    regenerate_environment()
+def test_ensure_generated_is_idempotent():
+    """Calling ensure_environment_generated twice produces identical XML."""
+    from src.chess_env.environment_generation import ensure_environment_generated, DEFAULT_SCENE_PATH
+    ensure_environment_generated()
     xml_first = DEFAULT_SCENE_PATH.read_text()
-    regenerate_environment()
+    ensure_environment_generated()
     xml_second = DEFAULT_SCENE_PATH.read_text()
     assert xml_first == xml_second
+
+
+def test_import_src_chess_env_does_not_write_files():
+    """Importing src.chess_env must not write any files (no import-time side effects)."""
+    import sys
+    from pathlib import Path
+    tracked = [
+        Path("chess_env/assets/pick_and_place.xml"),
+        Path("chess_env/stls/chess"),
+    ]
+    # Snapshot mtimes before
+    before = {p: p.stat().st_mtime_ns for p in tracked if p.exists()}
+    # Flush cached module
+    for key in list(sys.modules):
+        if "chess_env" in key:
+            del sys.modules[key]
+    import src.chess_env  # noqa: F401
+    # Check nothing changed
+    after = {p: p.stat().st_mtime_ns for p in tracked if p.exists()}
+    for p in before:
+        assert before[p] == after.get(p), f"Import wrote {p}"
 ```
 
 ---
@@ -295,21 +331,33 @@ def test_regenerate_is_idempotent(tmp_path):
 ## Stage 8 — Full Validation Checklist
 
 ```bash
-# 1. Auto-generation fires on import
+# 1. Import does NOT write files (no import-time generation)
 python -c "
+import sys
+for k in list(sys.modules):
+    if 'chess_env' in k:
+        del sys.modules[k]
 import src.chess_env
-from pathlib import Path
-xml = Path('chess_env/assets/pick_and_place.xml').read_text()
-assert '<!-- BOARD_START -->' in xml
-assert '<!-- PIECES_START -->' in xml
-assert '<!-- ZONES_START -->' in xml
-print('Auto-generation markers present')
+print('Import OK — no files written (verify via mtime test below)')
 "
 
-# 2. generate_scene.py all works
+# 2. Auto-generation fires on env construction (not import)
+python -c "
+import gymnasium as gym, src.chess_env
+from pathlib import Path
+env = gym.make('ChessFetchTask-v0')
+xml = Path('chess_env/assets/pick_and_place.xml').read_text()
+assert '<!-- generated board squares start -->' in xml
+assert '<!-- generated chess pieces start -->' in xml
+assert '<!-- generated zone markers start -->' in xml
+print('Generation markers present after env construction')
+env.close()
+"
+
+# 3. generate_scene.py all works
 python scripts/generate_scene.py all
 
-# 3. No raw float literals in geometry functions
+# 4. No raw float literals in geometry functions
 python -c "
 import ast, pathlib
 source = pathlib.Path('src/chess_env/environment_generation.py').read_text()
@@ -329,9 +377,9 @@ else:
     print('No raw float literals in triangle functions')
 "
 
-# 4. Idempotency test
+# 5. Idempotency test and import-side-effect test
 python -m pytest tests/chess_env/test_environment_generation.py -v
 
-# 5. Full test suite
+# 6. Full test suite
 python -m pytest tests/ -v
 ```

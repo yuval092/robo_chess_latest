@@ -16,17 +16,32 @@
 - Action shape `4`, gripper DOF `2` — hardware/model schema; named constants
 - Unit conversion `1000.0` (metres to millimetres) — physical constant; `M_TO_MM = 1000.0` in module
 
-**Fallback value (banned in config access)**:  A `dict.get(key, value)` call where `value` is not `None` and not an empty collection. Must be replaced with `cfg["key"]` so misconfigured runs fail loudly.
+**Fallback value (banned in config access)**: A `dict.get(key, value)` call where `value` is not `None` and not an empty collection. Must be replaced with `cfg["key"]` so misconfigured runs fail loudly.
 
 **Exception**: `dict.get(key)` with no fallback (returns `None`) is acceptable where `None` is a meaningful absence. So are `dict.get(key, {})` and `dict.get(key, [])` where an empty container is a valid default. Scenario-specific multi-level lookups (`cfg.get("transit_braking_dist", cfg.get("braking_dist"))`) are permitted when documented.
 
 ---
 
-## 3.2 New Config Keys to Add
+## 3.2 Config Key Status: What Already Exists vs What Needs Adding
 
-The following constants are currently magic numbers in Python code. They must be added to the appropriate YAML file.
+**Important**: Many keys that earlier plan iterations thought were missing are ALREADY present in `configs/env.yaml`. The work for those keys is simpler: just replace `.get("key", fallback)` with `cfg["key"]` (the fallback is dead code).
 
-### Add to `configs/env.yaml`
+### Keys already in `configs/env.yaml` — just replace `.get()` with `[]`
+
+The following keys exist and their corresponding `.get()` fallbacks must be dropped:
+- `hover_z`, `halt_vel_threshold`, `home_position_xy`
+- All grasp phase thresholds: `grasp_contact_approach_tolerance`, `grasp_close_steps`, `grasp_ramp_end`, `empty_grasp_threshold`, `grasp_hold_steps`, `grasp_plunge_step_m`, `grasp_retract_step_m`, `release_ramp_steps`, `release_settle_steps`, `grasp_verify_xy_threshold`, `grasp_verify_z_threshold`, `grasp_verify_finger_threshold`, `cube_held_xy_limit`, `cube_held_z_limit`
+- `stability_vel_threshold`, `eval_drift_limit`, `drift_limit_start`, `drift_limit_end`, `drift_curriculum_steps`
+- `grasp_align_tolerance`
+- `logging.level`, `logging.log_dir` (nested under `logging:` key)
+
+For `model_controller.py` specifically:
+- `.get("stability_vel_threshold", 0.02)` → `cfg["stability_vel_threshold"]`
+- `.get("eval_drift_limit", 0.010)` → `cfg["eval_drift_limit"]`
+
+### Keys that MUST BE ADDED to `configs/env.yaml` (truly new)
+
+These are currently hardcoded magic numbers in Python source files. Add them:
 
 ```yaml
 # Controller movement parameters (used by ScriptedController)
@@ -43,43 +58,15 @@ grasp_verify_drift_mm: 30.0      # Max XY drift (mm) for post-grasp cube-held ch
 reconcile_xy_tolerance_m: 0.020  # 20mm: max XY error before rejecting a place result
 reconcile_z_tolerance_m: 0.010   # 10mm: max Z error before rejecting a place result
 
-# Busy poll timing (used by QueuedUIBackend / JS; document here for reference)
-# Note: JS values are in app.js — document only; not loaded from YAML
-busy_poll_initial_ms: 200        # Initial polling interval when arm is busy
-busy_poll_max_ms: 1500           # Maximum polling interval (exponential backoff cap)
+# RL inference step limit
+rl_max_steps_per_stage: 300      # Maximum inference steps for one RL stage (transit/descend/ascend)
 ```
-
-### Add to `configs/chess.yaml` — under the existing `board:` section
-
-The current `configs/chess.yaml` has a `board:` section. Add the validation keys there, not at the top level, or they will cause `KeyError` in section 3.9 which loads them from `board_cfg`:
-
-```yaml
-board:
-  # ... existing keys (center_xy, cell_size_m, board_size, ...) ...
-  validation:
-    required_cell_size_m: 0.08       # Must equal cell_size_m; validated at construction
-    required_board_width_m: 0.64     # Must equal board_size * cell_size_m
-    required_table_margin_m: 0.03    # Minimum margin around board on table
-    geometry_tolerance_m: 1.0e-9     # Floating-point tolerance for geometry checks
-
-# Reachability eval expected coordinates (used by eval_chess_reachability.py)
-reachability_expected:
-  rank1_y_m: -0.0159
-  rank8_y_m: 0.5441
-  file_a_x_m: 0.600
-  file_h_x_m: 1.160
-  geometry_tolerance_m: 1.0e-9
-```
-
-### Add to `configs/physics.yaml`
-
-No new keys needed — all physics constants are already present.
 
 ---
 
-## 3.3 Fix `configs/env.yaml` — Ensure All Keys Exist
+## 3.3 Fix `configs/env.yaml` — Complete Key List
 
-Verify these keys exist (they do based on current file; listing for completeness):
+After adding the keys above, verify these all exist:
 - `cube_height`, `cube_z`, `grasp_z`, `hover_z`, `safe_z`
 - `success_threshold`, `drift_limit_end`, `floor_limit`
 - `hidden_object_pos`, `table_surface_z`, `table_center_xy`
@@ -90,12 +77,14 @@ Verify these keys exist (they do based on current file; listing for completeness
 - `grasp_retract_step_m`, `release_ramp_steps`, `release_settle_steps`
 - `grasp_verify_xy_threshold`, `grasp_verify_z_threshold`, `grasp_verify_finger_threshold`
 - `cube_held_xy_limit`, `cube_held_z_limit`
-- `halt_vel_threshold`, `stability_vel_threshold`, `braking_dist`
+- `halt_vel_threshold`, `stability_vel_threshold`, `eval_drift_limit`, `braking_dist`
+- `drift_limit_start`, `drift_limit_end`, `drift_curriculum_steps`, `grasp_align_tolerance`
 - `floor_proximity_threshold`, `max_gripper_width`
 - `finger_open_joint`, `finger_closed_joint`, `finger_outer_offset`
 - `transit_tolerance_m`, `vertical_tolerance_m`, `step_gain`
 - `min_step_size_m`, `max_step_size_m`, `transit_max_steps`, `vertical_max_steps`
 - `grasp_verify_drift_mm`, `reconcile_xy_tolerance_m`, `reconcile_z_tolerance_m`
+- `rl_max_steps_per_stage`
 
 ---
 
@@ -119,7 +108,7 @@ Replace every instance:
 
 ## 3.5 Fix `src/chess_env/task.py` — Remove All `.get()` Fallbacks
 
-**Current code (lines 83–142)**: 21 instances of `cfg.get("key", default)`.
+**Current code**: Many instances of `cfg.get("key", default)`. For keys that already exist in `env.yaml`, the fallback is dead code — replace with direct key access.
 
 Replace every instance:
 
@@ -142,7 +131,18 @@ Replace every instance:
 | `self.env_cfg.get("cube_held_xy_limit", 0.030)` | `self.env_cfg["cube_held_xy_limit"]` |
 | `self.env_cfg.get("cube_held_z_limit", 0.020)` | `self.env_cfg["cube_held_z_limit"]` |
 
-For the `logging` sub-dict (lines 140–142):
+For `drift_limit_start` and `drift_limit_end` specifically (already in `env.yaml`):
+```python
+# Before (dead fallback — key already exists)
+DRIFT_LIMIT_START = self.env_cfg.get("drift_limit_start", 0.060)
+DRIFT_LIMIT_END   = self.env_cfg.get("drift_limit_end",   0.010)
+
+# After
+DRIFT_LIMIT_START = self.env_cfg["drift_limit_start"]
+DRIFT_LIMIT_END   = self.env_cfg["drift_limit_end"]
+```
+
+For the `logging` sub-dict (nested key access):
 ```python
 # Before
 log_cfg = self.env_cfg.get("logging", {})
@@ -154,6 +154,37 @@ log_cfg = self.env_cfg["logging"]
 log_level = logging.DEBUG if debug else getattr(logging, log_cfg["level"])
 log_dir = log_cfg["log_dir"]
 ```
+
+---
+
+## 3.5a Fix `src/chess_env/task.py` — Legacy Constructor Param Cleanup
+
+Lines 28–36 of `task.py` consume legacy kwargs to suppress gymnasium warnings:
+```python
+kwargs.pop('drift_curriculum_steps', None)
+kwargs.pop('force_drift_limit', None)
+kwargs.pop('fixed_drift', None)
+```
+
+**Action (in Stage 3, before Stage 6 removes them entirely)**:
+
+Step 1 — Replace the `drift_curriculum_steps` kwarg path with config loading (the key is already in `env.yaml`):
+```python
+# Before
+self.drift_curriculum_steps = drift_curriculum_steps or self.env_cfg.get("drift_curriculum_steps", 200000)
+
+# After
+self.drift_curriculum_steps = self.env_cfg["drift_curriculum_steps"]
+```
+
+Step 2 — Verify that `force_drift_limit` and `fixed_drift` are not passed by any caller:
+```bash
+grep -rn "force_drift_limit\|fixed_drift" src/ scripts/ tests/ training/
+# If nothing found: these are truly dead params — remove in Stage 6.3.1
+# If callers found: fix those callers first
+```
+
+Step 3 — If no callers use them, remove the `kwargs.pop` lines. Otherwise, leave them for Stage 6.3.1 to handle after confirming all callers are updated.
 
 ---
 
@@ -196,9 +227,7 @@ def __init__(self, env, drift_limit: float = 0.010, render_fn=None, render_delay
 Remove the class-level attribute declarations entirely.
 
 **Remaining magic numbers in controller.py** (format strings using `1000.0` for mm conversion):
-- Lines 172, 197: `f"... {error:.1f}mm"` where error is already in mm from `* 1000.0`
-
-These are format strings, not logic constants. The `1000.0` multiplier for m→mm conversion should be named:
+The `1000.0` multiplier for m→mm conversion should be named:
 ```python
 M_TO_MM = 1000.0  # Unit conversion constant; not a tunable parameter
 ```
@@ -207,7 +236,28 @@ Define this as a module-level constant in `controller.py` (not in config, since 
 
 ---
 
-## 3.7 Fix `src/chess_env/environment_generation.py` — Name the STL Geometry Constants
+## 3.7 Fix `src/chess_env/model_controller.py` — Remove Unnecessary Fallbacks
+
+`model_controller.py` uses `.get()` with fallbacks for keys that already exist in `env.yaml`:
+
+```python
+# Before (key exists in env.yaml — fallback is dead code)
+self._stability_vel_threshold = self._env.env_cfg.get("stability_vel_threshold", 0.02)
+self._eval_drift_limit        = self._env.env_cfg.get("eval_drift_limit", 0.010)
+
+# After
+self._stability_vel_threshold = self._env.env_cfg["stability_vel_threshold"]
+self._eval_drift_limit        = self._env.env_cfg["eval_drift_limit"]
+```
+
+Also remove `MAX_STEPS = 300` (hardcoded constant) and replace with:
+```python
+self._max_steps = self._env.env_cfg["rl_max_steps_per_stage"]
+```
+
+---
+
+## 3.8 Fix `src/chess_env/environment_generation.py` — Name the STL Geometry Constants
 
 The piece geometry functions (`pawn_triangles`, `rook_triangles`, etc.) contain many floating-point literals like `0.0115`, `0.0085`, `0.007`, etc. These are piece visual dimensions in metres.
 
@@ -249,7 +299,7 @@ _STL_BASE_TOP_HEIGHT  = 0.032  # Default height of base frustum top in metres
 
 ---
 
-## 3.8 Fix `scripts/eval_chess_reachability.py` — Load Expected Coordinates from Config
+## 3.9 Fix `scripts/eval_chess_reachability.py` — Load Expected Coordinates from Config
 
 **Current code** (lines 14–16):
 ```python
@@ -284,9 +334,19 @@ def validate_board_geometry(mapper: BoardMapper) -> None:
             raise SystemExit(f"{name}: expected {required:.4f}m, got {actual:.6f}m")
 ```
 
+Add to `configs/chess.yaml`:
+```yaml
+reachability_expected:
+  rank1_y_m: -0.0159
+  rank8_y_m: 0.5441
+  file_a_x_m: 0.600
+  file_h_x_m: 1.160
+  geometry_tolerance_m: 1.0e-9
+```
+
 ---
 
-## 3.9 Fix `src/chess_game/board_mapper.py` — Load Validation Constants from Config
+## 3.10 Fix `src/chess_game/board_mapper.py` — Load Validation Constants from Config
 
 **Current code**: `REQUIRED_CELL_SIZE_M = 0.08`, `REQUIRED_BOARD_WIDTH_M = 0.64`, etc. are class-level constants.
 
@@ -318,9 +378,7 @@ class BoardMapper:
         ...
 ```
 
-This keeps `BoardMapper(geometry)` working in tests and any direct callers without changes.
-
-**Step 3**: Load from `chess.yaml` — keys are under `board.validation` (see section 3.2):
+**Step 3**: Load from `chess.yaml` — keys are under `board.validation` (see section 3.9):
 
 ```python
 @classmethod
@@ -349,11 +407,20 @@ def from_configs(cls) -> "BoardMapper":
     return cls(geometry, validation)
 ```
 
-Existing tests that call `BoardMapper(geometry)` continue to work via the default `_DEFAULT_VALIDATION`.
+Add to `configs/chess.yaml` under the `board:` section:
+```yaml
+board:
+  # ... existing keys ...
+  validation:
+    required_cell_size_m: 0.08
+    required_board_width_m: 0.64
+    required_table_margin_m: 0.03
+    geometry_tolerance_m: 1.0e-9
+```
 
 ---
 
-## 3.10 Fix `src/physical/movement_executor.py` — Remove Inline Tolerances
+## 3.11 Fix `src/physical/movement_executor.py` — Remove Inline Tolerances
 
 **Current code** (lines 68–71):
 ```python
@@ -381,7 +448,7 @@ if z_error > self._reconcile_z_tol:
 
 ---
 
-## 3.11 Fix `scripts/run_chess_ui.py` — Remove Hardcoded drift_limit
+## 3.12 Fix `scripts/run_chess_ui.py` — Remove Hardcoded drift_limit
 
 **Current code** (line ~97):
 ```python
@@ -396,20 +463,20 @@ controller = ScriptedController(env, drift_limit=cfg["drift_limit_end"], ...)
 
 ---
 
-## 3.12 Split `configs/training.yaml` — Separate Hyperparameters from Deployed Model Paths
+## 3.13 Split `configs/training.yaml` — Separate Hyperparameters from Deployed Model Paths
 
 **Problem**: `configs/training.yaml` currently mixes two completely different concerns:
 1. **Training hyperparameters** (`total_timesteps`, `n_envs`, `learning_rate`, etc.) — change rarely, only during training experiments
 2. **Deployed model paths** (`deployed_models.transit`, `deployed_models.descend`, etc.) — change every time a new model is deployed to production
 
-Production code (`model_controller.py`) reads deployed model paths to know which checkpoints to load. It has no business knowing about training hyperparameters. Mixing them means production code imports a config that contains training specifics, which is a training/production boundary violation.
+Production code (`model_controller.py`) reads deployed model paths to know which checkpoints to load. It has no business knowing about training hyperparameters.
 
 **Action**: Split into two files:
 
-`configs/training.yaml` — training hyperparameters only (all keys consumed by `training/trainer.py` and `training/callbacks.py`):
+`configs/training.yaml` — training hyperparameters only:
 ```yaml
 base_model: "models/pretrained/sac-FetchPickAndPlace-v4.zip"
-num_envs: 4                  # keep as num_envs — matches training/trainer.py
+num_envs: 4
 total_timesteps: 600000
 learning_rate: 0.0003
 batch_size: 256
@@ -437,16 +504,7 @@ ascend:  "checkpoints/ascend_20260523_222849/best_model_ascend.zip"
 **Update callers**:
 - `src/chess_env/model_controller.py` → `load_config("deployed_models")` (not `training`)
 - `scripts/train_rl.py` → `load_config("training")` (hyperparameters only)
-
-**Add to `configs/env.yaml`** — one more missing config key:
-```yaml
-rl_max_steps_per_stage: 300   # Maximum inference steps for one RL stage (transit/descend/ascend)
-```
-
-In `model_controller.py`, remove `MAX_STEPS = 300` and replace with:
-```python
-self._max_steps = self._env.env_cfg["rl_max_steps_per_stage"]
-```
+- `scripts/eval_targeted.py` → `load_config("deployed_models")` after this split (see Stage 7.14)
 
 **Why**: After Stage 10 removes the `training/` import from `model_controller.py`, this stage removes the final logical dependency — the production code no longer reads the training config at all.
 
@@ -459,7 +517,7 @@ self._max_steps = self._env.env_cfg["rl_max_steps_per_stage"]
 grep -n "= 0\.[0-9]\|> 0\.[0-9]\|< 0\.[0-9]" src/chess_env/controller.py src/chess_env/task.py src/physical/movement_executor.py
 
 # 2. No .get() with non-None fallback values
-grep -n "\.get(\"" src/chess_env/simulation.py src/chess_env/task.py
+grep -n "\.get(\"" src/chess_env/simulation.py src/chess_env/task.py src/chess_env/model_controller.py
 
 # 3. All new config keys are present
 python -c "
@@ -468,10 +526,23 @@ cfg = load_config('env')
 required = ['transit_tolerance_m', 'vertical_tolerance_m', 'step_gain',
             'min_step_size_m', 'max_step_size_m', 'transit_max_steps',
             'vertical_max_steps', 'grasp_verify_drift_mm',
-            'reconcile_xy_tolerance_m', 'reconcile_z_tolerance_m']
+            'reconcile_xy_tolerance_m', 'reconcile_z_tolerance_m',
+            'rl_max_steps_per_stage']
 for k in required:
     assert k in cfg, f'Missing key: {k}'
-print('All env.yaml keys present')
+print('All new env.yaml keys present')
+"
+
+# 4. Keys that already existed are still there
+python -c "
+from src.utils.io import load_config
+cfg = load_config('env')
+existing = ['hover_z', 'halt_vel_threshold', 'home_position_xy',
+            'stability_vel_threshold', 'eval_drift_limit',
+            'drift_limit_start', 'drift_limit_end', 'drift_curriculum_steps']
+for k in existing:
+    assert k in cfg, f'Pre-existing key gone: {k}'
+print('All pre-existing env.yaml keys still present')
 "
 
 python -c "
@@ -486,10 +557,18 @@ assert 'reachability_expected' in cfg
 print('All chess.yaml keys present')
 "
 
-# 4. Full test suite
+# 5. deployed_models.yaml exists and is loadable
+python -c "
+from src.utils.io import load_config
+cfg = load_config('deployed_models')
+assert 'transit' in cfg and 'descend' in cfg and 'ascend' in cfg
+print('deployed_models.yaml OK')
+"
+
+# 6. Full test suite
 python -m pytest tests/ -v
 
-# 5. Smoke test: controller loads config correctly
+# 7. Smoke test: controller loads config correctly
 python -c "
 import gymnasium as gym
 import src.chess_env

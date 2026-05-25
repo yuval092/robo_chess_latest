@@ -1322,8 +1322,16 @@ class ChessTaskEnv(ChessSimulationEnv):
 
             dist = float(np.linalg.norm(grip_pos - self.goal_pos))
             speed = float(np.linalg.norm(grip_vel))
-            if dist < self.env_cfg.get("braking_dist", 0.010):
-                reward -= self.env_cfg.get("braking_reward_weight", 0.15) * speed
+            scenario = self.current_scenario or "transit"
+            braking_d = self.env_cfg.get(
+                f"{scenario}_braking_dist", self.env_cfg.get("braking_dist", 0.010)
+            )
+            braking_w = self.env_cfg.get(
+                f"{scenario}_braking_reward_weight",
+                self.env_cfg.get("braking_reward_weight", 0.15),
+            )
+            if dist < braking_d:
+                reward -= braking_w * speed
 
             reward -= self.env_cfg.get("jitter_penalty_weight", 0.003) * float(
                 np.linalg.norm(action_copy[:3]) ** 2
@@ -1333,7 +1341,13 @@ class ChessTaskEnv(ChessSimulationEnv):
             if grip_pos[2] < self.FLOOR_LIMIT + floor_prox_thresh:
                 reward += float(self.env_cfg.get("floor_penalty", -0.5))
 
-            is_near = bool(self._is_success(grip_pos, self.goal_pos))
+            if self.current_scenario == "descend":
+                d_xy = float(np.linalg.norm(grip_pos[:2] - self.goal_pos[:2]))
+                d_z = float(abs(grip_pos[2] - self.goal_pos[2]))
+                descend_thresh = self.env_cfg.get("descend_success_threshold", self.SUCCESS_THRESHOLD)
+                is_near = bool(d_xy < self.SUCCESS_THRESHOLD and d_z < descend_thresh)
+            else:
+                is_near = bool(self._is_success(grip_pos, self.goal_pos))
             is_stable = float(np.linalg.norm(grip_vel)) < float(
                 self.env_cfg.get("stability_vel_threshold", 0.02)
             )

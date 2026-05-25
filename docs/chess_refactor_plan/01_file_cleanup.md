@@ -299,6 +299,26 @@ rm chess_env/assets/slide.xml
 
 ---
 
+## 1.10 Handle `eval_targeted.py`
+
+`scripts/eval_targeted.py` is a targeted square evaluation script that uses RL models to evaluate specific problem squares (those identified as failing in earlier diagnostics). It has a `main()` function, argparse, and imports from the RL pipeline.
+
+**Assessment**:
+- Has `main()` and argparse: qualifies as a proper `eval_*` script.
+- Uses RL models for evaluation: belongs at `scripts/` root alongside `eval_all_cells_rl.py`.
+- Has a `sys.path` hack: fixed in Stage 2.
+- Loads deployed model paths from `training.yaml["deployed_models"]` directly: fixed in Stage 7.14 after Stage 3.12 creates `deployed_models.yaml`.
+
+**Conclusion**: Keep `scripts/eval_targeted.py` in `scripts/` root. Do not move it to diagnostics. Fix its issues in the later stages as noted.
+
+```bash
+# Verify it is a proper eval script (not a diagnostic tool):
+python scripts/eval_targeted.py --help
+# Must show argparse help without error
+```
+
+---
+
 ## Stage 1 — Full Validation Checklist
 
 ```bash
@@ -323,6 +343,8 @@ python -c "from src.utils.logger import setup_logger; print('shim OK')"
 test -f chess_env/assets/robot.xml && echo "OK" || echo "FAIL: robot.xml missing"
 test -f chess_env/assets/shared.xml && echo "OK" || echo "FAIL: shared.xml missing"
 test ! -f chess_env/assets/push.xml && echo "OK" || echo "push.xml still present"
+test ! -f chess_env/assets/reach.xml && echo "OK" || echo "reach.xml still present"
+test ! -f chess_env/assets/slide.xml && echo "OK" || echo "slide.xml still present"
 
 # 6. MuJoCo env still loads (proves robot.xml/shared.xml intact)
 PYTHONPATH=. python -c "import src.chess_env, gymnasium as gym; env = gym.make('ChessFetchTask-v0'); env.close(); print('env load OK')"
@@ -339,4 +361,7 @@ python -m pytest tests/ -v
 
 # 10. Import smoke tests
 python -c "from src.chess_game.chess_service import ChessService, GameStatus; print('OK')"
+
+# 11. eval_targeted.py is a proper eval script at scripts/ root
+python scripts/eval_targeted.py --help
 ```

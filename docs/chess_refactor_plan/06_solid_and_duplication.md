@@ -85,7 +85,7 @@ while hasattr(inner, "env"):
 self.env = inner
 ```
 
-**Action**: Extract to a module-level utility function in `src/chess_env/simulation.py` (or a new `src/utils/env_utils.py`):
+**Action**: Extract to a module-level utility function in `src/utils/env_utils.py`:
 
 ```python
 def unwrap_env(env):
@@ -97,6 +97,24 @@ def unwrap_env(env):
 ```
 
 All five classes import and call `unwrap_env(env)` instead of repeating the loop.
+
+**Additional note — `model_controller.py` `transition()` method**: The `transition()` method in `model_controller.py` has a SECOND env-unwrapping loop (separate from `__init__`) used for resetting `_elapsed_steps` on the TimeLimit wrapper. This must also be replaced. The correct replacement stops at the **first** TimeLimit wrapper (not the innermost env):
+
+```python
+def transition(self, new_scenario, new_goal_pos, nominal_exit_pos, nominal_xy=None):
+    """Transition the controller to a new scenario and goal position."""
+    _, info = self._env.soft_reset(...)
+    # Reset elapsed steps on the outermost TimeLimit wrapper, if present.
+    wrapper = self._wrapped_env
+    while wrapper is not self._env:
+        if hasattr(wrapper, "_elapsed_steps"):
+            wrapper._elapsed_steps = 0
+            break
+        wrapper = wrapper.env
+    return info
+```
+
+This is more careful than the old inline loop — it stops at the first TimeLimit wrapper rather than walking all the way to the inner env.
 
 ---
 
@@ -138,7 +156,7 @@ class NoOpPhysicalExecutor:
         return PhysicalExecutionResult(success=True, command_results=[])
 ```
 
-Update all 4 files to import from `src.physical.noop_executor` instead of defining their own. This keeps production executor code and headless stub cleanly separated.
+`NoOpPhysicalExecutor` lives exclusively in `src/physical/noop_executor.py`. It is NOT in `plan_executor.py`. Update all 4 files to import from `src.physical.noop_executor` instead of defining their own.
 
 ---
 
@@ -321,6 +339,34 @@ This makes `run_chess_ui.py` a thin orchestration script rather than a file that
 
 ---
 
+## 6.3 `src/chess_env/task.py` — Legacy Parameter Cleanup
+
+### 6.3.1 Remove Dead Legacy Constructor Params
+
+Lines 28–36 of `task.py` consume legacy kwargs to suppress gymnasium warnings:
+```python
+kwargs.pop('drift_curriculum_steps', None)
+kwargs.pop('force_drift_limit', None)
+kwargs.pop('fixed_drift', None)
+kwargs.pop('sample_debug_freq', None)
+kwargs.pop('total_curriculum_steps', None)
+kwargs.pop('num_envs', None)
+kwargs.pop('curriculum_progress_override', None)
+```
+
+**Action**: Verify that none of these keys are passed anywhere in the current codebase (this was started in Stage 3.5a):
+```bash
+grep -rn "drift_curriculum\|force_drift\|fixed_drift\|sample_debug_freq\|total_curriculum\|num_envs\|curriculum_progress" src/ scripts/ tests/ training/
+```
+
+If no callers pass these keys, delete the `kwargs.pop` lines entirely. If any caller still passes them, fix the caller first, then delete the pops.
+
+After deleting the pops, also remove:
+- The `drift_curriculum_steps` parameter from `ChessTaskEnv.__init__` signature (replaced by `self.env_cfg["drift_curriculum_steps"]` in Stage 3.5a)
+- The `force_drift_limit` and `fixed_drift` parameters from the signature if they were formal parameters (not just kwargs.pop)
+
+---
+
 ## 6.4 `ModelEmbeddedController` — Single Responsibility Split
 
 **Dependency**: `ModelRegistry` imports `transfer_obs_enabled` from `src.chess_env.transfer_obs`, which is created in Stage 10. Stage 6.4 must be implemented after Stage 10, or Stage 10 must run concurrently.
@@ -399,28 +445,6 @@ This stage documents the intent; implementation is planned after Stage 10 valida
 
 ---
 
-## 6.3 `src/chess_env/task.py` — Legacy Parameter Cleanup
-
-Lines 28–36 of `task.py` consume legacy kwargs to suppress gymnasium warnings:
-```python
-kwargs.pop('drift_curriculum_steps', None)
-kwargs.pop('force_drift_limit', None)
-kwargs.pop('fixed_drift', None)
-kwargs.pop('sample_debug_freq', None)
-kwargs.pop('total_curriculum_steps', None)
-kwargs.pop('num_envs', None)
-kwargs.pop('curriculum_progress_override', None)
-```
-
-**Action**: Verify that none of these keys are passed anywhere in the current codebase:
-```bash
-grep -rn "drift_curriculum\|force_drift\|fixed_drift\|sample_debug_freq\|total_curriculum\|num_envs\|curriculum_progress" src/ scripts/ tests/
-```
-
-If no callers pass these keys, delete the `kwargs.pop` lines entirely. If any caller still passes them, fix the caller first, then delete the pops.
-
----
-
 ## Stage 6 — Full Validation Checklist
 
 ```bash
@@ -428,21 +452,21 @@ If no callers pass these keys, delete the `kwargs.pop` lines entirely. If any ca
 grep -rn "class Mock.*Executor\|class NoOp.*Executor" src/ scripts/ tests/
 # Should show only the one definition in src/physical/noop_executor.py
 
-# 2. No inline env-unwrap loops
-grep -rn "while hasattr.*env" src/ scripts/
-# Should show only the one definition in src/utils/env_utils.py (or wherever placed)
-
-# 3. task.py line count reduced
-wc -l src/chess_env/task.py
-# Should be <= 650 after extraction to task_execution.py
-
-# 4. QueuedUIBackend in src/ui/
-python -c "from src.ui.queued_backend import QueuedUIBackend; print('OK')"
-
-# 5. NoOpPhysicalExecutor in its own module (not in plan_executor.py)
+# 2. NoOpPhysicalExecutor in its own module (NOT in plan_executor.py)
 python -c "from src.physical.noop_executor import NoOpPhysicalExecutor; print('OK')"
 # Ensure it is NOT importable from plan_executor (wrong location):
 python -c "from src.physical.plan_executor import NoOpPhysicalExecutor" 2>&1 | grep "ImportError" && echo "correctly absent from plan_executor"
+
+# 3. No inline env-unwrap loops (the dedicated loop in transition() is replaced too)
+grep -rn "while hasattr.*env" src/ scripts/
+# Should show only the one definition in src/utils/env_utils.py
+
+# 4. task.py line count reduced
+wc -l src/chess_env/task.py
+# Should be <= 650 after extraction to task_execution.py
+
+# 5. QueuedUIBackend in src/ui/
+python -c "from src.ui.queued_backend import QueuedUIBackend; print('OK')"
 
 # 6. GameOrchestrator.create_headless works
 python -c "
@@ -457,4 +481,8 @@ python -m pytest tests/ -v
 
 # 8. run_chess_ui.py is importable
 python -c "import scripts.run_chess_ui; print('OK')"
+
+# 9. Legacy kwargs gone from task.py
+grep -n "drift_curriculum_steps\|force_drift_limit\|fixed_drift\|sample_debug_freq" src/chess_env/task.py
+# Must return nothing after cleanup
 ```

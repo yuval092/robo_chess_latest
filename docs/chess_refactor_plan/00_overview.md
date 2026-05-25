@@ -32,8 +32,9 @@
 | 8 | `08_environment_generation.md` | Auto-generation hardening and documentation | Medium |
 | 9 | `09_documentation_update.md` | Update `docs/current_status/` to match new code | Medium |
 | 10 | `10_training_production_separation.md` | Break production→training dependency; clean `training/` | High |
+| — | *(future)* `obs_builder_strategy.md` | Replace `_use_transfer_obs` flag with injected `ObsBuilder` | High (deferred) |
 
-**Stages must be completed in order.** Stage 0 before Stage 1 (archive models are referenced), Stage 10 can be done alongside Stage 6. Stage 3.12 (`deployed_models.yaml` split) depends on Stage 10 being complete (both change `model_controller.py`'s config loading).
+**Stages must be completed in order.** Stage 0 before Stage 1 (archive models are referenced). Stage 10 can be done alongside Stage 6. Stage 3.12 (`deployed_models.yaml` split) depends on Stage 10 being complete (both change `model_controller.py`'s config loading). The ObsBuilder stage is deferred until after Stage 10 validates the transfer observation boundary.
 
 ---
 
@@ -78,7 +79,7 @@ Minimum coverage required before starting Stage 1:
 Before implementing any stage, run this to catch plan contradictions:
 
 ```bash
-rg "Assets are auto-generated on every \`import src.chess_env\`|robot\.xml.*no longer exists|shared\.xml.*no longer exists|parents\[3\]" docs/cleanup_refactor_plan/ -g '*.md' -g '!00_overview.md' -g '!REVIEW_REPORT*.md'
+rg "Assets are auto-generated on every \`import src.chess_env\`|robot\.xml.*no longer exists|shared\.xml.*no longer exists|parents\[3\]" docs/chess_refactor_plan/ -g '*.md' -g '!00_overview.md'
 ```
 
 Must return nothing. If it returns any matches, fix them before implementing the stage.
@@ -140,13 +141,17 @@ Mark tests with `@pytest.mark.mujoco` and `@pytest.mark.rl` accordingly. The `fa
 
 ---
 
-## Current State Snapshot (as of 2026-05-24)
+## Current State Snapshot (as of 2026-05-25)
 
 Active components not present in the original plan:
-- `src/chess_env/model_controller.py` — production RL inference controller (new)
+- `src/chess_env/model_controller.py` — production RL inference controller (new); currently imports `from training.envs import WRAPPER_MAP` (violation fixed in Stage 10)
+- `src/chess_env/task.py` — uses `self._use_phase9_obs = False` and `_build_phase9_observation()` — renamed to `_use_transfer_obs` / `_build_transfer_observation()` in Stage 10
 - `training/` — top-level training package: `trainer.py`, `callbacks.py`, `envs/` with three stage wrappers (new)
-- `configs/training.yaml` — training hyperparameters and deployed model paths (new)
+- `configs/training.yaml` — training hyperparameters and deployed model paths (not yet split; split done in Stage 3.12); still has `base_model: "archive/rl_system/models/..."` (fixed in Stage 0)
 - `scripts/train_rl.py` — training launch script (new)
 - `scripts/eval_all_cells_rl.py` — full-board RL evaluation (new)
-- `scripts/eval_rl_stages.py` — standalone RL stage evaluator, partially redundant with `eval_stages.py --use-rl-models` (new, to be merged in Stage 7)
-- `scripts/diagnose_transit_full.py`, `diagnose_descend_afile.py`, `diagnose_transit_c2.py` — diagnostic scripts (new, to be organised in Stage 7)
+- `scripts/eval_targeted.py` — targeted square RL evaluation for specific problem squares; has `main()` + argparse; sys.path hack present; loads from `training.yaml["deployed_models"]` (fix in Stage 7)
+- `scripts/eval_rl_stages.py` — standalone RL stage evaluator, partially redundant with `eval_stages.py --use-rl-models` (new, to be moved to diagnostics in Stage 1)
+- `scripts/diagnose_transit_full.py`, `diagnose_descend_afile.py`, `diagnose_transit_c2.py` — diagnostic scripts (new, to be organised in Stage 1)
+- `game_orchestrator.py` — imports from `src.chess_game.models` (old shim) and `src.utils.config` (old shim); both fixed in Stage 1/2
+- `model_controller.py` — has duplicate env-unwrapping loop in `transition()` method (fixed in Stage 6) and uses `.get("stability_vel_threshold", 0.02)` / `.get("eval_drift_limit", 0.010)` with unnecessary fallbacks (keys already exist in `env.yaml`; fixed in Stage 3)
