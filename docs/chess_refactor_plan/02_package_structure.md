@@ -39,7 +39,7 @@ Create a `pyproject.toml` at the project root. This replaces the need for a `set
 ```toml
 [build-system]
 requires = ["setuptools>=68", "wheel"]
-build-backend = "setuptools.backends.legacy:build"
+build-backend = "setuptools.build_meta"
 
 [project]
 name = "robo-chess"
@@ -115,22 +115,37 @@ This makes `from src.chess_game.X import Y` work in any terminal, regardless of 
 
 ## 2.4 Remove All `sys.path` Hacks from Scripts
 
-**Affected files** (15+ scripts):
+**Generate the complete list of affected files first** — do not rely on a static list:
+
+```bash
+# Find every script (recursive, including diagnostics/) that has a sys.path hack
+grep -rln "sys\.path" scripts/
+```
+
+Run this before starting work to capture the full current inventory. At the time of writing the known affected files include:
+
 - `scripts/analyze_debug_log.py`
 - `scripts/debug_one_move.py`
+- `scripts/eval_all_cells_rl.py`
+- `scripts/eval_all_square_moves.py`
 - `scripts/eval_chess_game_flow.py`
 - `scripts/eval_chess_piece_move.py`
 - `scripts/eval_chess_reachability.py`
 - `scripts/eval_draw_conditions.py`
+- `scripts/eval_rl_stages.py`
 - `scripts/eval_sequence.py`
 - `scripts/eval_special_moves.py`
 - `scripts/eval_stages.py`
 - `scripts/eval_stress.py`
 - `scripts/eval_targeted.py`
+- `scripts/train_rl.py`
 - `scripts/run_chess_ui.py`
 - `scripts/verify_physics.py`
 - `scripts/visualize.py`
 - `scripts/generate_scene.py` (new file from Stage 1 — must not have the hack)
+- `scripts/diagnostics/*.py` (all diagnostic scripts)
+
+**The grep command is the authoritative source.** If the grep output differs from the list above, fix every file that grep finds.
 
 **Action**: In each file, remove the following lines entirely:
 
@@ -204,17 +219,22 @@ touch scripts/__init__.py
 
 ## 2.7 Verify Script Invocation Patterns
 
-After this stage, scripts must be runnable in two equivalent ways:
+**`scripts/` is not installed** — `python -m scripts.X` requires the repo root to be on `sys.path`. It works when run from the repo root but not from an arbitrary directory after a wheel install.
+
+After this stage there are two valid ways to run scripts, depending on context:
 
 ```bash
-# Method 1: direct file execution (from project root)
+# From the repo root (dev context only — scripts/ is NOT packaged)
 python scripts/eval_stages.py --n-episodes 5
+python -m scripts.eval_stages --n-episodes 5   # requires running from repo root
 
-# Method 2: module invocation (from anywhere, after pip install -e .)
-python -m scripts.eval_stages --n-episodes 5
+# From anywhere, using installed entry points (packaged src/cli/ only)
+robo-chess-ui --help
+robo-chess-generate --help
+robo-chess-visualize --help
 ```
 
-Both must work without any `sys.path` manipulation.
+The `python -m scripts.X` form is a convenience for developers running from the repo root; it is not a guarantee of portability. The only invocation patterns that work from arbitrary directories are the `robo-chess-*` entry points backed by `src/cli/`.
 
 ---
 
@@ -238,8 +258,10 @@ Ensure it has a module docstring and the `from __future__ import annotations` gu
 # 1. Install the package
 pip install -e .
 
-# 2. No sys.path hacks remaining
-grep -rn "sys.path" scripts/ tests/ src/
+# 2. No sys.path hacks remaining in ANY script (recursive scan)
+grep -rln "sys\.path" scripts/ tests/ src/
+# Must return nothing. This is the authoritative check — every file in scripts/**/*.py
+# must have had its hack removed.
 
 # 3. All imports work from a clean Python session
 python -c "from src.chess_game.chess_service import ChessService; print('OK')"
@@ -256,9 +278,12 @@ python -c "from src.cli.visualize import main; print('OK')"
 python -c "import pkg_resources; d = pkg_resources.get_distribution('robo-chess'); print([p for p in d.files if 'training' in str(p)])"
 # Must return [] (no training/ files in the installed distribution)
 
-# 6. Scripts runnable as modules
-python -m scripts.eval_stages --help
-python -m scripts.generate_scene --help
+# 6. Scripts runnable as modules FROM THE REPO ROOT (not from arbitrary dirs)
+python -m scripts.eval_stages --help      # run from repo root only
+# Installed entry points work from anywhere after pip install -e .:
+robo-chess-generate --help
+robo-chess-ui --help
+robo-chess-visualize --help
 
 # 7. Full test suite
 python -m pytest tests/ -v

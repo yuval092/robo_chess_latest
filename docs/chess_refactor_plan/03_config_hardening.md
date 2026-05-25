@@ -516,8 +516,11 @@ ascend:  "checkpoints/ascend_20260523_222849/best_model_ascend.zip"
 # 1. No naked numeric literals in key logic files
 grep -n "= 0\.[0-9]\|> 0\.[0-9]\|< 0\.[0-9]" src/chess_env/controller.py src/chess_env/task.py src/physical/movement_executor.py
 
-# 2. No .get() with non-None fallback values
-grep -n "\.get(\"" src/chess_env/simulation.py src/chess_env/task.py src/chess_env/model_controller.py
+# 2. No .get() with non-None fallback values in ALL of src/
+# The no-silent-fallbacks rule applies to all production src/ code.
+# training/ and scripts/ are exempt (they may have legitimate fallbacks).
+grep -rn '\.get("[^"]*", [^N{[]' src/
+# Expected: zero results from src/ (None, {}, and [] defaults are acceptable; numeric/string defaults are not)
 
 # 3. All new config keys are present
 python -c "

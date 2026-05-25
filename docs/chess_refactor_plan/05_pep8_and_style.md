@@ -22,7 +22,7 @@ select = [
     "UP",   # pyupgrade
 ]
 ignore = [
-    "E501",  # line length — handled separately with explicit wrapping decisions
+    "E501",  # line length — auto-formatter wraps most; E501 is checked separately below
 ]
 
 [tool.ruff.lint.isort]
@@ -213,18 +213,23 @@ pip install ruff
 ruff check --fix src/ scripts/ tests/
 ruff format src/ scripts/ tests/
 
-# 3. Check remaining violations (should be 0 errors)
+# 3. Check remaining violations (should be 0 errors, E501 exempted above)
 ruff check src/ scripts/ tests/
 
-# 4. Check no legacy typing imports remain
+# 4. Separate E501 gate — long lines are explicitly reviewed and must be zero
+# Run AFTER the manual wrapping work in section 5.3 is complete.
+ruff check --select E501 src/ scripts/ tests/
+# Must return 0 violations. If violations remain, wrap those lines manually.
+
+# 5. Check no legacy typing imports remain
 grep -rn "from typing import Dict\|from typing import List\|from typing import Optional\|from typing import Tuple" src/ scripts/
 
-# 5. Check no uppercase typing aliases in annotations
+# 6. Check no uppercase typing aliases in annotations
 grep -rn ": Dict\[\\|: List\[\\|: Optional\[\\|: Tuple\[" src/ scripts/
 
-# 6. Full test suite
+# 7. Full test suite
 python -m pytest tests/ -v
 
-# 7. mypy type check (informational; failures are not blockers for this stage)
+# 8. mypy type check (informational; failures are not blockers for this stage)
 python -m mypy src/ --ignore-missing-imports --no-error-summary 2>&1 | grep "error:" | wc -l
 ```

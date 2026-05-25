@@ -69,15 +69,34 @@ print('act_space:', m.action_space)
 "
 ```
 
-If it is an intermediate FetchPickAndPlace checkpoint with no better provenance than `sac-FetchPickAndPlace-v4.zip`, delete it. If it is a specialty checkpoint worth keeping, move it to `models/legacy/` with a descriptive name. Record the decision here before deletion.
+If it is an intermediate FetchPickAndPlace checkpoint with no better provenance than `sac-FetchPickAndPlace-v4.zip`, delete it. If it is a specialty checkpoint worth keeping, move it to `models/legacy/` with a descriptive name.
+
+**Required before deletion**: Create `docs/decisions/archive_latest_model.md` with the following content:
+
+```markdown
+# Decision: archive/rl_system/models/latest_model.zip
+
+Date: YYYY-MM-DD
+Obs space: <paste from inspection above>
+Action space: <paste from inspection above>
+Decision: DELETE  (or: KEEP AS models/legacy/<descriptive-name>.zip)
+Reason: <brief justification>
+```
+
+**Do not proceed to section 0.4 until this file is written.** The Stage 0 validation checklist checks for its existence.
 
 ## 0.4 Delete the Dead Archive Code
 
 ```bash
+# Only after docs/decisions/archive_latest_model.md has been written and committed:
+mkdir -p docs/decisions
+# (file should already exist from 0.3)
+test -f docs/decisions/archive_latest_model.md || { echo "STOP: write the decision file first (section 0.3)"; exit 1; }
+
 rm archive/rl_system/training/callbacks.py
 rm archive/rl_system/training/trainer.py
 rm archive/rl_system/training.yaml
-rm archive/rl_system/models/latest_model.zip   # after decision in 0.3
+rm archive/rl_system/models/latest_model.zip   # after decision recorded in 0.3
 rmdir archive/rl_system/training
 rmdir archive/rl_system/models   # now empty after model move and latest_model decision
 rmdir archive/rl_system
@@ -105,6 +124,9 @@ The validation script below imports `from src.utils.config import load_config`. 
 ## Stage 0 — Validation Checklist
 
 ```bash
+# 0. Decision file recorded before archive deletion
+test -f docs/decisions/archive_latest_model.md && echo "OK: decision file present" || echo "FAIL: write docs/decisions/archive_latest_model.md first"
+
 # 1. Base model exists at new location
 ls -la models/pretrained/sac-FetchPickAndPlace-v4.zip
 
