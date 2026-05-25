@@ -85,10 +85,13 @@ def build_orchestrator(
         controller=controller,
         env=env,
     )
+    engine_cfg = load_config("chess").get("engine")
+    chess_service = ChessService(engine_cfg=engine_cfg)
     return GameOrchestrator(
-        ChessService(),
+        chess_service,
         physical_executor,
         LogicalPieceTracker(),
+        engine_cfg=engine_cfg,
     )
 
 

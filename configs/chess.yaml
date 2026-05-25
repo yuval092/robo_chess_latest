@@ -64,3 +64,9 @@ promotion_reserve:
 game:
   human_color: white
   auto_computer_reply: true
+
+engine:
+  stockfish_path: stockfish  # executable name on PATH, or full path, or null to disable
+  skill_level: 5             # 0 (random-ish) to 20 (full Stockfish strength)
+  think_time_s: 0.5          # seconds Stockfish may think per move
+  fallback_depth: 3          # minimax search depth when Stockfish is unavailable

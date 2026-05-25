@@ -46,6 +46,7 @@ class GameOrchestrator:
         *,
         human_color: str | None = None,
         auto_computer_reply: bool | None = None,
+        engine_cfg: dict | None = None,
     ):
         """Initialise this object."""
         game_cfg = load_config("chess")["game"]
@@ -58,6 +59,7 @@ class GameOrchestrator:
             if auto_computer_reply is None
             else auto_computer_reply
         )
+        self._engine_cfg = engine_cfg
         self.is_busy = False
         self.error: str | None = None
         self.last_move: str | None = None
@@ -68,21 +70,23 @@ class GameOrchestrator:
         human_color: str | None = None,
         auto_computer_reply: bool | None = None,
     ) -> GameOrchestrator:
-        """Create a GameOrchestrator backed by NoOpPhysicalExecutor."""
+        """Create a GameOrchestrator backed by NoOpPhysicalExecutor (no chess engine)."""
         return cls(
             chess_service=ChessService(),
             physical_executor=NoOpPhysicalExecutor(),
             piece_tracker=LogicalPieceTracker(),
             human_color=human_color,
             auto_computer_reply=auto_computer_reply,
+            engine_cfg=None,
         )
 
     def new_game(self) -> GameSnapshot:
-        """Reset the game and physical state."""
+        """Reset the game and physical state, restarting the chess engine."""
         if self.is_busy:
             self.error = "Cannot start a new game while the arm is moving."
             return self.snapshot()
-        self.chess_service = ChessService()
+        self.chess_service.close()
+        self.chess_service = ChessService(engine_cfg=self._engine_cfg)
         self.piece_tracker = LogicalPieceTracker()
         self.error = None
         self.last_move = None

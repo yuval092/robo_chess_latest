@@ -3,10 +3,13 @@
 from __future__ import annotations
 
 import json
+import logging
 from dataclasses import dataclass
 from pathlib import Path
+from typing import Any
 
 import chess
+import chess.engine
 
 
 class IllegalMoveError(ValueError):
@@ -30,25 +33,49 @@ class GameStatus:
     legal_moves: list[str]
 
 
-PIECE_VALUES = {
-    chess.PAWN: 1,
-    chess.KNIGHT: 3,
-    chess.BISHOP: 3,
-    chess.ROOK: 5,
-    chess.QUEEN: 9,
-    chess.KING: 100,
-}
-
-
 class ChessService:
-    def __init__(self, starting_fen: str | None = None):
-        """Initialise this object."""
+    def __init__(
+        self,
+        starting_fen: str | None = None,
+        engine_cfg: dict[str, Any] | None = None,
+    ):
+        """Initialise the chess service, optionally starting a Stockfish engine.
+
+        engine_cfg keys (all optional):
+          stockfish_path  — executable name or full path (default: "stockfish")
+          skill_level     — 0–20 (default: 5)
+          think_time_s    — seconds per move (default: 0.5)
+        """
         self._board = chess.Board(starting_fen) if starting_fen else chess.Board()
         self._san_history: list[str] = []
+        self._engine: chess.engine.SimpleEngine | None = None
+        self._think_time: float = 0.5
+        self._logger = logging.getLogger(__name__)
+
+        if engine_cfg:
+            self._think_time = float(engine_cfg.get("think_time_s", 0.5))
+            path = engine_cfg.get("stockfish_path", "stockfish")
+            if path:
+                self._engine = chess.engine.SimpleEngine.popen_uci(path)
+                skill = int(engine_cfg.get("skill_level", 5))
+                self._engine.configure({"Skill Level": skill})
+
+    # ── Lifecycle ─────────────────────────────────────────────────────────────
+
+    def close(self) -> None:
+        """Shut down the Stockfish process if one is running."""
+        if self._engine is not None:
+            try:
+                self._engine.quit()
+            except Exception:
+                pass
+            self._engine = None
+
+    # ── Board queries ─────────────────────────────────────────────────────────
 
     @property
     def board(self) -> chess.Board:
-        """Run board logic."""
+        """Return the underlying python-chess Board."""
         return self._board
 
     def legal_moves(self) -> list[str]:
@@ -125,37 +152,25 @@ class ChessService:
         """Return the side whose turn it is."""
         return self._board.turn
 
+    # ── Engine ────────────────────────────────────────────────────────────────
+
     def choose_engine_move(self) -> chess.Move:
-        """Choose a legal move using the built-in heuristic."""
-        legal_moves = list(self._board.legal_moves)
-        if not legal_moves:
+        """Choose the computer's move using Stockfish."""
+        if not list(self._board.legal_moves):
             raise IllegalMoveError("No legal moves available.")
-
-        def score(move: chess.Move) -> tuple[int, int, int, int, str]:
-            """Score a candidate engine move."""
-            board = self._board
-            captured = board.piece_at(move.to_square)
-            if board.is_en_passant(move):
-                captured = chess.Piece(chess.PAWN, not board.turn)
-            captured_value = PIECE_VALUES.get(captured.piece_type, 0) if captured else 0
-
-            board.push(move)
-            is_checkmate = board.is_checkmate()
-            board.pop()
-
-            gives_check = board.gives_check(move)
-            promotion_value = (
-                PIECE_VALUES.get(move.promotion, 0) if move.promotion else 0
+        if self._engine is None:
+            raise RuntimeError(
+                "No chess engine configured. Pass engine_cfg when creating ChessService."
             )
-            return (
-                1 if is_checkmate else 0,
-                captured_value,
-                promotion_value,
-                1 if gives_check else 0,
-                self._stable_move_tiebreak(move),
-            )
+        result = self._engine.play(
+            self._board,
+            chess.engine.Limit(time=self._think_time),
+        )
+        if result.move is None or result.move not in self._board.legal_moves:
+            raise RuntimeError("Stockfish returned an invalid move.")
+        return result.move
 
-        return max(legal_moves, key=score)
+    # ── Persistence ───────────────────────────────────────────────────────────
 
     def save_to_file(self, path: str) -> None:
         """Save the current game state to JSON."""
@@ -175,8 +190,10 @@ class ChessService:
         service._san_history = list(data.get("san_history", []))
         return service
 
+    # ── Internal helpers ──────────────────────────────────────────────────────
+
     def _validate_move(self, move: chess.Move) -> chess.Move:
-        """Run  validate move logic."""
+        """Raise IllegalMoveError if the move is not legal in the current position."""
         if move not in self._board.legal_moves:
             raise IllegalMoveError(
                 f"Illegal move {move.uci()} for position {self._board.fen()}"
@@ -185,7 +202,7 @@ class ChessService:
 
     @staticmethod
     def _parse_promotion(promotion: str | None) -> int | None:
-        """Run  parse promotion logic."""
+        """Convert a promotion letter to a python-chess piece type constant."""
         if promotion is None:
             return None
         promotion_map = {
@@ -198,9 +215,3 @@ class ChessService:
             return promotion_map[promotion.lower()]
         except KeyError as exc:
             raise IllegalMoveError(f"Unsupported promotion piece: {promotion}") from exc
-
-    @staticmethod
-    def _stable_move_tiebreak(move: chess.Move) -> str:
-        # max() picks lexicographically greatest as the final deterministic tiebreak.
-        """Run  stable move tiebreak logic."""
-        return move.uci()

@@ -81,9 +81,11 @@ def test_physical_failure_leaves_fen_unchanged():
 
 def test_computer_move_uses_same_execution_path():
     executor = FakePhysicalExecutor(success=True)
-    orchestrator = make_orchestrator(executor, human_color="black")
+    service = ChessService(engine_cfg={"stockfish_path": "stockfish", "skill_level": 1})
+    orchestrator = make_orchestrator(executor, human_color="black", service=service)
 
     result = orchestrator.let_computer_play_current_turn()
+    service.close()
 
     assert result.accepted
     assert result.physical_success
@@ -106,9 +108,11 @@ def test_busy_state_rejects_overlapping_request():
 
 def test_auto_computer_reply_runs_after_human_success():
     executor = FakePhysicalExecutor(success=True)
-    orchestrator = make_orchestrator(executor, auto=True)
+    service = ChessService(engine_cfg={"stockfish_path": "stockfish", "skill_level": 1})
+    orchestrator = make_orchestrator(executor, auto=True, service=service)
 
     result = orchestrator.submit_human_move("e2", "e4")
+    service.close()
 
     assert result.accepted
     assert result.physical_success

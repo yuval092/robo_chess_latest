@@ -27,17 +27,22 @@ class FakePhysicalExecutor:
         return FakePhysicalResult(True)
 
 
+_ENGINE_CFG = {"stockfish_path": "stockfish", "skill_level": 1}
+
+
 @pytest.fixture
 def client():
     orchestrator = GameOrchestrator(
-        ChessService(),
+        ChessService(engine_cfg=_ENGINE_CFG),
         FakePhysicalExecutor(),
         LogicalPieceTracker(),
         auto_computer_reply=False,
+        engine_cfg=_ENGINE_CFG,
     )
     app = create_app(orchestrator)
     app.config.update(TESTING=True)
-    return app.test_client()
+    yield app.test_client()
+    orchestrator.chess_service.close()
 
 
 def test_snapshot_returns_initial_board(client):

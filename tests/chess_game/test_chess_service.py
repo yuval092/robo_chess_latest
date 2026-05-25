@@ -67,8 +67,9 @@ def test_promotion_requires_promotion_piece():
 
 
 def test_choose_engine_move_returns_legal_move():
-    service = ChessService()
+    service = ChessService(engine_cfg={"stockfish_path": "stockfish", "skill_level": 1})
     move = service.choose_engine_move()
+    service.close()
 
     assert move in service.board.legal_moves
 
