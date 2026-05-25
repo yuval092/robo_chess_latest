@@ -1,7 +1,7 @@
 import queue
 import threading
 
-from scripts.run_chess_ui import QueuedUIBackend
+from src.ui.queued_backend import QueuedUIBackend
 
 
 class FakePhysicalExecutor:

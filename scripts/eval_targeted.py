@@ -6,8 +6,9 @@ reporting per-destination success rates.
 
 Usage:
     PYTHONPATH=. python scripts/eval_targeted.py --transit-model <path> [--n-reps 5]
-    PYTHONPATH=. python scripts/eval_targeted.py  # uses deployed model from training.yaml
+    PYTHONPATH=. python scripts/eval_targeted.py  # uses deployed model from configs/deployed_models.yaml
 """
+
 from __future__ import annotations
 
 import argparse
@@ -15,55 +16,69 @@ import os
 import sys
 from collections import defaultdict
 
-import numpy as np
 import mujoco
+import numpy as np
 
 os.environ.setdefault("MPLCONFIGDIR", "/tmp/matplotlib")
-sys.path.append(os.getcwd())
 
 import gymnasium as gym
-import src.chess_env  # noqa: register
+
 from src.chess_env.model_controller import ModelEmbeddedController
 from src.chess_game.board_mapper import BoardMapper
-from src.utils.config import load_config
-
+from src.utils.io import load_config
 
 # Previously problematic destination squares (highest priority)
 PROBLEM_DESTINATIONS = ["a5", "c1"]
 
 # Structural coverage: corners, near-corners, edge midpoints, center
-CORNER_SQUARES    = ["a1", "h1", "a8", "h8"]
-NEAR_CORNER       = ["b1", "g1", "b8", "g8"]
-EDGE_MID          = ["a4", "h4", "a5", "h5", "d1", "d8"]
-CENTER            = ["d4", "e5"]
+CORNER_SQUARES = ["a1", "h1", "a8", "h8"]
+NEAR_CORNER = ["b1", "g1", "b8", "g8"]
+EDGE_MID = ["a4", "h4", "a5", "h5", "d1", "d8"]
+CENTER = ["d4", "e5"]
 
-ALL_DST = list(dict.fromkeys(PROBLEM_DESTINATIONS + CORNER_SQUARES + NEAR_CORNER + EDGE_MID + CENTER))
+ALL_DST = list(
+    dict.fromkeys(
+        PROBLEM_DESTINATIONS + CORNER_SQUARES + NEAR_CORNER + EDGE_MID + CENTER
+    )
+)
 
 # Source squares: 10 spread across the board (center, corners, edges, mid-inner)
 SOURCE_SQUARES = [
-    "d4", "e5",               # center
-    "a1", "h8",               # far corners
-    "b2", "g7",               # near-corner
-    "h4", "a5",               # edge
-    "c3", "f6",               # mid-inner ring
+    "d4",
+    "e5",  # center
+    "a1",
+    "h8",  # far corners
+    "b2",
+    "g7",  # near-corner
+    "h4",
+    "a5",  # edge
+    "c3",
+    "f6",  # mid-inner ring
 ]
 
 
 def sq_xy(name: str, bm: BoardMapper) -> np.ndarray:
+    """Return sq xy."""
     return bm.square_name_to_xy(name)
 
 
 def reposition_arm(inner, xy: np.ndarray, safe_z: float):
+    """Return reposition arm."""
     target_pos = np.array([xy[0], xy[1], safe_z])
-    inner._move_mocap_to(target_pos, inner.VERTICAL_QUAT, max_steps=250, tolerance=0.003)
+    inner._move_mocap_to(
+        target_pos, inner.VERTICAL_QUAT, max_steps=250, tolerance=0.003
+    )
     mujoco.mj_forward(inner.model, inner.data)
 
 
 def run_eval(ctrl, inner, bm, env_cfg, n_reps: int):
-    safe_z = env_cfg.get("safe_z", 0.53)
+    """Run eval."""
+    safe_z = env_cfg["safe_z"]
 
     # dst → {attempts, successes, error_mm_list}
-    dst_stats: dict[str, dict] = {d: {"attempts": 0, "successes": 0, "errors": []} for d in ALL_DST}
+    dst_stats: dict[str, dict] = {
+        d: {"attempts": 0, "successes": 0, "errors": []} for d in ALL_DST
+    }
     # (src, dst) → list of bools
     pair_results: dict[tuple, list] = defaultdict(list)
 
@@ -97,8 +112,11 @@ def run_eval(ctrl, inner, bm, env_cfg, n_reps: int):
 
 
 def print_results(dst_stats: dict, pair_results: dict):
+    """Print results output."""
     print("\n" + "=" * 65)
-    print(f"{'DESTINATION':<12} {'SUCCESS%':>9} {'ATTEMPTS':>9} {'AVG_ERR_MM':>12} {'STATUS':>10}")
+    print(
+        f"{'DESTINATION':<12} {'SUCCESS%':>9} {'ATTEMPTS':>9} {'AVG_ERR_MM':>12} {'STATUS':>10}"
+    )
     print("-" * 65)
 
     warned = []
@@ -112,7 +130,9 @@ def print_results(dst_stats: dict, pair_results: dict):
         if dst in PROBLEM_DESTINATIONS:
             label = "<-- WAS BAD"
         status = "OK" if pct >= 95 else ("WARN" if pct >= 80 else "FAIL")
-        print(f"{dst:<12} {pct:>8.1f}% {s['attempts']:>9}  {avg_err:>10.1f}   {status}  {label}")
+        print(
+            f"{dst:<12} {pct:>8.1f}% {s['attempts']:>9}  {avg_err:>10.1f}   {status}  {label}"
+        )
         if status != "OK":
             warned.append((dst, pct, s))
 
@@ -121,8 +141,11 @@ def print_results(dst_stats: dict, pair_results: dict):
     if warned:
         print("\nFailed source→destination breakdown:")
         for dst, pct, s in warned:
-            fails = [(src, results) for (src, d), results in pair_results.items()
-                     if d == dst and not all(results)]
+            fails = [
+                (src, results)
+                for (src, d), results in pair_results.items()
+                if d == dst and not all(results)
+            ]
             fails.sort(key=lambda x: sum(x[1]) / len(x[1]))
             for src, results in fails[:10]:
                 sr = sum(results) / len(results) * 100
@@ -132,16 +155,27 @@ def print_results(dst_stats: dict, pair_results: dict):
 
 
 def main():
-    parser = argparse.ArgumentParser(description="Targeted problematic-square transit evaluation.")
-    parser.add_argument("--transit-model", type=str, default=None,
-                        help="Path to transit model zip. Defaults to training.yaml deployed_models.transit")
-    parser.add_argument("--n-reps", type=int, default=3,
-                        help="Repetitions per (src, dst) pair (default: 3)")
+    """Parse command-line arguments and run the script."""
+    parser = argparse.ArgumentParser(
+        description="Targeted problematic-square transit evaluation."
+    )
+    parser.add_argument(
+        "--transit-model",
+        type=str,
+        default=None,
+        help="Path to transit model zip. Defaults to configs/deployed_models.yaml transit",
+    )
+    parser.add_argument(
+        "--n-reps",
+        type=int,
+        default=3,
+        help="Repetitions per (src, dst) pair (default: 3)",
+    )
     args = parser.parse_args()
 
-    cfg = load_config("training")
+    cfg = load_config("deployed_models")
     env_cfg = load_config("env")
-    transit_path = args.transit_model or cfg.get("deployed_models", {}).get("transit")
+    transit_path = args.transit_model or cfg.get("transit")
     if not transit_path:
         print("ERROR: No transit model path found.")
         sys.exit(1)

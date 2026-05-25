@@ -1,18 +1,27 @@
 """
 ScriptedController: Deterministic arm movement for all waypoint stages.
 """
-import numpy as np
-import mujoco
+
 from dataclasses import dataclass
-from typing import Optional
+
+import numpy as np
+
+import time
+
+from src.chess_env.simulation import reset_elapsed_steps, unwrap_env
+from src.chess_env.waypoints import HOVER_Z, SAFE_Z
+from src.utils.io import load_config
+
+M_TO_MM = 1000.0
 
 
 @dataclass
 class StageResult:
     """Result of a single waypoint stage."""
+
     success: bool
     steps: int
-    crash_reason: Optional[str]
+    crash_reason: str | None
     final_pos: np.ndarray
     error_mm: float  # Distance from target at end of stage
 
@@ -20,10 +29,11 @@ class StageResult:
 @dataclass
 class SequenceResult:
     """Result of a full scenario chain."""
+
     success: bool
     stage_results: list  # List[tuple[str, StageResult]]
-    failed_at: Optional[str]  # scenario name where failure occurred
-    grasp_quality: Optional[dict]  # Set after execute_grasp
+    failed_at: str | None  # scenario name where failure occurred
+    grasp_quality: dict | None  # Set after execute_grasp
 
 
 class ScriptedController:
@@ -33,18 +43,9 @@ class ScriptedController:
     without any RL model.
     """
 
-    # Movement parameters
-    TRANSIT_TOLERANCE_M   = 0.004   # 4mm: success threshold for transit
-    VERTICAL_TOLERANCE_M  = 0.004   # 4mm: success threshold for descend/ascend
-    STEP_GAIN             = 1.0     # Full error applied per step (proportional)
-    MIN_STEP_SIZE_M       = 0.002   # 2mm floor prevents slow final-approach creep
-    MAX_STEP_SIZE_M       = 0.024   # 24mm per physics step max; keeps edge-square reachability stable
-    TRANSIT_MAX_STEPS     = 300     # Sufficient for longest board diagonal; ~50 steps to reach equilibrium from any board square
-    VERTICAL_MAX_STEPS    = 200     # Sufficient for 50mm (SAFE_Z → HOVER_Z)
-    FLOOR_LIMIT           = 0.400   # Abort transit if grip Z drops below this
-    GRASP_VERIFY_DRIFT_MM = 30.0    # Max XY drift for "cube held" check post-grasp
-
-    def __init__(self, env, drift_limit: float = 0.010, render_fn=None, render_delay: float = 0.0):
+    def __init__(
+        self, env, drift_limit: float = 0.010, render_fn=None, render_delay: float = 0.0
+    ):
         """
         Args:
             env: gymnasium-wrapped ChessTaskEnv (or the unwrapped env directly)
@@ -52,12 +53,18 @@ class ScriptedController:
             render_fn: Optional callback for rendering intermediate frames
             render_delay: Optional delay after each render call
         """
-        # Unwrap to access ChessTaskEnv directly
-        inner = env
-        while hasattr(inner, 'env'):
-            inner = inner.env
-        self._env = inner
-        self._wrapped_env = env  # Keep reference for TimeLimit reset
+        self._env = unwrap_env(env)
+        self._wrapped_env = env
+        cfg = load_config("env")
+        self.TRANSIT_TOLERANCE_M = cfg["transit_tolerance_m"]
+        self.VERTICAL_TOLERANCE_M = cfg["vertical_tolerance_m"]
+        self.STEP_GAIN = cfg["step_gain"]
+        self.MIN_STEP_SIZE_M = cfg["min_step_size_m"]
+        self.MAX_STEP_SIZE_M = cfg["max_step_size_m"]
+        self.TRANSIT_MAX_STEPS = cfg["transit_max_steps"]
+        self.VERTICAL_MAX_STEPS = cfg["vertical_max_steps"]
+        self.FLOOR_LIMIT = cfg["floor_limit"]
+        self.GRASP_VERIFY_DRIFT_MM = cfg["grasp_verify_drift_mm"]
         self.drift_limit = drift_limit
         self._render_fn = render_fn
         self._render_delay = render_delay
@@ -67,38 +74,40 @@ class ScriptedController:
     # ------------------------------------------------------------------
 
     def _run_movement_loop(
-        self,
-        target_pos: np.ndarray,
-        *,
-        tolerance: float,
-        max_steps: int,
-        abort_fn=None
+        self, target_pos: np.ndarray, *, tolerance: float, max_steps: int, abort_fn=None
     ) -> StageResult:
         """
         Proportional movement loop with optional per-step abort check.
-        
+
         The abort_fn signature: (grip_pos: np.ndarray) -> (abort: bool, reason: str)
         If abort_fn is None, no safety checks are applied.
         """
-        import time
         env = self._env
         for step in range(max_steps):
-            grip_pos = env._utils.get_site_xpos(env.model, env.data, "robot0:grip").copy()
+            grip_pos = env._utils.get_site_xpos(
+                env.model, env.data, "robot0:grip"
+            ).copy()
             error = target_pos - grip_pos
             dist = float(np.linalg.norm(error))
 
             if dist < tolerance:
                 return StageResult(
-                    success=True, steps=step, crash_reason=None,
-                    final_pos=grip_pos.copy(), error_mm=dist * 1000
+                    success=True,
+                    steps=step,
+                    crash_reason=None,
+                    final_pos=grip_pos.copy(),
+                    error_mm=dist * M_TO_MM,
                 )
 
             if abort_fn is not None:
                 abort, reason = abort_fn(grip_pos)
                 if abort:
                     return StageResult(
-                        success=False, steps=step, crash_reason=reason,
-                        final_pos=grip_pos.copy(), error_mm=dist * 1000
+                        success=False,
+                        steps=step,
+                        crash_reason=reason,
+                        final_pos=grip_pos.copy(),
+                        error_mm=dist * M_TO_MM,
                     )
 
             # Apply capped proportional step
@@ -109,7 +118,7 @@ class ScriptedController:
             elif 0.0 < step_norm < self.MIN_STEP_SIZE_M:
                 step_vec = step_vec / step_norm * self.MIN_STEP_SIZE_M
 
-            env._set_action(np.zeros(4))          # Reset mocap to current body
+            env._set_action(np.zeros(4))  # Reset mocap to current body
             env.data.mocap_pos[0][:3] += step_vec  # Apply capped delta
             env.data.mocap_quat[0][:] = env.VERTICAL_QUAT
             env._mujoco_step(None)
@@ -123,8 +132,11 @@ class ScriptedController:
         grip_pos = env._utils.get_site_xpos(env.model, env.data, "robot0:grip").copy()
         dist = float(np.linalg.norm(target_pos - grip_pos))
         return StageResult(
-            success=False, steps=max_steps, crash_reason="TIMEOUT",
-            final_pos=grip_pos.copy(), error_mm=dist * 1000
+            success=False,
+            steps=max_steps,
+            crash_reason="TIMEOUT",
+            final_pos=grip_pos.copy(),
+            error_mm=dist * M_TO_MM,
         )
 
     # ------------------------------------------------------------------
@@ -141,6 +153,7 @@ class ScriptedController:
         target = np.array([target_xy[0], target_xy[1], env.SAFE_Z])
 
         def transit_abort(grip_pos):
+            """Run transit abort logic."""
             if grip_pos[2] < self.FLOOR_LIMIT:
                 return True, f"FLOOR_HIT (z={grip_pos[2]:.4f})"
             if env.grasp_mode:  # Cube drop check during transit-with-cube
@@ -153,7 +166,7 @@ class ScriptedController:
             target,
             tolerance=self.TRANSIT_TOLERANCE_M,
             max_steps=self.TRANSIT_MAX_STEPS,
-            abort_fn=transit_abort
+            abort_fn=transit_abort,
         )
 
     def run_descend(self, target_xy: np.ndarray) -> StageResult:
@@ -167,9 +180,13 @@ class ScriptedController:
         tube_center = np.array([target_xy[0], target_xy[1]])
 
         def descend_abort(grip_pos):
+            """Run descend abort logic."""
             drift = float(np.linalg.norm(grip_pos[:2] - tube_center))
             if drift > self.drift_limit:
-                return True, f"TUBE_BREACH (drift={drift*1000:.1f}mm > limit={self.drift_limit*1000:.0f}mm)"
+                return (
+                    True,
+                    f"TUBE_BREACH (drift={drift * M_TO_MM:.1f}mm > limit={self.drift_limit * M_TO_MM:.0f}mm)",
+                )
             if grip_pos[2] < env.TABLE_SURFACE_Z:
                 return True, f"TABLE_HIT (z={grip_pos[2]:.4f})"
             return False, None
@@ -178,7 +195,7 @@ class ScriptedController:
             target,
             tolerance=self.VERTICAL_TOLERANCE_M,
             max_steps=self.VERTICAL_MAX_STEPS,
-            abort_fn=descend_abort
+            abort_fn=descend_abort,
         )
 
     def run_ascend(self, target_xy: np.ndarray) -> StageResult:
@@ -192,9 +209,13 @@ class ScriptedController:
         tube_center = np.array([target_xy[0], target_xy[1]])
 
         def ascend_abort(grip_pos):
+            """Run ascend abort logic."""
             drift = float(np.linalg.norm(grip_pos[:2] - tube_center))
             if drift > self.drift_limit:
-                return True, f"TUBE_BREACH (drift={drift*1000:.1f}mm > limit={self.drift_limit*1000:.0f}mm)"
+                return (
+                    True,
+                    f"TUBE_BREACH (drift={drift * M_TO_MM:.1f}mm > limit={self.drift_limit * M_TO_MM:.0f}mm)",
+                )
             if env.grasp_mode:
                 held, reason = env._check_cube_held(grip_pos)
                 if not held:
@@ -205,7 +226,7 @@ class ScriptedController:
             target,
             tolerance=self.VERTICAL_TOLERANCE_M,
             max_steps=self.VERTICAL_MAX_STEPS,
-            abort_fn=ascend_abort
+            abort_fn=ascend_abort,
         )
 
     def run_grasp(self) -> StageResult:
@@ -214,7 +235,9 @@ class ScriptedController:
         Precondition: arm is stationary at HOVER_Z over cube XY.
         """
         env = self._env
-        grip_before = env._utils.get_site_xpos(env.model, env.data, "robot0:grip").copy()
+        grip_before = env._utils.get_site_xpos(
+            env.model, env.data, "robot0:grip"
+        ).copy()
 
         result_dict = env.execute_grasp()  # Returns dict with success/reason
         success = result_dict.get("success", False)
@@ -223,10 +246,12 @@ class ScriptedController:
 
         return StageResult(
             success=success,
-            steps=result_dict.get("total_steps_used", result_dict.get("close_steps_used", 0)),
+            steps=result_dict.get(
+                "total_steps_used", result_dict.get("close_steps_used", 0)
+            ),
             crash_reason=None if success else result_dict.get("reason", "GRASP_FAILED"),
             final_pos=grip_after.copy(),
-            error_mm=dist * 1000
+            error_mm=dist * M_TO_MM,
         )
 
     def run_place(self, dst_xy: np.ndarray) -> StageResult:
@@ -235,7 +260,7 @@ class ScriptedController:
         Precondition: arm is stationary at HOVER_Z over dst_xy with cube held.
         """
         env = self._env
-        grip_before = env._utils.get_site_xpos(env.model, env.data, "robot0:grip").copy()
+        env._utils.get_site_xpos(env.model, env.data, "robot0:grip").copy()
 
         result_dict = env.execute_place(dst_xy)
         success = result_dict.get("success", False)
@@ -246,7 +271,7 @@ class ScriptedController:
             steps=result_dict.get("total_steps_used", 0),
             crash_reason=None if success else result_dict.get("reason", "PLACE_FAILED"),
             final_pos=grip_after.copy(),
-            error_mm=0.0
+            error_mm=0.0,
         )
 
     # ------------------------------------------------------------------
@@ -258,7 +283,7 @@ class ScriptedController:
         new_scenario: str,
         new_goal_pos: np.ndarray,
         nominal_exit_pos: np.ndarray,
-        nominal_xy=None
+        nominal_xy=None,
     ) -> dict:
         """
         Delegate to env.soft_reset() and reset the TimeLimit step counter.
@@ -267,19 +292,8 @@ class ScriptedController:
         obs, info = self._env.soft_reset(
             new_scenario, new_goal_pos, nominal_exit_pos, nominal_xy
         )
-        # Reset the TimeLimit wrapper's step counter
-        curr = self._wrapped_env
-        # Try to find _elapsed_steps in wrappers
-        while hasattr(curr, 'env'):
-            if hasattr(curr, '_elapsed_steps'):
-                curr._elapsed_steps = 0
-                break
-            curr = curr.env
-        else:
-            # Check the last one too
-            if hasattr(curr, '_elapsed_steps'):
-                curr._elapsed_steps = 0
-                
+        reset_elapsed_steps(self._wrapped_env)
+
         return info
 
     # ------------------------------------------------------------------
@@ -291,7 +305,6 @@ class ScriptedController:
         Execute: transit → descend → grasp → ascend at src_xy.
         Returns SequenceResult with per-stage StageResults.
         """
-        from src.chess_env.waypoints import exit_waypoint, SAFE_Z, HOVER_Z
         results = []
 
         # 1. Transit to src_xy
@@ -335,7 +348,6 @@ class ScriptedController:
         Execute: transit → descend → place → ascend at dst_xy.
         Precondition: cube is currently held (grasp_mode=True).
         """
-        from src.chess_env.waypoints import SAFE_Z, HOVER_Z
         results = []
 
         # 1. Transit to dst_xy (cube held throughout)
@@ -390,5 +402,5 @@ class ScriptedController:
             success=place_result.success,
             stage_results=combined_results,
             failed_at=place_result.failed_at,
-            grasp_quality=place_result.grasp_quality
+            grasp_quality=place_result.grasp_quality,
         )

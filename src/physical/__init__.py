@@ -1,1 +1,1 @@
-"""Physical MuJoCo-facing helpers for chess pieces."""
+"""Physical execution layer: arm movement, teleporter, occupancy, and plan executor."""

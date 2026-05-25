@@ -1,5 +1,5 @@
-from pathlib import Path
 import struct
+from pathlib import Path
 
 from src.chess_env.environment_generation import regenerate_scene, regenerate_stls
 

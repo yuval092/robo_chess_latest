@@ -4,29 +4,28 @@ Exact chess-board reachability sweep.
 Validates all 64 configured 8cm chess square centers through transit,
 descend, and ascend using the scripted waypoint controller.
 """
+
 import argparse
 import math
-import os
 import sys
 
 import numpy as np
 
-sys.path.append(os.getcwd())
-
-import src.chess_env
 from src.chess_env.controller import ScriptedController
 from src.chess_game.board_mapper import BoardMapper
 from src.utils.args import add_common_args, make_env
+from src.utils.io import load_config
 
 
-REQUIRED_RANK1_Y = -0.0159
-REQUIRED_RANK8_Y = 0.5441
-REQUIRED_FILE_A_X = 0.600
-REQUIRED_FILE_H_X = 1.160
-GEOMETRY_TOLERANCE_M = 1e-9
+def _load_expected_geometry() -> dict:
+    """Load expected board geometry from config for reachability validation."""
+    return load_config("chess")["reachability_expected"]
 
 
 def validate_board_geometry(mapper: BoardMapper) -> None:
+    """Return validate board geometry."""
+    expected = _load_expected_geometry()
+    tol = expected["geometry_tolerance_m"]
     rank1_y = mapper.square_name_to_xy("a1")[1]
     rank8_y = mapper.square_name_to_xy("a8")[1]
     file_a_x = mapper.square_name_to_xy("a1")[0]
@@ -35,17 +34,19 @@ def validate_board_geometry(mapper: BoardMapper) -> None:
         f"Board geometry: rank1_y={rank1_y:.4f}m rank8_y={rank8_y:.4f}m "
         f"fileA_x={file_a_x:.3f}m fileH_x={file_h_x:.3f}m"
     )
-    if not math.isclose(rank1_y, REQUIRED_RANK1_Y, abs_tol=GEOMETRY_TOLERANCE_M):
-        raise SystemExit(f"rank1 center Y must be {REQUIRED_RANK1_Y:.4f}m, got {rank1_y:.6f}m")
-    if not math.isclose(rank8_y, REQUIRED_RANK8_Y, abs_tol=GEOMETRY_TOLERANCE_M):
-        raise SystemExit(f"rank8 center Y must be {REQUIRED_RANK8_Y:.4f}m, got {rank8_y:.6f}m")
-    if not math.isclose(file_a_x, REQUIRED_FILE_A_X, abs_tol=GEOMETRY_TOLERANCE_M):
-        raise SystemExit(f"file-a center X must be {REQUIRED_FILE_A_X:.3f}m, got {file_a_x:.6f}m")
-    if not math.isclose(file_h_x, REQUIRED_FILE_H_X, abs_tol=GEOMETRY_TOLERANCE_M):
-        raise SystemExit(f"file-h center X must be {REQUIRED_FILE_H_X:.3f}m, got {file_h_x:.6f}m")
+    checks = [
+        ("rank1_y", rank1_y, expected["rank1_y_m"]),
+        ("rank8_y", rank8_y, expected["rank8_y_m"]),
+        ("file_a_x", file_a_x, expected["file_a_x_m"]),
+        ("file_h_x", file_h_x, expected["file_h_x_m"]),
+    ]
+    for name, actual, required in checks:
+        if not math.isclose(actual, required, abs_tol=tol):
+            raise SystemExit(f"{name}: expected {required:.4f}m, got {actual:.6f}m")
 
 
 def run_square(square_name: str, square_xy: np.ndarray, args, env, ctrl) -> list[dict]:
+    """Run square."""
     results = []
     inner = env.unwrapped
 
@@ -97,6 +98,7 @@ def run_square(square_name: str, square_xy: np.ndarray, args, env, ctrl) -> list
 
 
 def format_stage(result) -> str:
+    """Format stage for display."""
     if isinstance(result, Exception):
         return f"EXCEPTION {result}"
     if result.success:
@@ -105,9 +107,16 @@ def format_stage(result) -> str:
 
 
 def main() -> None:
-    parser = argparse.ArgumentParser(description="Validate exact 8cm chess-square reachability.")
-    parser.add_argument("--all-squares", action="store_true", help="Validate all 64 squares.")
-    parser.add_argument("--squares", nargs="*", help="Optional square names, e.g. a1 e4 h8.")
+    """Parse command-line arguments and run the script."""
+    parser = argparse.ArgumentParser(
+        description="Validate exact 8cm chess-square reachability."
+    )
+    parser.add_argument(
+        "--all-squares", action="store_true", help="Validate all 64 squares."
+    )
+    parser.add_argument(
+        "--squares", nargs="*", help="Optional square names, e.g. a1 e4 h8."
+    )
     parser = add_common_args(parser)
     args = parser.parse_args()
 
@@ -119,7 +128,9 @@ def main() -> None:
     elif args.all_squares:
         selected = centers
     else:
-        selected = {name: centers[name] for name in ("a1", "h1", "a8", "h8", "d4", "e5")}
+        selected = {
+            name: centers[name] for name in ("a1", "h1", "a8", "h8", "d4", "e5")
+        }
 
     print(f"Chess reachability: {len(selected)} squares × {args.n_episodes} episode(s)")
     failures = []
@@ -144,7 +155,10 @@ def main() -> None:
                         max_error_mm = max(max_error_mm, stage_result.error_mm)
                     stage_text.append(f"{stage}={format_stage(stage_result)}")
                 status = "OK" if result["success"] else "FAIL"
-                print(f"{square_name:>2} ({xy[0]:.3f}, {xy[1]:.3f}) ep={result['episode']} {status}  " + "  ".join(stage_text))
+                print(
+                    f"{square_name:>2} ({xy[0]:.3f}, {xy[1]:.3f}) ep={result['episode']} {status}  "
+                    + "  ".join(stage_text)
+                )
                 if not result["success"]:
                     failures.append(result)
     finally:

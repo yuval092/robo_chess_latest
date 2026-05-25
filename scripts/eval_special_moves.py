@@ -1,13 +1,9 @@
+"""Evaluate special chess move planning and execution."""
 import argparse
-import os
-import sys
 
 import chess
 import gymnasium as gym
 
-sys.path.append(os.getcwd())
-
-import src.chess_env
 from src.chess_env.controller import ScriptedController
 from src.chess_game.board_mapper import BoardMapper
 from src.chess_game.chess_service import ChessService
@@ -19,31 +15,26 @@ from src.chess_game.move_planner import (
     TeleportCommand,
 )
 from src.physical.movement_executor import MovementExecutor
+from src.physical.noop_executor import NoOpPhysicalExecutor
 from src.physical.occupancy import PhysicalOccupancy
 from src.physical.piece_registry import PieceRegistry
 from src.physical.piece_teleport import PieceTeleporter
-from src.physical.plan_executor import PhysicalExecutionResult, PhysicalPlanExecutor
-
-
-class MockPhysicalExecutor:
-    def __init__(self):
-        self.plans = []
-
-    def execute(self, plan):
-        self.plans.append(plan)
-        return PhysicalExecutionResult(True, [(command, True) for command in plan.commands])
-
-    def return_to_home(self):
-        return PhysicalExecutionResult(True, [])
+from src.physical.plan_executor import PhysicalPlanExecutor
 
 
 def command_signature(command) -> tuple:
+    """Return command signature."""
     if isinstance(command, ArmMoveCommand):
         return ("arm", command.piece_id, command.src_square, command.dst_square)
     if isinstance(command, RemoveFromBoardCommand):
         return ("remove", command.piece_id, command.graveyard_slot)
     if isinstance(command, TeleportCommand):
-        return ("teleport", command.piece_id, command.destination_kind, command.destination_id)
+        return (
+            "teleport",
+            command.piece_id,
+            command.destination_kind,
+            command.destination_id,
+        )
     raise TypeError(f"Unsupported command {command}")
 
 
@@ -91,6 +82,7 @@ CASES = {
 
 
 def tracker_for(case: dict) -> LogicalPieceTracker:
+    """Return tracker for."""
     tracker = LogicalPieceTracker.empty()
     for square, piece_id in case["pieces"].items():
         tracker.set_piece_at(square, piece_id)
@@ -98,7 +90,8 @@ def tracker_for(case: dict) -> LogicalPieceTracker:
 
 
 def run_mock_case(name: str, case: dict) -> None:
-    executor = MockPhysicalExecutor()
+    """Run mock case."""
+    executor = NoOpPhysicalExecutor()
     orchestrator = GameOrchestrator(
         ChessService(case["fen"]),
         executor,
@@ -116,11 +109,14 @@ def run_mock_case(name: str, case: dict) -> None:
         raise SystemExit(f"{name} failed: {result.error}")
     actual = [command_signature(command) for command in executor.plans[-1].commands]
     if actual != case["expected"]:
-        raise SystemExit(f"{name} command mismatch: expected {case['expected']}, got {actual}")
+        raise SystemExit(
+            f"{name} command mismatch: expected {case['expected']}, got {actual}"
+        )
     print(f"{name}: ok move={result.move_uci} fen={result.snapshot.fen}")
 
 
 def run_real_case(name: str, case: dict, args) -> None:
+    """Run real case."""
     env = gym.make(
         "ChessFetchTask-v0",
         render_mode="human" if args.visualize else None,
@@ -136,11 +132,15 @@ def run_real_case(name: str, case: dict, args) -> None:
         offboard_slots = {"white": 0, "black": 0}
         for piece_id in PieceRegistry().starting_square_map():
             color = "white" if piece_id.startswith("white_") else "black"
-            teleporter.teleport_piece_to_graveyard(piece_id, f"slot_{offboard_slots[color]:02d}")
+            teleporter.teleport_piece_to_graveyard(
+                piece_id, f"slot_{offboard_slots[color]:02d}"
+            )
             offboard_slots[color] += 1
         for square, piece_id in case["pieces"].items():
             teleporter.teleport_piece_to_square(piece_id, square)
-        occupancy = PhysicalOccupancy({piece_id: square for square, piece_id in case["pieces"].items()})
+        occupancy = PhysicalOccupancy(
+            {piece_id: square for square, piece_id in case["pieces"].items()}
+        )
         controller = ScriptedController(
             env,
             drift_limit=args.drift_limit,
@@ -169,16 +169,33 @@ def run_real_case(name: str, case: dict, args) -> None:
         )
         if not result.accepted or not result.physical_success:
             raise SystemExit(f"{name} real-physics failed: {result.error}")
-        print(f"{name}: real-physics ok move={result.move_uci} fen={result.snapshot.fen}")
+        print(
+            f"{name}: real-physics ok move={result.move_uci} fen={result.snapshot.fen}"
+        )
     finally:
         env.close()
 
 
 def main() -> None:
-    parser = argparse.ArgumentParser(description="Evaluate special chess moves through planner/orchestrator.")
-    parser.add_argument("--all", action="store_true", help="Run all mocked special-move cases. This is the default.")
-    parser.add_argument("--case", choices=sorted(CASES), help="Run one case instead of all mocked cases.")
-    parser.add_argument("--real-physics", action="store_true", help="Run the selected case with MuJoCo physics.")
+    """Parse command-line arguments and run the script."""
+    parser = argparse.ArgumentParser(
+        description="Evaluate special chess moves through planner/orchestrator."
+    )
+    parser.add_argument(
+        "--all",
+        action="store_true",
+        help="Run all mocked special-move cases. This is the default.",
+    )
+    parser.add_argument(
+        "--case",
+        choices=sorted(CASES),
+        help="Run one case instead of all mocked cases.",
+    )
+    parser.add_argument(
+        "--real-physics",
+        action="store_true",
+        help="Run the selected case with MuJoCo physics.",
+    )
     parser.add_argument("--visualize", action="store_true")
     parser.add_argument("--delay", type=float, default=0.0)
     parser.add_argument("--drift-limit", type=float, default=0.010)
@@ -186,7 +203,9 @@ def main() -> None:
 
     selected = {args.case: CASES[args.case]} if args.case else CASES
     if args.real_physics and len(selected) != 1:
-        raise SystemExit("--real-physics requires --case to avoid a long destructive scenario sequence")
+        raise SystemExit(
+            "--real-physics requires --case to avoid a long destructive scenario sequence"
+        )
 
     for name, case in selected.items():
         if args.real_physics:

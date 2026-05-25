@@ -2,7 +2,6 @@ import gymnasium as gym
 import numpy as np
 import pytest
 
-import src.chess_env
 from src.chess_env.controller import ScriptedController
 from src.chess_game.board_mapper import BoardMapper
 from src.physical.movement_executor import MovementExecutor
@@ -34,10 +33,19 @@ def make_executor(env, registry):
     ],
 )
 def test_move_piece_in_crowded_starting_position(piece_id, src, dst, dst_square):
-    env = gym.make("ChessFetchTask-v0", render_mode=None, show_chess_pieces=True, hide_object=True, force_scenario="transit")
+    env = gym.make(
+        "ChessFetchTask-v0",
+        render_mode=None,
+        show_chess_pieces=True,
+        hide_object=True,
+        force_scenario="transit",
+    )
     env.reset()
     registry = PieceRegistry()
-    starts = {piece.piece_id: piece_xyz(env.unwrapped, piece) for piece in registry.all_pieces()}
+    starts = {
+        piece.piece_id: piece_xyz(env.unwrapped, piece)
+        for piece in registry.all_pieces()
+    }
 
     result = make_executor(env, registry).move_piece_between_squares(piece_id, src, dst)
 
@@ -49,13 +57,22 @@ def test_move_piece_in_crowded_starting_position(piece_id, src, dst, dst_square)
     for piece in registry.all_pieces():
         if piece.piece_id == piece_id:
             continue
-        assert np.linalg.norm(piece_xyz(env.unwrapped, piece) - starts[piece.piece_id]) < 0.002
+        assert (
+            np.linalg.norm(piece_xyz(env.unwrapped, piece) - starts[piece.piece_id])
+            < 0.002
+        )
 
     env.close()
 
 
 def test_move_rejects_empty_source_and_occupied_destination_before_motion():
-    env = gym.make("ChessFetchTask-v0", render_mode=None, show_chess_pieces=True, hide_object=True, force_scenario="transit")
+    env = gym.make(
+        "ChessFetchTask-v0",
+        render_mode=None,
+        show_chess_pieces=True,
+        hide_object=True,
+        force_scenario="transit",
+    )
     env.reset()
     registry = PieceRegistry()
     executor = make_executor(env, registry)

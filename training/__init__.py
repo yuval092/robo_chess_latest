@@ -1,1 +1,1 @@
-"""Training utilities for RoboChess RL specialist models."""
+"""SAC specialist model training infrastructure. Not imported by production src code."""

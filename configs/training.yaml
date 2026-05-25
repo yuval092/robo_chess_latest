@@ -1,5 +1,5 @@
 # Base pretrained model (FetchPickAndPlace-v4 transfer weights)
-base_model: "archive/rl_system/models/sac-FetchPickAndPlace-v4.zip"
+base_model: "models/pretrained/sac-FetchPickAndPlace-v4.zip"
 
 # Parallelism
 num_envs: 4
@@ -28,14 +28,3 @@ n_eval_episodes: 20
 # Logging
 log_freq: 2000
 moving_avg_window: 100
-
-# Optional model path registry for eval/integration scripts.
-deployed_models:
-  # transit: new run 2026-05-24. Use best_model (saved ~450K steps, 100% eval).
-  # final_transit MUST NOT be used — training collapsed from 100%→30% at 550K–600K steps.
-  transit: "checkpoints/transit_20260524_142519/best_model_transit.zip"
-  # descend: new run 2026-05-24. Use final_descend (600K steps, 9/9 key squares with code fixes).
-  # best_model (450K) was oscillating — final converged and is better.
-  # Requires VERTICAL_QUAT fix in _run_stage + descend_success_z_tolerance: 0.015 in env.yaml.
-  descend: "checkpoints/descend_20260524_142540/final_descend.zip"
-  ascend: "checkpoints/ascend_20260523_222849/best_model_ascend.zip"

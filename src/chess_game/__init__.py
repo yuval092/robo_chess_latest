@@ -1,1 +1,1 @@
-"""Pure chess-game geometry and rules helpers."""
+"""Chess game logic: service, orchestrator, move planner, and board mapper."""

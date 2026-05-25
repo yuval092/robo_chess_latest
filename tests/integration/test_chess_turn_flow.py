@@ -2,18 +2,17 @@ import chess
 import gymnasium as gym
 import numpy as np
 
-import src.chess_env
+from scripts.eval_chess_game_flow import run_flow
 from src.chess_env.controller import ScriptedController
+from src.chess_game.board_mapper import BoardMapper
 from src.chess_game.chess_service import ChessService
 from src.chess_game.game_orchestrator import GameOrchestrator
 from src.chess_game.move_planner import LogicalPieceTracker
-from src.chess_game.board_mapper import BoardMapper
 from src.physical.movement_executor import MovementExecutor
 from src.physical.occupancy import PhysicalOccupancy
 from src.physical.piece_registry import PieceRegistry
 from src.physical.piece_teleport import PieceTeleporter
 from src.physical.plan_executor import PhysicalPlanExecutor
-
 
 ARM_HOME_JOINTS = (
     "robot0:torso_lift_joint",
@@ -30,11 +29,19 @@ ARM_HOME_JOINTS = (
 
 
 def robot_home_qpos(uw):
-    return np.array([uw.data.qpos[uw.model.joint(name).qposadr[0]] for name in ARM_HOME_JOINTS])
+    return np.array(
+        [uw.data.qpos[uw.model.joint(name).qposadr[0]] for name in ARM_HOME_JOINTS]
+    )
 
 
 def test_real_physical_single_turn_commits_after_success():
-    env = gym.make("ChessFetchTask-v0", render_mode=None, show_chess_pieces=True, hide_object=True, force_scenario="transit")
+    env = gym.make(
+        "ChessFetchTask-v0",
+        render_mode=None,
+        show_chess_pieces=True,
+        hide_object=True,
+        force_scenario="transit",
+    )
     env.reset()
     home_qpos = robot_home_qpos(env.unwrapped)
     registry = PieceRegistry()
@@ -69,9 +76,13 @@ def test_real_physical_single_turn_commits_after_success():
 
 
 def test_edge_pawn_move_after_prior_home_returns_does_not_timeout():
-    from scripts.eval_chess_game_flow import run_flow
-
-    env = gym.make("ChessFetchTask-v0", render_mode=None, show_chess_pieces=True, hide_object=True, force_scenario="transit")
+    env = gym.make(
+        "ChessFetchTask-v0",
+        render_mode=None,
+        show_chess_pieces=True,
+        hide_object=True,
+        force_scenario="transit",
+    )
     try:
         env.reset()
         mapper = BoardMapper.from_configs()

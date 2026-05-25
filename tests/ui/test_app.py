@@ -55,7 +55,14 @@ def test_index_renders_interactive_controls(client):
 
     assert response.status_code == 200
     html = response.get_data(as_text=True)
-    for element_id in ["board", "new-game", "computer", "refresh", "flip-board", "history"]:
+    for element_id in [
+        "board",
+        "new-game",
+        "computer",
+        "refresh",
+        "flip-board",
+        "history",
+    ]:
         assert f'id="{element_id}"' in html
     assert "busy-overlay" not in html
 

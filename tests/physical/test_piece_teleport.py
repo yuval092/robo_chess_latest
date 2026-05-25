@@ -1,7 +1,6 @@
 import gymnasium as gym
 import numpy as np
 
-import src.chess_env
 from src.chess_game.board_mapper import BoardMapper
 from src.physical.occupancy import PhysicalOccupancy
 from src.physical.piece_registry import PieceRegistry
@@ -36,7 +35,10 @@ def test_teleport_piece_to_square_sets_pose_and_zeroes_velocity():
 
     teleporter.teleport_piece_to_square("white_pawn_e", "e4")
 
-    assert np.allclose(piece_xyz(uw, "white_pawn_e"), mapper.square_to_piece_xyz(__import__("chess").E4))
+    assert np.allclose(
+        piece_xyz(uw, "white_pawn_e"),
+        mapper.square_to_piece_xyz(__import__("chess").E4),
+    )
     joint_id = uw.model.joint("piece_white_pawn_e:joint").id
     dof_start = uw.model.jnt_dofadr[joint_id]
     assert np.allclose(uw.data.qvel[dof_start : dof_start + 6], 0.0)
@@ -50,7 +52,9 @@ def test_teleport_piece_to_graveyard_slot():
 
     teleporter.teleport_piece_to_graveyard("white_pawn_e", "slot_03")
 
-    assert np.allclose(piece_xyz(env.unwrapped, "white_pawn_e"), [0.640, -0.300 + 3 * 0.045, 0.015])
+    assert np.allclose(
+        piece_xyz(env.unwrapped, "white_pawn_e"), [0.640, -0.300 + 3 * 0.045, 0.015]
+    )
     env.close()
 
 

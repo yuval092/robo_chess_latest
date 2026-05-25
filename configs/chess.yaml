@@ -9,6 +9,18 @@ board:
     file_axis: x
     rank_axis: y
   use_env_edge_margin_for_board: false
+  validation:
+    required_cell_size_m: 0.08
+    required_board_width_m: 0.64
+    required_table_margin_m: 0.03
+    geometry_tolerance_m: 1.0e-9
+
+reachability_expected:
+  rank1_y_m: -0.0159
+  rank8_y_m: 0.5441
+  file_a_x_m: 0.600
+  file_h_x_m: 1.160
+  geometry_tolerance_m: 1.0e-9
 
 pieces:
   cube_half_extent_m: 0.015    # Physics collision body half-size

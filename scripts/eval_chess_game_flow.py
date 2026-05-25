@@ -1,14 +1,10 @@
+"""Evaluate complete chess game flow through logical and physical layers."""
 import argparse
-import os
-import sys
 
 import chess
 import gymnasium as gym
 import numpy as np
 
-sys.path.append(os.getcwd())
-
-import src.chess_env
 from src.chess_env.controller import ScriptedController
 from src.chess_env.model_controller import ModelEmbeddedController
 from src.chess_game.board_mapper import BoardMapper
@@ -21,26 +17,19 @@ from src.chess_game.move_planner import (
     TeleportCommand,
 )
 from src.physical.movement_executor import MovementExecutor
+from src.physical.noop_executor import NoOpPhysicalExecutor
 from src.physical.occupancy import PhysicalOccupancy
 from src.physical.piece_registry import PieceRegistry
 from src.physical.piece_teleport import PieceTeleporter
-from src.physical.plan_executor import PhysicalExecutionResult, PhysicalPlanExecutor
-from src.utils.config import load_config
-
+from src.physical.plan_executor import PhysicalPlanExecutor
+from src.utils.io import load_config
 
 DEFAULT_MOVES = "e2e4,e7e5,g1f3,b8c6"
 POSITION_TOLERANCE_MM = 5.0
 
 
-class MockPhysicalExecutor:
-    def execute(self, plan):
-        return PhysicalExecutionResult(True, [(command, True) for command in plan.commands])
-
-    def return_to_home(self):
-        return PhysicalExecutionResult(True, [])
-
-
 def piece_position(env, piece_id: str) -> np.ndarray:
+    """Return piece position."""
     inner = env.unwrapped if hasattr(env, "unwrapped") else env
     previous = inner.active_piece_id
     inner.set_active_piece(piece_id)
@@ -53,6 +42,7 @@ def piece_position(env, piece_id: str) -> np.ndarray:
 
 
 def touched_piece_ids(plan) -> set[str]:
+    """Return touched piece ids."""
     touched = set()
     for command in plan.commands:
         if isinstance(command, ArmMoveCommand):
@@ -65,6 +55,7 @@ def touched_piece_ids(plan) -> set[str]:
 
 
 def command_signature(command) -> str:
+    """Return command signature."""
     if isinstance(command, ArmMoveCommand):
         return f"ARM {command.piece_id} {command.src_square}->{command.dst_square}"
     if isinstance(command, RemoveFromBoardCommand):
@@ -75,13 +66,17 @@ def command_signature(command) -> str:
 
 
 def piece_type_from_id(piece_id: str) -> str:
+    """Return piece type from id."""
     parts = piece_id.split("_")
     if "reserve" in parts:
         return parts[2]
     return parts[1]
 
 
-def assert_tracker_matches_board(board: chess.Board, tracker: LogicalPieceTracker) -> None:
+def assert_tracker_matches_board(
+    board: chess.Board, tracker: LogicalPieceTracker
+) -> None:
+    """Assert tracker matches board."""
     expected_type = {
         chess.PAWN: "pawn",
         chess.KNIGHT: "knight",
@@ -95,19 +90,27 @@ def assert_tracker_matches_board(board: chess.Board, tracker: LogicalPieceTracke
         tracked_piece_id = tracker.piece_id_at(square)
         if board_piece is None:
             if tracked_piece_id is not None:
-                raise SystemExit(f"Tracker has {tracked_piece_id} on empty logical square {square}")
+                raise SystemExit(
+                    f"Tracker has {tracked_piece_id} on empty logical square {square}"
+                )
             continue
         if tracked_piece_id is None:
             raise SystemExit(f"Tracker is missing {board_piece.symbol()} on {square}")
         color = "white" if board_piece.color == chess.WHITE else "black"
         piece_type = expected_type[board_piece.piece_type]
-        if not tracked_piece_id.startswith(f"{color}_") or piece_type_from_id(tracked_piece_id) != piece_type:
+        if (
+            not tracked_piece_id.startswith(f"{color}_")
+            or piece_type_from_id(tracked_piece_id) != piece_type
+        ):
             raise SystemExit(
                 f"Tracker mismatch on {square}: board={board_piece.symbol()} tracked={tracked_piece_id}"
             )
 
 
-def assert_occupancy_matches_tracker(occupancy: PhysicalOccupancy, tracker: LogicalPieceTracker) -> None:
+def assert_occupancy_matches_tracker(
+    occupancy: PhysicalOccupancy, tracker: LogicalPieceTracker
+) -> None:
+    """Assert occupancy matches tracker."""
     for square in chess.SQUARE_NAMES:
         tracked_piece_id = tracker.piece_id_at(square)
         physical_piece_id = occupancy.piece_at_square(square)
@@ -117,7 +120,10 @@ def assert_occupancy_matches_tracker(occupancy: PhysicalOccupancy, tracker: Logi
             )
 
 
-def assert_physical_positions(env, mapper: BoardMapper, occupancy: PhysicalOccupancy, tolerance_mm: float) -> None:
+def assert_physical_positions(
+    env, mapper: BoardMapper, occupancy: PhysicalOccupancy, tolerance_mm: float
+) -> None:
+    """Assert physical positions."""
     for piece_id in PieceRegistry().starting_square_map():
         square = occupancy.square_of_piece(piece_id)
         if square is None:
@@ -132,22 +138,32 @@ def assert_physical_positions(env, mapper: BoardMapper, occupancy: PhysicalOccup
             )
 
 
-def assert_nonmoving_displacement(env, before: dict[str, np.ndarray], skipped: set[str], tolerance_mm: float) -> None:
+def assert_nonmoving_displacement(
+    env, before: dict[str, np.ndarray], skipped: set[str], tolerance_mm: float
+) -> None:
+    """Assert nonmoving displacement."""
     worst_piece = None
     worst_mm = 0.0
     for piece_id, start_pos in before.items():
         if piece_id in skipped:
             continue
-        displacement_mm = float(np.linalg.norm(piece_position(env, piece_id) - start_pos) * 1000.0)
+        displacement_mm = float(
+            np.linalg.norm(piece_position(env, piece_id) - start_pos) * 1000.0
+        )
         if displacement_mm > worst_mm:
             worst_piece = piece_id
             worst_mm = displacement_mm
-    print(f"  nonmoving_max_displacement piece={worst_piece} displacement={worst_mm:.1f}mm")
+    print(
+        f"  nonmoving_max_displacement piece={worst_piece} displacement={worst_mm:.1f}mm"
+    )
     if worst_mm > tolerance_mm:
-        raise SystemExit(f"Non-moving displacement exceeded tolerance: {worst_piece} {worst_mm:.1f}mm")
+        raise SystemExit(
+            f"Non-moving displacement exceeded tolerance: {worst_piece} {worst_mm:.1f}mm"
+        )
 
 
 def print_failure_context(env, fen_before: str, uci: str, plan, result) -> None:
+    """Print failure context output."""
     print("Failure context:")
     print(f"  fen_before={fen_before}")
     print(f"  attempted_uci={uci}")
@@ -183,6 +199,7 @@ def run_flow(
     occupancy: PhysicalOccupancy | None = None,
     verify_agreement: bool = False,
 ) -> None:
+    """Run flow."""
     service = ChessService()
     occupancy_piece_ids = set(PieceRegistry().starting_square_map())
     for index, uci in enumerate(moves, start=1):
@@ -191,15 +208,22 @@ def run_flow(
         plan = MovePlanner(service.board, tracker).plan(move)
         before_positions = {}
         if env is not None:
-            before_positions = {piece_id: piece_position(env, piece_id) for piece_id in occupancy_piece_ids}
+            before_positions = {
+                piece_id: piece_position(env, piece_id)
+                for piece_id in occupancy_piece_ids
+            }
 
         result = physical_executor.execute(plan)
         if not result.success:
             print_failure_context(env, fen_before, uci, plan, result)
-            raise SystemExit(f"move {index} {uci} physical execution failed: {result.error}")
+            raise SystemExit(
+                f"move {index} {uci} physical execution failed: {result.error}"
+            )
         home_result = physical_executor.return_to_home()
         if not home_result.success:
-            raise SystemExit(f"move {index} {uci} return home failed: {home_result.error}")
+            raise SystemExit(
+                f"move {index} {uci} return home failed: {home_result.error}"
+            )
 
         service.push(move)
         tracker.apply_committed_move(move, plan)
@@ -209,7 +233,9 @@ def run_flow(
             if env is not None and mapper is not None:
                 assert_physical_positions(env, mapper, occupancy, POSITION_TOLERANCE_MM)
         if env is not None:
-            assert_nonmoving_displacement(env, before_positions, touched_piece_ids(plan), tolerance_mm)
+            assert_nonmoving_displacement(
+                env, before_positions, touched_piece_ids(plan), tolerance_mm
+            )
         for command in plan.commands:
             if isinstance(command, RemoveFromBoardCommand):
                 occupancy_piece_ids.discard(command.piece_id)
@@ -217,15 +243,32 @@ def run_flow(
 
 
 def main() -> None:
-    parser = argparse.ArgumentParser(description="Run a deterministic chess game flow through planning and execution.")
-    parser.add_argument("--moves", default=DEFAULT_MOVES, help="Comma-separated UCI move sequence.")
-    parser.add_argument("--mock-physical", action="store_true", help="Skip MuJoCo and validate logical planning only.")
-    parser.add_argument("--verify-agreement", action="store_true", help="Check board, tracker, occupancy, and MuJoCo positions after every move.")
+    """Parse command-line arguments and run the script."""
+    parser = argparse.ArgumentParser(
+        description="Run a deterministic chess game flow through planning and execution."
+    )
+    parser.add_argument(
+        "--moves", default=DEFAULT_MOVES, help="Comma-separated UCI move sequence."
+    )
+    parser.add_argument(
+        "--mock-physical",
+        action="store_true",
+        help="Skip MuJoCo and validate logical planning only.",
+    )
+    parser.add_argument(
+        "--verify-agreement",
+        action="store_true",
+        help="Check board, tracker, occupancy, and MuJoCo positions after every move.",
+    )
     parser.add_argument("--visualize", action="store_true")
     parser.add_argument("--delay", type=float, default=0.0)
     parser.add_argument("--drift-limit", type=float, default=0.010)
     parser.add_argument("--nonmoving-tolerance-mm", type=float, default=2.0)
-    parser.add_argument("--use-rl-models", action="store_true", help="Use configured RL movement models where available.")
+    parser.add_argument(
+        "--use-rl-models",
+        action="store_true",
+        help="Use configured RL movement models where available.",
+    )
     parser.add_argument("--transit-model", type=str, default=None)
     parser.add_argument("--descend-model", type=str, default=None)
     parser.add_argument("--ascend-model", type=str, default=None)
@@ -236,7 +279,7 @@ def main() -> None:
     if args.mock_physical:
         run_flow(
             moves,
-            MockPhysicalExecutor(),
+            NoOpPhysicalExecutor(),
             tracker,
             None,
             args.nonmoving_tolerance_mm,
@@ -258,9 +301,11 @@ def main() -> None:
         occupancy = PhysicalOccupancy(PieceRegistry().starting_square_map())
         render_fn = env.render if args.visualize else None
         if args.use_rl_models:
-            train_cfg = load_config("training")
-            model_paths = train_cfg.get("deployed_models", {})
-            controller = ModelEmbeddedController(env=env, render_fn=render_fn, render_delay=args.delay)
+            deployed_cfg = load_config("deployed_models")
+            model_paths = deployed_cfg
+            controller = ModelEmbeddedController(
+                env=env, render_fn=render_fn, render_delay=args.delay
+            )
             controller.load_available(
                 transit_path=args.transit_model or model_paths.get("transit"),
                 descend_path=args.descend_model or model_paths.get("descend"),

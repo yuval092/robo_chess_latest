@@ -6,40 +6,37 @@ Drop-in replacement for ScriptedController during movement stages.
 The three movement stages may be served by specialist SAC models. Grasp,
 place, transitions, and high-level sequencing remain scripted.
 """
+
 import time
-from typing import Callable, Optional
+from collections.abc import Callable
 
 import numpy as np
 
+from src.chess_env.controller import ScriptedController, SequenceResult, StageResult
+from src.chess_env.model_registry import ModelRegistry
+from src.chess_env.simulation import reset_elapsed_steps, unwrap_env
+
+M_TO_MM = 1000.0
 
 class ModelEmbeddedController:
     """Wraps specialist SAC models behind the ScriptedController interface."""
 
-    MAX_STEPS = 300
-
     def __init__(
         self,
         env,
-        render_fn: Optional[Callable] = None,
+        render_fn: Callable | None = None,
         render_delay: float = 0.0,
     ):
+        """Initialise this object."""
         self._wrapped_env = env
-        inner = env
-        while hasattr(inner, "env"):
-            inner = inner.env
-        self._env = inner
+        self._env = unwrap_env(env)
         self._render_fn = render_fn
         self._render_delay = render_delay
+        self._max_steps = self._env.env_cfg["rl_max_steps_per_stage"]
 
-        self._models = {
-            "transit": None,
-            "descend": None,
-            "ascend": None,
-        }
+        self._registry = ModelRegistry(env)
 
-        from src.chess_env.controller import ScriptedController
-
-        drift_limit = self._env.env_cfg.get("eval_drift_limit", 0.010)
+        drift_limit = self._env.env_cfg["eval_drift_limit"]
         self.scripted_controller = ScriptedController(
             env,
             drift_limit=drift_limit,
@@ -49,28 +46,12 @@ class ModelEmbeddedController:
 
     def load_model(self, stage: str, path: str) -> None:
         """Load a specialist model for one stage."""
-        if stage not in self._models:
+        if stage not in self._registry.KNOWN_STAGES:
             raise ValueError(f"Unknown stage: {stage}")
         if not path:
             raise ValueError(f"No model path provided for {stage}")
 
-        import io
-        import contextlib
-        from stable_baselines3 import SAC
-        from training.envs import WRAPPER_MAP
-
-        # HER replay buffer requires env at load time to reconstruct goal spaces.
-        # Wrap in a context to suppress the verbose SB3 "Wrapping in DummyVecEnv"
-        # messages that would otherwise clutter startup output.
-        prev_phase9 = self._env._use_phase9_obs
-        prev_obs_space = self._env.observation_space
-
-        load_env = WRAPPER_MAP[stage](self._wrapped_env)
-        with contextlib.redirect_stdout(io.StringIO()):
-            self._models[stage] = SAC.load(path, env=load_env)
-
-        self._env._use_phase9_obs = prev_phase9
-        self._env.observation_space = prev_obs_space
+        self._registry.load(stage, path)
         print(f"[ModelEmbeddedController] Loaded {stage} model from {path}")
 
     def load_all(self, transit_path: str, descend_path: str, ascend_path: str) -> None:
@@ -81,9 +62,9 @@ class ModelEmbeddedController:
 
     def load_available(
         self,
-        transit_path: Optional[str] = None,
-        descend_path: Optional[str] = None,
-        ascend_path: Optional[str] = None,
+        transit_path: str | None = None,
+        descend_path: str | None = None,
+        ascend_path: str | None = None,
     ) -> None:
         """Load provided specialist models and keep scripted fallback for missing stages."""
         for stage, path in {
@@ -109,7 +90,9 @@ class ModelEmbeddedController:
         target_pos = np.array([tube_xy[0], tube_xy[1], self._env.SAFE_Z])
         return self._run_stage("ascend", target_pos)
 
-    def transition(self, new_scenario: str, new_goal_pos, nominal_exit_pos, nominal_xy=None):
+    def transition(
+        self, new_scenario: str, new_goal_pos, nominal_exit_pos, nominal_xy=None
+    ):
         """Delegate to env.soft_reset() and reset wrapper episode counters."""
         _, info = self._env.soft_reset(
             new_scenario=new_scenario,
@@ -117,15 +100,7 @@ class ModelEmbeddedController:
             nominal_exit_pos=nominal_exit_pos,
             nominal_xy=nominal_xy,
         )
-        curr = self._wrapped_env
-        while hasattr(curr, "env"):
-            if hasattr(curr, "_elapsed_steps"):
-                curr._elapsed_steps = 0
-                break
-            curr = curr.env
-        else:
-            if hasattr(curr, "_elapsed_steps"):
-                curr._elapsed_steps = 0
+        reset_elapsed_steps(self._wrapped_env)
         return info
 
     def execute_grasp(self):
@@ -138,16 +113,19 @@ class ModelEmbeddedController:
 
     def run_grasp(self):
         """Execute the scripted grasp pipeline and return StageResult."""
-        from src.chess_env.controller import StageResult
 
         env = self._env
-        grip_before = env._utils.get_site_xpos(env.model, env.data, "robot0:grip").copy()
+        grip_before = env._utils.get_site_xpos(
+            env.model, env.data, "robot0:grip"
+        ).copy()
         result_dict = env.execute_grasp()
         success = result_dict.get("success", False)
         grip_after = env._utils.get_site_xpos(env.model, env.data, "robot0:grip").copy()
         return StageResult(
             success=success,
-            steps=result_dict.get("total_steps_used", result_dict.get("close_steps_used", 0)),
+            steps=result_dict.get(
+                "total_steps_used", result_dict.get("close_steps_used", 0)
+            ),
             crash_reason=None if success else result_dict.get("reason", "GRASP_FAILED"),
             final_pos=grip_after.copy(),
             error_mm=float(np.linalg.norm(grip_after - grip_before)) * 1000.0,
@@ -155,7 +133,6 @@ class ModelEmbeddedController:
 
     def run_place(self, dst_xy: np.ndarray):
         """Execute the scripted place pipeline and return StageResult."""
-        from src.chess_env.controller import StageResult
 
         env = self._env
         result_dict = env.execute_place(dst_xy)
@@ -171,7 +148,6 @@ class ModelEmbeddedController:
 
     def run_pick_sequence(self, src_xy: np.ndarray):
         """Execute transit -> descend -> grasp -> ascend at src_xy."""
-        from src.chess_env.controller import SequenceResult
 
         results = []
         result = self.run_transit(src_xy)
@@ -206,7 +182,6 @@ class ModelEmbeddedController:
 
     def run_place_sequence(self, dst_xy: np.ndarray):
         """Execute transit -> descend -> place -> ascend at dst_xy."""
-        from src.chess_env.controller import SequenceResult
 
         results = []
         result = self.run_transit(dst_xy)
@@ -241,7 +216,6 @@ class ModelEmbeddedController:
 
     def run_full_move(self, src_xy: np.ndarray, dst_xy: np.ndarray):
         """Full pick-and-place move. Called by MovementExecutor."""
-        from src.chess_env.controller import SequenceResult
 
         pick = self.run_pick_sequence(src_xy)
         if not pick.success:
@@ -257,7 +231,7 @@ class ModelEmbeddedController:
     def _run_stage(self, stage: str, target_pos: np.ndarray):
         """Run a model-backed stage, or fall back to the scripted controller."""
         env = self._env
-        model = self._models[stage]
+        model = self._registry.get(stage)
 
         if model is None:
             target_xy = target_pos[:2]
@@ -268,8 +242,6 @@ class ModelEmbeddedController:
             if stage == "ascend":
                 return self.scripted_controller.run_ascend(target_xy)
             raise ValueError(f"Unknown stage: {stage}")
-
-        from src.chess_env.controller import StageResult
 
         env.goal_pos = target_pos.copy()
         env.goal = target_pos.copy()
@@ -305,25 +277,31 @@ class ModelEmbeddedController:
                         f"PRECONDITION_FINGER (actual={l_finger:.4f}, "
                         f"expected={expected_finger:.4f})"
                     ),
-                    final_pos=env._utils.get_site_xpos(env.model, env.data, "robot0:grip").copy(),
+                    final_pos=env._utils.get_site_xpos(
+                        env.model, env.data, "robot0:grip"
+                    ).copy(),
                     error_mm=0.0,
                 )
 
-        previous_phase9 = env._use_phase9_obs
-        env._use_phase9_obs = True
+        previous_phase9 = env._use_transfer_obs
+        env._use_transfer_obs = True
         crash_reason = None
         success = False
         step_idx = 0
 
         try:
-            for step_idx in range(self.MAX_STEPS):
-                grip_pos = env._utils.get_site_xpos(env.model, env.data, "robot0:grip").copy()
-                grip_vel = env._utils.get_site_xvelp(env.model, env.data, "robot0:grip").copy()
+            for step_idx in range(self._max_steps):
+                grip_pos = env._utils.get_site_xpos(
+                    env.model, env.data, "robot0:grip"
+                ).copy()
+                grip_vel = env._utils.get_site_xvelp(
+                    env.model, env.data, "robot0:grip"
+                ).copy()
                 speed = float(np.linalg.norm(grip_vel))
 
                 is_near = bool(env._is_success(grip_pos, target_pos))
 
-                if is_near and speed < env.env_cfg.get("stability_vel_threshold", 0.02):
+                if is_near and speed < env.env_cfg["stability_vel_threshold"]:
                     success = True
                     break
 
@@ -344,16 +322,18 @@ class ModelEmbeddedController:
                     if self._render_delay > 0:
                         time.sleep(self._render_delay)
 
-                grip_pos = env._utils.get_site_xpos(env.model, env.data, "robot0:grip").copy()
+                grip_pos = env._utils.get_site_xpos(
+                    env.model, env.data, "robot0:grip"
+                ).copy()
                 crash_reason = self._check_crash(env, stage, grip_pos)
                 if crash_reason:
                     break
         finally:
-            env._use_phase9_obs = previous_phase9
+            env._use_transfer_obs = previous_phase9
 
         grip_pos = env._utils.get_site_xpos(env.model, env.data, "robot0:grip").copy()
         dist = float(np.linalg.norm(target_pos - grip_pos))
-        if not success and crash_reason is None and step_idx + 1 >= self.MAX_STEPS:
+        if not success and crash_reason is None and step_idx + 1 >= self._max_steps:
             crash_reason = "TIMEOUT"
 
         return StageResult(
@@ -361,10 +341,10 @@ class ModelEmbeddedController:
             steps=step_idx + 1,
             crash_reason=crash_reason if not success else None,
             final_pos=grip_pos.copy(),
-            error_mm=dist * 1000.0,
+            error_mm=dist * M_TO_MM,
         )
 
-    def _check_crash(self, env, stage: str, grip_pos: np.ndarray) -> Optional[str]:
+    def _check_crash(self, env, stage: str, grip_pos: np.ndarray) -> str | None:
         """Lightweight in-loop crash check for inference."""
         if stage == "transit":
             if grip_pos[2] < env.FLOOR_LIMIT:
@@ -377,9 +357,9 @@ class ModelEmbeddedController:
         elif stage in {"descend", "ascend"}:
             if env.tube_center_xy is not None:
                 drift = float(np.linalg.norm(grip_pos[:2] - env.tube_center_xy))
-                drift_limit = env.env_cfg.get("eval_drift_limit", 0.010)
+                drift_limit = env.env_cfg["eval_drift_limit"]
                 if drift > drift_limit:
-                    return f"TUBE_BREACH (drift={drift*1000:.1f}mm)"
+                    return f"TUBE_BREACH (drift={drift * M_TO_MM:.1f}mm)"
             if grip_pos[2] < env.TABLE_SURFACE_Z:
                 return f"TABLE_HIT (z={grip_pos[2]:.4f})"
             if stage == "ascend" and env.grasp_mode:

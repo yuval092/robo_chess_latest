@@ -1,2 +1,1 @@
-import sys, os
-sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
+"""Pytest configuration and shared fixtures for the RoboChess test suite."""

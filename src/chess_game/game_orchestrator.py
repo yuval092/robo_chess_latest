@@ -1,13 +1,15 @@
+"""Top-level game coordinator for logical and physical chess moves."""
+
 from __future__ import annotations
 
 from dataclasses import dataclass
 
 import chess
 
-from src.chess_game.chess_service import ChessService, IllegalMoveError
-from src.chess_game.models import GameStatus
+from src.chess_game.chess_service import ChessService, GameStatus, IllegalMoveError
 from src.chess_game.move_planner import LogicalPieceTracker, MovePlanner
-from src.utils.config import load_config
+from src.physical.noop_executor import NoOpPhysicalExecutor
+from src.utils.io import load_config
 
 
 @dataclass(frozen=True)
@@ -45,17 +47,38 @@ class GameOrchestrator:
         human_color: str | None = None,
         auto_computer_reply: bool | None = None,
     ):
-        game_cfg = load_config("chess").get("game", {})
+        """Initialise this object."""
+        game_cfg = load_config("chess")["game"]
         self.chess_service = chess_service
         self.physical_executor = physical_executor
         self.piece_tracker = piece_tracker
-        self.human_color = human_color or game_cfg.get("human_color", "white")
-        self.auto_computer_reply = game_cfg.get("auto_computer_reply", True) if auto_computer_reply is None else auto_computer_reply
+        self.human_color = human_color or game_cfg["human_color"]
+        self.auto_computer_reply = (
+            game_cfg["auto_computer_reply"]
+            if auto_computer_reply is None
+            else auto_computer_reply
+        )
         self.is_busy = False
         self.error: str | None = None
         self.last_move: str | None = None
 
+    @classmethod
+    def create_headless(
+        cls,
+        human_color: str | None = None,
+        auto_computer_reply: bool | None = None,
+    ) -> GameOrchestrator:
+        """Create a GameOrchestrator backed by NoOpPhysicalExecutor."""
+        return cls(
+            chess_service=ChessService(),
+            physical_executor=NoOpPhysicalExecutor(),
+            piece_tracker=LogicalPieceTracker(),
+            human_color=human_color,
+            auto_computer_reply=auto_computer_reply,
+        )
+
     def new_game(self) -> GameSnapshot:
+        """Reset the game and physical state."""
         if self.is_busy:
             self.error = "Cannot start a new game while the arm is moving."
             return self.snapshot()
@@ -66,12 +89,16 @@ class GameOrchestrator:
         return self.snapshot()
 
     def snapshot(self) -> GameSnapshot:
+        """Return a frozen game snapshot."""
         status = self.chess_service.status()
         return GameSnapshot(
             fen=self.chess_service.fen(),
             turn=status.turn,
             board=self._logical_board_symbols(),
-            physical_piece_ids={square: self.piece_tracker.piece_id_at(square) for square in chess.SQUARE_NAMES},
+            physical_piece_ids={
+                square: self.piece_tracker.piece_id_at(square)
+                for square in chess.SQUARE_NAMES
+            },
             legal_moves=self.chess_service.legal_moves(),
             status=status,
             last_move=self.last_move,
@@ -80,10 +107,15 @@ class GameOrchestrator:
             error=self.error,
         )
 
-    def submit_human_move(self, src: str, dst: str, promotion: str | None = None) -> MoveExecutionResult:
-        if self._turn_color_name() != self.human_color:
+    def submit_human_move(
+        self, src: str, dst: str, promotion: str | None = None
+    ) -> MoveExecutionResult:
+        """Validate and execute a human move request."""
+        if self.human_color != "both" and self._turn_color_name() != self.human_color:
             return self._rejected("It is not the human side's turn.")
-        result = self._submit_move(lambda: self.chess_service.validate_square_move(src, dst, promotion))
+        result = self._submit_move(
+            lambda: self.chess_service.validate_square_move(src, dst, promotion)
+        )
         if (
             result.accepted
             and result.physical_success
@@ -94,6 +126,7 @@ class GameOrchestrator:
         return result
 
     def let_computer_play_current_turn(self) -> MoveExecutionResult:
+        """Execute one computer-selected move."""
         if self.chess_service.board.is_game_over(claim_draw=True):
             return self._rejected(self._game_over_message())
         result = self._submit_move(self.chess_service.choose_engine_move)
@@ -105,17 +138,24 @@ class GameOrchestrator:
             and result.physical_success
             and self.auto_computer_reply
             and not self.chess_service.board.is_game_over()
+            and self.human_color != "both"
             and self._turn_color_name() != self.human_color
         ):
             return self.let_computer_play_current_turn()
         return result
 
     def run_computer_turn_if_needed(self) -> MoveExecutionResult | None:
-        if self._turn_color_name() == self.human_color or self.chess_service.board.is_game_over():
+        """Run the computer turn when turn ownership requires it."""
+        if (
+            self.human_color != "both"
+            and self._turn_color_name() == self.human_color
+            or self.chess_service.board.is_game_over()
+        ):
             return None
         return self.let_computer_play_current_turn()
 
     def _submit_move(self, move_factory) -> MoveExecutionResult:
+        """Execute a move through validation, planning, and physical execution."""
         if self.is_busy:
             return self._rejected("Game is busy.")
         try:
@@ -130,7 +170,9 @@ class GameOrchestrator:
             if not physical_result.success:
                 self.error = physical_result.error
                 self.is_busy = False
-                return MoveExecutionResult(True, False, move.uci(), physical_result.error, self.snapshot())
+                return MoveExecutionResult(
+                    True, False, move.uci(), physical_result.error, self.snapshot()
+                )
             home_result = self.physical_executor.return_to_home()
             home_failed = not home_result.success
             if home_failed:
@@ -144,7 +186,9 @@ class GameOrchestrator:
             else:
                 self.error = None
             self.is_busy = False
-            return MoveExecutionResult(True, True, move.uci(), self.error, self.snapshot())
+            return MoveExecutionResult(
+                True, True, move.uci(), self.error, self.snapshot()
+            )
         except Exception as exc:
             self.error = f"INTERNAL_ERROR: {exc}"
             raise
@@ -152,13 +196,16 @@ class GameOrchestrator:
             self.is_busy = False
 
     def _rejected(self, error: str) -> MoveExecutionResult:
+        """Return a rejected move result with a snapshot."""
         self.error = error
         return MoveExecutionResult(False, False, None, error, self.snapshot())
 
     def _turn_color_name(self) -> str:
+        """Return the current turn as a colour name."""
         return "white" if self.chess_service.side_to_move() == chess.WHITE else "black"
 
     def _logical_board_symbols(self) -> dict[str, str | None]:
+        """Return board symbols keyed by square name."""
         board = {}
         for square in chess.SQUARES:
             piece = self.chess_service.board.piece_at(square)
@@ -166,6 +213,7 @@ class GameOrchestrator:
         return board
 
     def _game_over_message(self) -> str:
+        """Return a human-readable terminal game message."""
         status = self.chess_service.status()
         if status.outcome == "1-0":
             result = "White wins"

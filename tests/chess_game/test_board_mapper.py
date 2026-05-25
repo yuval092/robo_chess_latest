@@ -3,7 +3,7 @@ import numpy as np
 import pytest
 
 from src.chess_game.board_mapper import BoardMapper
-from src.utils.config import load_config
+from src.utils.io import load_config
 
 
 def test_square_centers_are_64_unique_points():
@@ -28,15 +28,19 @@ def test_all_square_centers_inside_table():
 def test_cell_spacing_is_8cm():
     mapper = BoardMapper.from_configs()
 
-    assert np.isclose(mapper.square_name_to_xy("a2")[1] - mapper.square_name_to_xy("a1")[1], 0.08)
-    assert np.isclose(mapper.square_name_to_xy("b1")[0] - mapper.square_name_to_xy("a1")[0], 0.08)
+    assert np.isclose(
+        mapper.square_name_to_xy("a2")[1] - mapper.square_name_to_xy("a1")[1], 0.08
+    )
+    assert np.isclose(
+        mapper.square_name_to_xy("b1")[0] - mapper.square_name_to_xy("a1")[0], 0.08
+    )
 
 
 def test_board_does_not_use_env_edge_margin():
     mapper = BoardMapper.from_configs()
     env_cfg = load_config("env")
     cx, cy = env_cfg["table_center_xy"]
-    hx, hy = env_cfg["table_half_x"], env_cfg["table_half_y"]
+    hx, _hy = env_cfg["table_half_x"], env_cfg["table_half_y"]
     margin = env_cfg["edge_margin"]
 
     edge_margin_a1 = np.array([cx - hx + margin + 0.5 * ((2 * (hx - margin)) / 8), cy])

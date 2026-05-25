@@ -1,3 +1,5 @@
+"""Gymnasium environment registration for ChessFetchTask-v0."""
+
 from gymnasium.envs.registration import register
 
 register(

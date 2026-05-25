@@ -1,1 +1,1 @@
-"""Local web UI for RoboChess."""
+"""Web UI: Flask application and JSON serialisation."""

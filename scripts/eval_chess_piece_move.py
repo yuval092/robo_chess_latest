@@ -1,13 +1,9 @@
+"""Evaluate physical movement of selected chess pieces."""
 import argparse
-import os
-import sys
 
 import gymnasium as gym
 import numpy as np
 
-sys.path.append(os.getcwd())
-
-import src.chess_env
 from src.chess_env.controller import ScriptedController
 from src.chess_game.board_mapper import BoardMapper
 from src.physical.movement_executor import MovementExecutor
@@ -16,6 +12,7 @@ from src.physical.piece_registry import PieceRegistry
 
 
 def piece_position(env, piece_id: str) -> np.ndarray:
+    """Return piece position."""
     inner = env.unwrapped if hasattr(env, "unwrapped") else env
     previous = inner.active_piece_id
     inner.set_active_piece(piece_id)
@@ -27,7 +24,10 @@ def piece_position(env, piece_id: str) -> np.ndarray:
     return position
 
 
-def assert_piece_at_square(env, mapper: BoardMapper, piece_id: str, square: str, tolerance_mm: float) -> float:
+def assert_piece_at_square(
+    env, mapper: BoardMapper, piece_id: str, square: str, tolerance_mm: float
+) -> float:
+    """Assert piece at square."""
     expected = mapper.square_to_piece_xyz(__import__("chess").parse_square(square))
     actual = piece_position(env, piece_id)
     error_mm = float(np.linalg.norm(actual - expected) * 1000.0)
@@ -39,7 +39,10 @@ def assert_piece_at_square(env, mapper: BoardMapper, piece_id: str, square: str,
 
 
 def main() -> None:
-    parser = argparse.ArgumentParser(description="Execute one physical chess-piece board move.")
+    """Parse command-line arguments and run the script."""
+    parser = argparse.ArgumentParser(
+        description="Execute one physical chess-piece board move."
+    )
     parser.add_argument("--piece", required=True, help="Piece id, e.g. white_pawn_e")
     parser.add_argument("--src", required=True, help="Source square, e.g. e2")
     parser.add_argument("--dst", required=True, help="Destination square, e.g. e4")
@@ -67,14 +70,21 @@ def main() -> None:
     try:
         env.reset()
         render_fn = env.render if args.visualize else None
-        controller = ScriptedController(env, drift_limit=args.drift_limit, render_fn=render_fn, render_delay=args.delay)
+        controller = ScriptedController(
+            env,
+            drift_limit=args.drift_limit,
+            render_fn=render_fn,
+            render_delay=args.delay,
+        )
         registry = PieceRegistry()
         mapper = BoardMapper.from_configs()
         starting_square_map = registry.starting_square_map()
         occupancy = PhysicalOccupancy(starting_square_map)
         occupancy.assert_piece_at(args.piece, args.src)
         occupancy.assert_square_empty(args.dst)
-        src_error_mm = assert_piece_at_square(env, mapper, args.piece, args.src, args.final_tolerance_mm)
+        src_error_mm = assert_piece_at_square(
+            env, mapper, args.piece, args.src, args.final_tolerance_mm
+        )
         nonmoving_start = {
             piece_id: piece_position(env, piece_id)
             for piece_id in starting_square_map
@@ -87,23 +97,33 @@ def main() -> None:
             occupancy,
         )
         result = executor.move_piece_between_squares(args.piece, args.src, args.dst)
-        print(f"success={result.success} piece={result.piece_id} {result.src_square}->{result.dst_square} error={result.error}")
+        print(
+            f"success={result.success} piece={result.piece_id} {result.src_square}->{result.dst_square} error={result.error}"
+        )
         print(f"start_check {args.piece}@{args.src} error={src_error_mm:.1f}mm")
         for stage_name, stage in result.stage_results:
-            print(f"{stage_name:<8} success={stage.success} err={stage.error_mm:.1f}mm reason={stage.crash_reason}")
+            print(
+                f"{stage_name:<8} success={stage.success} err={stage.error_mm:.1f}mm reason={stage.crash_reason}"
+            )
         if not result.success:
             raise SystemExit(1)
-        final_error_mm = assert_piece_at_square(env, mapper, args.piece, args.dst, args.final_tolerance_mm)
+        final_error_mm = assert_piece_at_square(
+            env, mapper, args.piece, args.dst, args.final_tolerance_mm
+        )
         print(f"final_check {args.piece}@{args.dst} error={final_error_mm:.1f}mm")
         if not args.skip_nonmoving_check:
             max_displacement_mm = 0.0
             worst_piece = None
             for piece_id, start_pos in nonmoving_start.items():
-                displacement_mm = float(np.linalg.norm(piece_position(env, piece_id) - start_pos) * 1000.0)
+                displacement_mm = float(
+                    np.linalg.norm(piece_position(env, piece_id) - start_pos) * 1000.0
+                )
                 if displacement_mm > max_displacement_mm:
                     max_displacement_mm = displacement_mm
                     worst_piece = piece_id
-            print(f"nonmoving_max_displacement piece={worst_piece} displacement={max_displacement_mm:.1f}mm")
+            print(
+                f"nonmoving_max_displacement piece={worst_piece} displacement={max_displacement_mm:.1f}mm"
+            )
             if max_displacement_mm > args.nonmoving_tolerance_mm:
                 raise SystemExit(
                     f"Non-moving piece displacement exceeded tolerance: "

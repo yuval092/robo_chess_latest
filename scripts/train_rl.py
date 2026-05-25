@@ -2,18 +2,20 @@
 """
 Train a specialist SAC model for one movement stage.
 """
-import argparse
-import os
-import sys
 
-sys.path.append(os.getcwd())
+import argparse
 
 from training.trainer import SACTrainer
 
 
 def main():
-    parser = argparse.ArgumentParser(description="Train a specialist SAC model for RoboChess.")
-    parser.add_argument("--stage", required=True, choices=["transit", "descend", "ascend"])
+    """Parse training arguments and launch specialist SAC training."""
+    parser = argparse.ArgumentParser(
+        description="Train a specialist SAC model for RoboChess."
+    )
+    parser.add_argument(
+        "--stage", required=True, choices=["transit", "descend", "ascend"]
+    )
     parser.add_argument("--envs", type=int, default=None)
     parser.add_argument("--model", type=str, default=None)
     parser.add_argument("--timesteps", type=int, default=None)

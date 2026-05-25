@@ -1,64 +1,138 @@
 # Scripts
 
-This directory contains all runnable scripts for RoboChess: scene generation, evaluation, and visualization.
+Development tools for evaluating, validating, training, and debugging RoboChess.
 
-## Generation Scripts
+All `eval_*` scripts accept `--help` and exit with code 1 on failure, making them
+usable in CI pipelines. Most accept `--n-episodes`, `--visualize`, and `--debug`.
 
-These scripts produce or update project assets. Run them whenever the relevant configs change.
+> **Application entry points** (UI, viewer, scene generation) are in `src/cli/`
+> and installed as `robo-chess-ui`, `robo-chess-visualize`, `robo-chess-generate`.
+> This folder contains evaluation and developer tools only.
 
-| Script | What it does | Run command |
-|--------|-------------|-------------|
-| `generate_chess_stls.py` | Generates STL meshes for all 6 chess piece types. STLs have a 30×30mm cube-covering base and a distinctive shape per type. | `python scripts/generate_chess_stls.py` |
-| `generate_board_xml.py` | Generates the 64 chess board square geoms into `pick_and_place.xml`. | `python scripts/generate_board_xml.py --write` |
-| `generate_pieces_xml.py` | Generates all piece body XML (active + promotion reserve) into `pick_and_place.xml`. Re-run after changing `chess.yaml`. | `python scripts/generate_pieces_xml.py --write` |
-| `generate_zones_xml.py` | Generates flat zone marker geoms (graveyard + reserve areas) into `pick_and_place.xml`. | `python scripts/generate_zones_xml.py --write` |
+---
 
-### Typical regen workflow
+## Evaluation — Movement
+
+RL models are the default for all movement scripts. Pass `--use-scripted-only` to
+use the deterministic waypoint controller without trained models.
+
+| Script | What it tests |
+|---|---|
+| `eval_stages.py` | Per-stage accuracy (transit / descend / ascend), success rate + crash breakdown |
+| `eval_sequence.py` | Full scenario chain (pick / full_move / vertical) |
+| `eval_stress.py` | Corner and grid-position stress test across the board |
+| `eval_targeted.py` | Known-difficult squares, per-destination success rate |
+| `eval_all_cells_rl.py` | All-64-squares RL coverage (modes: `pawn`, `key`, `full`) |
+| `eval_all_square_moves.py` | Exhaustive physical reachability sweep, all src→dst pairs |
+| `eval_grasp_physics.py` | Grasp physics verification (cube hold, drop, finger closure) |
+| `verify_physics.py` | MuJoCo XML asset integrity and board geometry sanity check |
 
 ```bash
-python scripts/generate_chess_stls.py
-python scripts/generate_pieces_xml.py --write
-# if zone positions changed:
-python scripts/generate_zones_xml.py --write
+# Quick per-stage check (RL default, 20 episodes each)
+python scripts/eval_stages.py --n-episodes 20
+
+# Scripted fallback — no trained models required
+python scripts/eval_stages.py --use-scripted-only --stages transit --n-episodes 50
+
+# Full pick-and-place chain, 20 episodes
+python scripts/eval_sequence.py --chain full_move --n-episodes 20
+
+# All-squares RL coverage, key positions only
+python scripts/eval_all_cells_rl.py --mode key
+
+# Full exhaustive board reachability (takes a long time)
+python scripts/eval_all_square_moves.py
 ```
 
-## Verification Scripts
+---
 
-| Script | What it does | Run command |
-|--------|-------------|-------------|
-| `verify_physics.py` | Loads the MuJoCo scene and checks that the arm can reach all 64 squares. Reports HEALTHY / UNHEALTHY. | `python scripts/verify_physics.py` |
-| `eval_chess_reachability.py` | Validates board geometry constants (corner positions, spacing) against expected values from `chess.yaml`. | `python scripts/eval_chess_reachability.py` |
-| `eval_all_square_moves.py` | Exhaustively tests physical pick/place reachability from each square to each other square using one piece body; other pieces are moved out of the way. | `python scripts/eval_all_square_moves.py` |
+## Evaluation — Chess Logic
 
-## Evaluation Scripts
+These scripts do not require MuJoCo and run fast. Good for CI.
 
-All eval scripts support `--visualize` (human render) and `--delay <seconds>` for slow-motion playback.
+| Script | What it tests |
+|---|---|
+| `eval_game_logic.py` | Complete game sequences (Scholar's mate, castling, en passant, promotion) |
+| `eval_chess_game_flow.py` | Full logical + physical game flow (scripted arm) |
+| `eval_chess_piece_move.py` | Single piece move through the full stack |
+| `eval_chess_reachability.py` | All 64 board squares mapped to reachable XY coordinates |
+| `eval_draw_conditions.py` | All draw condition types (stalemate, 50-move, repetition, …) |
+| `eval_special_moves.py` | Castling, en passant, promotion command generation |
 
-| Script | What it does | Key flags |
-|--------|-------------|-----------|
-| `eval_chess_piece_move.py` | Evaluates moving a single piece from a given square. Useful for debugging a specific move. | `--from e2 --to e4` |
-| `eval_chess_game_flow.py` | Evaluates complete game flow: opening moves, captures, castling, en passant, promotion. | `--verify-agreement` |
-| `eval_sequence.py` | Runs a scripted sequence of moves and reports per-move success rate. | `--moves e2e3,e7e6,...` |
-| `eval_special_moves.py` | Evaluates all special moves: castling (both sides), en passant, pawn promotion. | `--all` |
-| `eval_stages.py` | Evaluates individual controller stages (transit, ascend, descend, grasp, release) in isolation. | `--stages transit,grasp` |
-| `eval_stress.py` | Stress test: N random legal moves, reports success rate. | `--n-moves 50` |
-| `eval_draw_conditions.py` | Verifies draw detection: 50-move rule, stalemate, threefold repetition. | (no flags needed) |
+```bash
+python scripts/eval_game_logic.py --verbose
+python scripts/eval_draw_conditions.py --verbose
+python scripts/eval_special_moves.py --verbose
+python scripts/eval_chess_piece_move.py --help
+```
 
-## Visualization Scripts
+---
 
-| Script | What it does | Run command |
-|--------|-------------|-------------|
-| `visualize.py` | Interactive MuJoCo viewer with ScriptedController. | `python scripts/visualize.py` |
-| `visualize_chess_setup.py` | Static MuJoCo viewer with pieces on starting squares. | `python scripts/visualize_chess_setup.py` |
+## Validation
 
-## Application
+Run these before launching evaluation or training to catch missing config keys or
+model files early.
 
-| Script | What it does | Run command |
-|--------|-------------|-------------|
-| `run_chess_ui.py` | Starts the Flask web server. Open `http://localhost:5000` in a browser. | `python scripts/run_chess_ui.py` |
+| Script | What it checks |
+|---|---|
+| `validate_config.py` | All required YAML config keys exist; no missing sections |
+| `validate_deployed_models.py` | All paths in `configs/deployed_models.yaml` point to existing files |
 
-## Physics Testing
+```bash
+python scripts/validate_config.py
+python scripts/validate_deployed_models.py
+```
 
-| Script | What it does | Run command |
-|--------|-------------|-------------|
-| `test_grasp_physics.py` | Interactive test of grasp physics on a single piece. Run after XML or physics param changes to verify the cube can be held without vibration. | `python scripts/test_grasp_physics.py` |
+---
+
+## Training
+
+```bash
+# Train one specialist SAC model (pick one stage)
+python scripts/train_rl.py --stage transit
+python scripts/train_rl.py --stage descend
+python scripts/train_rl.py --stage ascend
+
+# Resume from a checkpoint
+python scripts/train_rl.py --stage transit --model checkpoints/transit_20260524/best_model.zip
+
+# Override timesteps or save directory
+python scripts/train_rl.py --stage ascend --timesteps 500000 --save-dir checkpoints/my_run
+```
+
+After training, update `configs/deployed_models.yaml` with the new checkpoint paths
+and run `python scripts/validate_deployed_models.py`.
+
+---
+
+## Analysis
+
+```bash
+# Parse a debug_one_move JSONL log and generate a Markdown report
+python scripts/analyze_debug_log.py logs/debug_move_20260524_142519.jsonl
+```
+
+`analyze_debug_log.py` reads the dense per-step log produced by
+`scripts/diagnostics/debug_one_move.py` and summarises phase timing, gripper
+trajectory, and failure points.
+
+---
+
+## Diagnostics
+
+Scripts in `scripts/diagnostics/` are developer debug tools. They may import
+training wrappers, produce verbose per-step output, and are not CI-blocking.
+
+| Script | Purpose |
+|---|---|
+| `debug_one_move.py` | Run one chess move (e2→e3) with full per-step JSONL logging |
+| `check_import_graph.py` | Verify `src/` has no imports from `training/` or `scripts/` |
+| `diagnose_transit_full.py` | Investigate transit TIMEOUT failures step-by-step |
+| `diagnose_transit_c2.py` | Transit diagnosis focused on c2-file positions |
+| `diagnose_descend_afile.py` | Descend TIMEOUT diagnosis at a-file positions |
+| `eval_rl_stages_direct.py` | Direct RL stage rollout with raw model output logging |
+
+```bash
+python scripts/diagnostics/check_import_graph.py
+python scripts/diagnostics/debug_one_move.py --help
+```

@@ -5,15 +5,21 @@ Usage:
     python scripts/eval_stages.py [--stages transit,descend,ascend]
         [--n-episodes 50] [--drift-limit 0.010] [--visualize] [--delay 0.02] [--debug]
 """
-import sys, os, argparse, time
+
+import argparse
+import sys
+
 import numpy as np
 
-# Ensure project root is in path
-sys.path.append(os.getcwd())
-
-import src.chess_env
 from src.chess_env.controller import ScriptedController
+from src.chess_env.model_controller import ModelEmbeddedController
 from src.utils.args import add_common_args, make_env
+from src.utils.io import load_config
+
+try:
+    from scripts.validate_deployed_models import validate_or_exit
+except ModuleNotFoundError:
+    from validate_deployed_models import validate_or_exit
 
 STAGE_CHOICES = ["transit", "descend", "ascend"]
 
@@ -22,12 +28,10 @@ def evaluate_stage(stage: str, args) -> dict:
     """Run N episodes of a single stage and collect accuracy statistics."""
     env = make_env(args, force_scenario=stage)
     render_fn = env.render if args.visualize else None
-    if args.use_rl_models:
-        from src.chess_env.model_controller import ModelEmbeddedController
-        from src.utils.config import load_config
-
-        train_cfg = load_config("training")
-        model_paths = train_cfg.get("deployed_models", {})
+    if not args.use_scripted_only:
+        validate_or_exit()
+        deployed_cfg = load_config("deployed_models")
+        model_paths = deployed_cfg
         ctrl = ModelEmbeddedController(
             env=env,
             render_fn=render_fn,
@@ -40,8 +44,12 @@ def evaluate_stage(stage: str, args) -> dict:
         }
         ctrl.load_model(stage, stage_model_args[stage] or model_paths.get(stage))
     else:
-        ctrl = ScriptedController(env, drift_limit=args.drift_limit,
-                                  render_fn=render_fn, render_delay=args.delay)
+        ctrl = ScriptedController(
+            env,
+            drift_limit=args.drift_limit,
+            render_fn=render_fn,
+            render_delay=args.delay,
+        )
     inner = env.unwrapped
 
     successes = 0
@@ -88,8 +96,11 @@ def evaluate_stage(stage: str, args) -> dict:
 
 
 def print_summary(results: list):
+    """Print summary output."""
     print("\n" + "=" * 70)
-    print(f"{'Stage':<12} {'Success':>8} {'Crash':>8} {'Timeout':>9} {'AvgErr':>9} {'P95Err':>9}")
+    print(
+        f"{'Stage':<12} {'Success':>8} {'Crash':>8} {'Timeout':>9} {'AvgErr':>9} {'P95Err':>9}"
+    )
     print("-" * 70)
     for r in results:
         print(
@@ -107,15 +118,18 @@ def print_summary(results: list):
 
 
 def main():
+    """Parse command-line arguments and run the script."""
     parser = argparse.ArgumentParser(description="Per-stage accuracy evaluation.")
     parser.add_argument(
-        "--stages", type=str, default="transit,descend,ascend",
-        help="Comma-separated list of stages to evaluate"
+        "--stages",
+        type=str,
+        default="transit,descend,ascend",
+        help="Comma-separated list of stages to evaluate",
     )
     parser.add_argument(
-        "--use-rl-models",
+        "--use-scripted-only",
         action="store_true",
-        help="Use RL models instead of the scripted controller",
+        help="Use ScriptedController instead of integrated RL models",
     )
     parser.add_argument("--transit-model", type=str, default=None)
     parser.add_argument("--descend-model", type=str, default=None)

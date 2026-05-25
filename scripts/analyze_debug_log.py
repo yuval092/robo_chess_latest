@@ -7,6 +7,7 @@ Usage:
 Output:
   logs/debug_analysis_TIMESTAMP.md
 """
+
 from __future__ import annotations
 
 import json
@@ -17,34 +18,33 @@ from pathlib import Path
 
 import numpy as np
 
-
 PHYSICS_DT = 0.002  # seconds per step
 
 # Expected upper-bound step counts per phase (for stall detection)
 PHASE_EXPECTED_STEPS = {
-    "transit":            300,
-    "descend":            100,
-    "grasp_p0_halt":       30,
-    "grasp_p12_align":    100,
-    "grasp_p3_plunge":     50,
-    "grasp_p4_close":      24,
-    "grasp_p5_hold":       10,
-    "grasp_p6_retract":    80,
-    "softreset_p1_halt":   30,
-    "softreset_p2_align":  80,
-    "softreset_p3_state":   5,
-    "softreset_p4_gripper":50,
-    "place_p0_halt":       20,
-    "place_p12_align":    100,
-    "place_p3_plunge":     50,
-    "place_p4_release":     8,
-    "place_p5_verify":      5,
-    "place_p6_retract":    80,
-    "ascend":             100,
+    "transit": 300,
+    "descend": 100,
+    "grasp_p0_halt": 30,
+    "grasp_p12_align": 100,
+    "grasp_p3_plunge": 50,
+    "grasp_p4_close": 24,
+    "grasp_p5_hold": 10,
+    "grasp_p6_retract": 80,
+    "softreset_p1_halt": 30,
+    "softreset_p2_align": 80,
+    "softreset_p3_state": 5,
+    "softreset_p4_gripper": 50,
+    "place_p0_halt": 20,
+    "place_p12_align": 100,
+    "place_p3_plunge": 50,
+    "place_p4_release": 8,
+    "place_p5_verify": 5,
+    "place_p6_retract": 80,
+    "ascend": 100,
 }
 
-STALL_VEL_THRESHOLD = 0.002   # m/s — grip speed below this is a stall
-STALL_MIN_STEPS = 10           # consecutive below-threshold steps = stall
+STALL_VEL_THRESHOLD = 0.002  # m/s — grip speed below this is a stall
+STALL_MIN_STEPS = 10  # consecutive below-threshold steps = stall
 PIECE_VIBRATION_THRESHOLD = 0.003  # m/s — piece velocity while the arm is stationary
 STALL_PHASES = {
     "transit",
@@ -61,6 +61,7 @@ STALL_PHASES = {
 
 
 def load_records(path: Path) -> list[dict]:
+    """Load records."""
     records = []
     with path.open() as f:
         for line in f:
@@ -83,6 +84,7 @@ def phase_segments(records: list[dict]) -> list[tuple[str, list[dict]]]:
 
 
 def grip_speed(rec: dict) -> float:
+    """Return grip speed."""
     v = rec["grip_vel"]
     return float(np.linalg.norm(v))
 
@@ -101,13 +103,15 @@ def detect_stalls(recs: list[dict]) -> list[dict]:
         if in_stall and rec["phase"] != stall_phase:
             span = rec["step"] - stall_start
             if span >= STALL_MIN_STEPS:
-                stalls.append({
-                    "start_step": stall_start,
-                    "end_step": rec["step"],
-                    "phase": stall_phase,
-                    "duration_s": round(span * PHYSICS_DT, 4),
-                    "steps": span,
-                })
+                stalls.append(
+                    {
+                        "start_step": stall_start,
+                        "end_step": rec["step"],
+                        "phase": stall_phase,
+                        "duration_s": round(span * PHYSICS_DT, 4),
+                        "steps": span,
+                    }
+                )
             in_stall = False
             stall_start = None
             stall_phase = None
@@ -118,13 +122,15 @@ def detect_stalls(recs: list[dict]) -> list[dict]:
         elif not slow and in_stall:
             span = rec["step"] - stall_start
             if span >= STALL_MIN_STEPS:
-                stalls.append({
-                    "start_step": stall_start,
-                    "end_step": rec["step"],
-                    "phase": stall_phase,
-                    "duration_s": round(span * PHYSICS_DT, 4),
-                    "steps": span,
-                })
+                stalls.append(
+                    {
+                        "start_step": stall_start,
+                        "end_step": rec["step"],
+                        "phase": stall_phase,
+                        "duration_s": round(span * PHYSICS_DT, 4),
+                        "steps": span,
+                    }
+                )
             in_stall = False
             stall_start = None
             stall_phase = None
@@ -132,13 +138,15 @@ def detect_stalls(recs: list[dict]) -> list[dict]:
     if in_stall:
         span = recs[-1]["step"] - stall_start
         if span >= STALL_MIN_STEPS:
-            stalls.append({
-                "start_step": stall_start,
-                "end_step": recs[-1]["step"],
-                "phase": stall_phase,
-                "duration_s": round(span * PHYSICS_DT, 4),
-                "steps": span,
-            })
+            stalls.append(
+                {
+                    "start_step": stall_start,
+                    "end_step": recs[-1]["step"],
+                    "phase": stall_phase,
+                    "duration_s": round(span * PHYSICS_DT, 4),
+                    "steps": span,
+                }
+            )
     return stalls
 
 
@@ -154,12 +162,14 @@ def piece_vibration(recs: list[dict], piece_key: str = "src_piece_pos") -> list[
             continue
         speed = float(np.linalg.norm(piece_vel[:2]))
         if speed > PIECE_VIBRATION_THRESHOLD:
-            events.append({
-                "step": rec["step"],
-                "phase": rec["phase"],
-                "speed_mm_s": round(speed * 1000, 2),
-                "pos": [round(x * 1000, 1) for x in rec[piece_key]],
-            })
+            events.append(
+                {
+                    "step": rec["step"],
+                    "phase": rec["phase"],
+                    "speed_mm_s": round(speed * 1000, 2),
+                    "pos": [round(x * 1000, 1) for x in rec[piece_key]],
+                }
+            )
     return events
 
 
@@ -169,21 +179,25 @@ def finger_convergence(recs: list[dict]) -> list[dict]:
     for rec in recs:
         err = abs(rec["l_finger_pos"] - rec["finger_target"])
         if err > 0.0005:
-            events.append({
-                "step": rec["step"],
-                "phase": rec["phase"],
-                "finger_actual": round(rec["l_finger_pos"], 5),
-                "finger_target": round(rec["finger_target"], 5),
-                "error_m": round(err, 5),
-            })
+            events.append(
+                {
+                    "step": rec["step"],
+                    "phase": rec["phase"],
+                    "finger_actual": round(rec["l_finger_pos"], 5),
+                    "finger_target": round(rec["finger_target"], 5),
+                    "error_m": round(err, 5),
+                }
+            )
     return events
 
 
 def fmt_xyz(xyz) -> str:
-    return f"({xyz[0]*1000:.1f}, {xyz[1]*1000:.1f}, {xyz[2]*1000:.1f}) mm"
+    """Return fmt xyz."""
+    return f"({xyz[0] * 1000:.1f}, {xyz[1] * 1000:.1f}, {xyz[2] * 1000:.1f}) mm"
 
 
 def write_report(records: list[dict], report_path: Path, log_path: Path) -> None:
+    """Return write report."""
     segs = phase_segments(records)
     total_steps = len(records)
     total_time_s = total_steps * PHYSICS_DT
@@ -193,7 +207,9 @@ def write_report(records: list[dict], report_path: Path, log_path: Path) -> None
     finger_errs = finger_convergence(records)
 
     # Per-phase summary
-    phase_stats: dict[str, dict] = defaultdict(lambda: {"steps": 0, "sim_time_s": 0.0, "over_budget": False})
+    phase_stats: dict[str, dict] = defaultdict(
+        lambda: {"steps": 0, "sim_time_s": 0.0, "over_budget": False}
+    )
     for phase_name, recs in segs:
         s = len(recs)
         phase_stats[phase_name]["steps"] += s
@@ -204,19 +220,19 @@ def write_report(records: list[dict], report_path: Path, log_path: Path) -> None
 
     lines = []
     lines += [
-        f"# Debug Move Analysis",
-        f"",
+        "# Debug Move Analysis",
+        "",
         f"**Log file:** `{log_path.name}`  ",
         f"**Total physics steps:** {total_steps}  ",
         f"**Total simulated time:** {total_time_s:.3f}s  ",
         f"**Wall time at last step:** {records[-1]['wall_time_s']:.2f}s  ",
-        f"",
-        f"---",
-        f"",
-        f"## Phase Breakdown",
-        f"",
-        f"| Phase | Steps | Sim time (s) | Budget | Status |",
-        f"|-------|-------|-------------|--------|--------|",
+        "",
+        "---",
+        "",
+        "## Phase Breakdown",
+        "",
+        "| Phase | Steps | Sim time (s) | Budget | Status |",
+        "|-------|-------|-------------|--------|--------|",
     ]
 
     for phase_name, stats in phase_stats.items():
@@ -227,83 +243,91 @@ def write_report(records: list[dict], report_path: Path, log_path: Path) -> None
         )
 
     lines += [
-        f"",
-        f"---",
-        f"",
-        f"## Stall Detection",
-        f"",
-        f"Grip speed < {STALL_VEL_THRESHOLD*1000:.0f} mm/s for ≥ {STALL_MIN_STEPS} consecutive steps.",
-        f"",
+        "",
+        "---",
+        "",
+        "## Stall Detection",
+        "",
+        f"Grip speed < {STALL_VEL_THRESHOLD * 1000:.0f} mm/s for ≥ {STALL_MIN_STEPS} consecutive steps.",
+        "",
     ]
 
     if stalls:
         lines.append(f"**{len(stalls)} stall(s) detected:**")
-        lines.append(f"")
-        lines.append(f"| Start step | End step | Phase | Duration (s) | Steps |")
-        lines.append(f"|-----------|---------|-------|-------------|-------|")
+        lines.append("")
+        lines.append("| Start step | End step | Phase | Duration (s) | Steps |")
+        lines.append("|-----------|---------|-------|-------------|-------|")
         for s in stalls:
-            lines.append(f"| {s['start_step']} | {s['end_step']} | `{s['phase']}` | {s['duration_s']:.3f} | {s['steps']} |")
+            lines.append(
+                f"| {s['start_step']} | {s['end_step']} | `{s['phase']}` | {s['duration_s']:.3f} | {s['steps']} |"
+            )
     else:
         lines.append("No significant stalls detected.")
 
     lines += [
-        f"",
-        f"---",
-        f"",
-        f"## Piece Vibration",
-        f"",
-        f"Steps where source-piece XY speed is > {PIECE_VIBRATION_THRESHOLD*1000:.0f} mm/s while the grip is stationary.",
-        f"",
+        "",
+        "---",
+        "",
+        "## Piece Vibration",
+        "",
+        f"Steps where source-piece XY speed is > {PIECE_VIBRATION_THRESHOLD * 1000:.0f} mm/s while the grip is stationary.",
+        "",
     ]
 
     if vibrations:
         sample = vibrations[:20]
-        lines.append(f"**{len(vibrations)} vibration step(s)** (showing first {len(sample)}):")
-        lines.append(f"")
-        lines.append(f"| Step | Phase | Speed (mm/s) | Piece pos (mm) |")
-        lines.append(f"|------|-------|-----------|----------------|")
+        lines.append(
+            f"**{len(vibrations)} vibration step(s)** (showing first {len(sample)}):"
+        )
+        lines.append("")
+        lines.append("| Step | Phase | Speed (mm/s) | Piece pos (mm) |")
+        lines.append("|------|-------|-----------|----------------|")
         for v in sample:
-            pos_str = fmt_xyz([x/1000 for x in v["pos"]])
-            lines.append(f"| {v['step']} | `{v['phase']}` | {v['speed_mm_s']} | {pos_str} |")
+            pos_str = fmt_xyz([x / 1000 for x in v["pos"]])
+            lines.append(
+                f"| {v['step']} | `{v['phase']}` | {v['speed_mm_s']} | {pos_str} |"
+            )
         if len(vibrations) > 20:
-            lines.append(f"| … | | ({len(vibrations)-20} more) | |")
+            lines.append(f"| … | | ({len(vibrations) - 20} more) | |")
     else:
         lines.append("No vibration events detected.")
 
     lines += [
-        f"",
-        f"---",
-        f"",
-        f"## Finger Convergence",
-        f"",
-        f"Steps where |l_finger_actual − target| > 0.5 mm.",
-        f"",
+        "",
+        "---",
+        "",
+        "## Finger Convergence",
+        "",
+        "Steps where |l_finger_actual − target| > 0.5 mm.",
+        "",
     ]
 
     if finger_errs:
         sample = finger_errs[:20]
-        lines.append(f"**{len(finger_errs)} step(s) with finger lag** (showing first {len(sample)}):")
-        lines.append(f"")
-        lines.append(f"| Step | Phase | Actual | Target | Error (m) |")
-        lines.append(f"|------|-------|--------|--------|-----------|")
+        lines.append(
+            f"**{len(finger_errs)} step(s) with finger lag** (showing first {len(sample)}):"
+        )
+        lines.append("")
+        lines.append("| Step | Phase | Actual | Target | Error (m) |")
+        lines.append("|------|-------|--------|--------|-----------|")
         for fe in sample:
             lines.append(
                 f"| {fe['step']} | `{fe['phase']}` | {fe['finger_actual']:.5f} | {fe['finger_target']:.5f} | {fe['error_m']:.5f} |"
             )
         if len(finger_errs) > 20:
-            lines.append(f"| … | | | | ({len(finger_errs)-20} more) |")
+            lines.append(f"| … | | | | ({len(finger_errs) - 20} more) |")
     else:
         lines.append("Finger tracking within tolerance throughout.")
 
     # Grip position trace per phase
     lines += [
-        f"",
-        f"---",
-        f"",
-        f"## Grip Height Trace (Per Phase Entry/Exit)",
-        f"",
-        f"| Phase | Entry grip Z (mm) | Exit grip Z (mm) | ΔZ (mm) |",
-        f"|-------|------------------|-----------------|---------|",
+        "",
+        "---",
+        "",
+        "## Grip Height Trace (Per Phase Entry/Exit)",
+        "",
+        "| Phase | Entry grip Z (mm) | Exit grip Z (mm) | ΔZ (mm) |",
+        "|-------|------------------|-----------------|---------|",
     ]
 
     for phase_name, recs in segs:
@@ -319,20 +343,28 @@ def write_report(records: list[dict], report_path: Path, log_path: Path) -> None
     for phase_name, stats in phase_stats.items():
         if stats["over_budget"]:
             budget = PHASE_EXPECTED_STEPS[phase_name]
-            issues.append(f"- **{phase_name}** used {stats['steps']} steps vs budget {budget} (+{stats['steps']-budget})")
+            issues.append(
+                f"- **{phase_name}** used {stats['steps']} steps vs budget {budget} (+{stats['steps'] - budget})"
+            )
     for s in stalls:
-        issues.append(f"- **Stall** in `{s['phase']}` steps {s['start_step']}–{s['end_step']} ({s['duration_s']:.3f}s)")
+        issues.append(
+            f"- **Stall** in `{s['phase']}` steps {s['start_step']}–{s['end_step']} ({s['duration_s']:.3f}s)"
+        )
     if len(vibrations) > 50:
-        issues.append(f"- **Excessive vibration**: {len(vibrations)} steps with piece drift > {PIECE_VIBRATION_THRESHOLD*1000:.0f}mm")
+        issues.append(
+            f"- **Excessive vibration**: {len(vibrations)} steps with piece drift > {PIECE_VIBRATION_THRESHOLD * 1000:.0f}mm"
+        )
     if len(finger_errs) > 100:
-        issues.append(f"- **Finger lag**: {len(finger_errs)} steps with finger not at target")
+        issues.append(
+            f"- **Finger lag**: {len(finger_errs)} steps with finger not at target"
+        )
 
     lines += [
-        f"",
-        f"---",
-        f"",
-        f"## Detected Issues Summary",
-        f"",
+        "",
+        "---",
+        "",
+        "## Detected Issues Summary",
+        "",
     ]
 
     if issues:
@@ -346,8 +378,11 @@ def write_report(records: list[dict], report_path: Path, log_path: Path) -> None
 
 
 def main() -> None:
+    """Parse command-line arguments and run the script."""
     if len(sys.argv) < 2:
-        print("Usage: python scripts/analyze_debug_log.py logs/debug_move_TIMESTAMP.jsonl")
+        print(
+            "Usage: python scripts/analyze_debug_log.py logs/debug_move_TIMESTAMP.jsonl"
+        )
         sys.exit(1)
 
     log_path = Path(sys.argv[1])

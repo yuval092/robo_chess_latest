@@ -21,7 +21,9 @@ class FakePhysicalExecutor:
 
     def execute(self, plan):
         self.plans.append(plan)
-        return FakePhysicalResult(self.success, None if self.success else "ROBOT_FAILED")
+        return FakePhysicalResult(
+            self.success, None if self.success else "ROBOT_FAILED"
+        )
 
     def return_to_home(self):
         self.home_calls += 1
@@ -86,7 +88,10 @@ def test_computer_move_uses_same_execution_path():
     assert result.accepted
     assert result.physical_success
     assert executor.plans
-    assert result.move_uci in result.snapshot.move_history_san[-1] or result.move_uci is not None
+    assert (
+        result.move_uci in result.snapshot.move_history_san[-1]
+        or result.move_uci is not None
+    )
 
 
 def test_busy_state_rejects_overlapping_request():

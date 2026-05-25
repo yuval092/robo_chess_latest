@@ -1,11 +1,10 @@
+"""Training callbacks for SAC specialist fine-tuning."""
 import os
 
 import numpy as np
 from stable_baselines3.common.callbacks import BaseCallback, EvalCallback
 
-from src.utils.config import load_config
-from src.utils.logger import setup_logger
-
+from src.utils.io import load_config, setup_logger
 
 progress_logger = setup_logger("training_progress", "logs/training_progress.log")
 
@@ -16,16 +15,18 @@ class DetailedLoggingCallback(BaseCallback):
     """
 
     def __init__(self, verbose=0):
+        """Return init."""
         super().__init__(verbose)
         cfg = load_config("training")
-        self.log_freq = cfg.get("log_freq", 2000)
-        self.window = cfg.get("moving_avg_window", 100)
+        self.log_freq = cfg["log_freq"]
+        self.window = cfg["moving_avg_window"]
         self.episode_rewards = []
         self.episode_lengths = []
         self.successes = []
         self.last_log_step = 0
 
     def _on_step(self) -> bool:
+        """Return on step."""
         for info in self.locals.get("infos", []):
             if "episode" in info:
                 self.episode_rewards.append(info["episode"]["r"])
@@ -56,6 +57,7 @@ class SuccessRateEvalCallback(EvalCallback):
     """
 
     def __init__(self, *args, save_path: str, name: str, **kwargs):
+        """Return init."""
         super().__init__(*args, **kwargs)
         self.save_path = save_path
         self.name = name
@@ -63,6 +65,7 @@ class SuccessRateEvalCallback(EvalCallback):
         self.last_mean_success = -1.0
 
     def _on_step(self) -> bool:
+        """Return on step."""
         result = super()._on_step()
         if self.eval_freq <= 0 or self.n_calls % self.eval_freq != 0:
             return result

@@ -1,6 +1,6 @@
 import pytest
 
-from src.utils.config import load_config
+from src.utils.io import load_config
 
 
 @pytest.mark.parametrize(

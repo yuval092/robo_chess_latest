@@ -8,18 +8,18 @@ Usage:
         [--n-episodes 20] [--drift-limit 0.010]
         [--visualize] [--delay 0.02] [--debug]
 """
-import sys, os, argparse, time
+
+import argparse
+
 import numpy as np
 
-# Ensure project root is in path
-sys.path.append(os.getcwd())
-
-import src.chess_env
 from src.chess_env.controller import ScriptedController, SequenceResult
+from src.chess_env.model_controller import ModelEmbeddedController
+from src.chess_env.waypoints import HOVER_Z, SAFE_Z
 from src.utils.args import add_common_args, make_env
+from src.utils.io import load_config
 
 CHAIN_CHOICES = ["full_move", "pick", "vertical"]
-
 
 def run_sequence_episodes(args, src_xy, dst_xy) -> list:
     """Run N episodes of the specified chain. Returns list of SequenceResult."""
@@ -27,11 +27,9 @@ def run_sequence_episodes(args, src_xy, dst_xy) -> list:
     env = make_env(args, force_scenario="transit", hide_object=hide_object)
     render_fn = env.render if args.visualize else None
     if args.use_rl_models:
-        from src.chess_env.model_controller import ModelEmbeddedController
-        from src.utils.config import load_config
 
-        train_cfg = load_config("training")
-        model_paths = train_cfg.get("deployed_models", {})
+        deployed_cfg = load_config("deployed_models")
+        model_paths = deployed_cfg
         ctrl = ModelEmbeddedController(
             env=env,
             render_fn=render_fn,
@@ -43,8 +41,12 @@ def run_sequence_episodes(args, src_xy, dst_xy) -> list:
             ascend_path=args.ascend_model or model_paths.get("ascend"),
         )
     else:
-        ctrl = ScriptedController(env, drift_limit=args.drift_limit,
-                                  render_fn=render_fn, render_delay=args.delay)
+        ctrl = ScriptedController(
+            env,
+            drift_limit=args.drift_limit,
+            render_fn=render_fn,
+            render_delay=args.delay,
+        )
     inner = env.unwrapped
     results = []
 
@@ -52,8 +54,9 @@ def run_sequence_episodes(args, src_xy, dst_xy) -> list:
         # Force start near home_pos
         inner.force_start_pos = inner.HOME_POS.copy()
         if args.chain in ("full_move", "pick"):
-            inner.force_cube_pos = np.array([src_xy[0], src_xy[1],
-                                              inner.TABLE_SURFACE_Z + inner.CUBE_HEIGHT / 2])
+            inner.force_cube_pos = np.array(
+                [src_xy[0], src_xy[1], inner.TABLE_SURFACE_Z + inner.CUBE_HEIGHT / 2]
+            )
         obs, _ = env.reset()
 
         if args.chain == "full_move":
@@ -61,7 +64,7 @@ def run_sequence_episodes(args, src_xy, dst_xy) -> list:
         elif args.chain == "pick":
             result = ctrl.run_pick_sequence(src_xy)
         elif args.chain == "vertical":
-            from src.chess_env.waypoints import SAFE_Z, HOVER_Z
+
             nom_exit = np.array([src_xy[0], src_xy[1], SAFE_Z])
             goal_descend = np.array([src_xy[0], src_xy[1], HOVER_Z])
             ctrl.transition("descend", goal_descend, nom_exit, src_xy)
@@ -72,27 +75,31 @@ def run_sequence_episodes(args, src_xy, dst_xy) -> list:
                 goal_ascend = np.array([src_xy[0], src_xy[1], SAFE_Z])
                 ctrl.transition("ascend", goal_ascend, nom_exit_hover, src_xy)
                 a = ctrl.run_ascend(src_xy)
-            
+
             result = SequenceResult(
                 success=d.success and (a is not None and a.success),
                 stage_results=[("descend", d)] + ([("ascend", a)] if a else []),
-                failed_at=None if (d.success and a and a.success) else ("descend" if not d.success else "ascend"),
-                grasp_quality=None
+                failed_at=None
+                if (d.success and a and a.success)
+                else ("descend" if not d.success else "ascend"),
+                grasp_quality=None,
             )
         results.append(result)
 
     env.close()
     return results
 
-
 def print_summary(results: list, chain: str):
+    """Print summary output."""
     n = len(results)
     if n == 0:
         print("No results to summarize.")
         return
     successes = sum(r.success for r in results)
-    print(f"\n{'='*65}")
-    print(f"Chain: {chain}  |  Episodes: {n}  |  Full success: {successes}/{n} ({successes/n:.1%})")
+    print(f"\n{'=' * 65}")
+    print(
+        f"Chain: {chain}  |  Episodes: {n}  |  Full success: {successes}/{n} ({successes / n:.1%})"
+    )
 
     # Per-stage breakdown
     stage_stats = {}
@@ -105,7 +112,9 @@ def print_summary(results: list, chain: str):
             else:
                 stage_stats[name]["fail"] += 1
                 reason = sr.crash_reason or "UNKNOWN"
-                stage_stats[name]["reasons"][reason] = stage_stats[name]["reasons"].get(reason, 0) + 1
+                stage_stats[name]["reasons"][reason] = (
+                    stage_stats[name]["reasons"].get(reason, 0) + 1
+                )
 
     print(f"\n{'Stage':<12} {'Success':>9} {'Fail':>7}")
     print("-" * 35)
@@ -118,14 +127,22 @@ def print_summary(results: list, chain: str):
             print()
     print("=" * 65)
 
-
 def main():
+    """Parse command-line arguments and run the script."""
     parser = argparse.ArgumentParser(description="Full scenario chain evaluation.")
     parser.add_argument("--chain", type=str, default="full_move", choices=CHAIN_CHOICES)
-    parser.add_argument("--src-xy", type=str, default="0.88 0.2641",
-                        help="Source XY: two space-separated floats")
-    parser.add_argument("--dst-xy", type=str, default="1.00 0.40",
-                        help="Destination XY: two space-separated floats")
+    parser.add_argument(
+        "--src-xy",
+        type=str,
+        default="0.88 0.2641",
+        help="Source XY: two space-separated floats",
+    )
+    parser.add_argument(
+        "--dst-xy",
+        type=str,
+        default="1.00 0.40",
+        help="Destination XY: two space-separated floats",
+    )
     parser.add_argument(
         "--use-rl-models",
         action="store_true",
@@ -143,7 +160,6 @@ def main():
     print(f"Chain: {args.chain}, src={src_xy}, dst={dst_xy}, n={args.n_episodes}")
     results = run_sequence_episodes(args, src_xy, dst_xy)
     print_summary(results, args.chain)
-
 
 if __name__ == "__main__":
     main()

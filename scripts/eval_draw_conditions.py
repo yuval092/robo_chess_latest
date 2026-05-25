@@ -1,26 +1,20 @@
-import os
-import sys
+"""Verify that chess draw conditions are correctly detected."""
 
-sys.path.append(os.getcwd())
+from __future__ import annotations
+
+import argparse
 
 from src.chess_game.chess_service import ChessService
 from src.chess_game.game_orchestrator import GameOrchestrator
 from src.chess_game.move_planner import LogicalPieceTracker
-from src.physical.plan_executor import PhysicalExecutionResult
-
-
-class MockPhysicalExecutor:
-    def execute(self, plan):
-        return PhysicalExecutionResult(True, [(command, True) for command in plan.commands])
-
-    def return_to_home(self):
-        return PhysicalExecutionResult(True, [])
+from src.physical.noop_executor import NoOpPhysicalExecutor
 
 
 def orchestrator_for(service: ChessService) -> GameOrchestrator:
+    """Return orchestrator for."""
     return GameOrchestrator(
         service,
-        MockPhysicalExecutor(),
+        NoOpPhysicalExecutor(),
         LogicalPieceTracker.empty(),
         human_color="white",
         auto_computer_reply=False,
@@ -28,6 +22,7 @@ def orchestrator_for(service: ChessService) -> GameOrchestrator:
 
 
 def assert_status(name: str, service: ChessService, **expected) -> None:
+    """Assert status."""
     snapshot = orchestrator_for(service).snapshot()
     failures = []
     for field, wanted in expected.items():
@@ -43,6 +38,7 @@ def assert_status(name: str, service: ChessService, **expected) -> None:
 
 
 def threefold_service() -> ChessService:
+    """Return threefold service."""
     service = ChessService()
     for uci in ("g1f3", "g8f6", "f3g1", "f6g8", "g1f3", "g8f6", "f3g1", "f6g8"):
         service.push(service.validate_uci(uci))
@@ -50,6 +46,15 @@ def threefold_service() -> ChessService:
 
 
 def main() -> None:
+    """Parse arguments and run draw-condition checks."""
+    parser = argparse.ArgumentParser(
+        description="Verify chess draw condition detection."
+    )
+    parser.add_argument(
+        "--verbose", "-v", action="store_true", help="Print check details."
+    )
+    parser.parse_args()
+
     assert_status(
         "stalemate",
         ChessService("7k/5K2/6Q1/8/8/8/8/8 b - - 0 1"),
