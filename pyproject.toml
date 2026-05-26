@@ -21,15 +21,21 @@ dependencies = [
 
 [tool.setuptools.packages.find]
 where = ["."]
-include = ["src*", "chess_env*"]
+include = ["src*", "chess_env*", "training*"]
 
 [tool.setuptools.package-data]
 "chess_env" = ["assets/*.xml", "stls/**/*.stl"]
 
 [project.scripts]
-robo-chess-ui = "src.cli.run_chess_ui:main"
-robo-chess-generate = "src.cli.generate_scene:main"
-robo-chess-visualize = "src.cli.visualize:main"
+# Production
+robo-chess-play         = "src.cli.play:main"
+robo-chess-generate     = "src.cli.generate_scene:main"
+# Evaluation
+robo-chess-eval-stage   = "src.cli.eval_stage:main"
+robo-chess-eval-physics = "src.cli.eval_physics:main"
+robo-chess-eval-flow    = "src.cli.eval_flow:main"
+# Training
+robo-chess-train        = "training.cli.main:main"
 
 [tool.ruff]
 line-length = 88
@@ -40,4 +46,4 @@ select = ["E", "W", "F", "I", "UP"]
 ignore = ["E501"]
 
 [tool.ruff.lint.isort]
-known-first-party = ["src", "scripts", "chess_env"]
+known-first-party = ["src", "chess_env", "training"]

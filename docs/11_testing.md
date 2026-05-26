@@ -47,7 +47,7 @@ def test_config_schema_is_valid() -> None:
     validate_config()
 ```
 
-Calls the `validate_config()` function from `scripts/validate_config.py`. This ensures all YAML config files have required keys and satisfy internal geometry constraints (Z-level ordering, board dimensions, etc.). This test runs without MuJoCo and completes in under 100ms.
+Calls the `validate_config()` function from `src/utils/config_validation.py`. This ensures all YAML config files have required keys and satisfy internal geometry constraints (Z-level ordering, board dimensions, etc.). This test runs without MuJoCo and completes in under 100ms.
 
 ---
 

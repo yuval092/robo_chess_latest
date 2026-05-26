@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from scripts.validate_config import validate_config
+from src.utils.config_validation import validate_config
 
 
 def test_config_schema_is_valid() -> None:

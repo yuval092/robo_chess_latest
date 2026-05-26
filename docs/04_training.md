@@ -5,12 +5,13 @@
 Each of the three movement specialists (transit, descend, ascend) is trained independently using SAC fine-tuning from the pretrained `FetchPickAndPlace-v4` checkpoint. Training is launched via:
 
 ```bash
-python scripts/train_rl.py --stage transit
-python scripts/train_rl.py --stage descend
-python scripts/train_rl.py --stage ascend
+robo-chess-train train --stage transit
+robo-chess-train train --stage descend
+robo-chess-train train --stage ascend
 ```
 
-After training, update `configs/deployed_models.yaml` with the checkpoint path and validate with `python scripts/validate_deployed_models.py`.
+After training, update `configs/deployed_models.yaml` with the checkpoint path,
+then verify stage accuracy with `robo-chess-eval-stage`.
 
 ---
 
@@ -176,18 +177,18 @@ After training, run the evaluation suite before deploying:
 
 ```bash
 # Per-stage accuracy (20 episodes each)
-python scripts/eval_stages.py --n-episodes 20
+robo-chess-eval-stage --stage all --episodes 20
 
-# All 64 board squares — "key" mode covers corners + edges + centre
-python scripts/eval_all_cells_rl.py --mode key
+# Targeted hard-cell coverage (corners, edges, known-bad destinations)
+robo-chess-eval-flow --mode complex
 
-# Full pick-and-place sequence
-python scripts/eval_sequence.py --chain full_move --n-episodes 20
+# Full pick-and-place sequence check
+robo-chess-eval-stage --stage full_move --episodes 20
 ```
 
 Results are reported as success rate, crash breakdown, and per-stage timing.
 
-**Warning from training experience:** The callback-level evaluation during training is unreliable. Episodes are 2–17 steps long (an artifact of the evaluation environment), producing inflated success rates. Always use `eval_stages.py` and `eval_all_cells_rl.py` with the production checkpoint for ground-truth evaluation.
+**Warning from training experience:** The callback-level evaluation during training is unreliable. Episodes are 2–17 steps long (an artifact of the evaluation environment), producing inflated success rates. Always use `robo-chess-eval-stage` and `robo-chess-eval-flow` with the production checkpoint for ground-truth evaluation.
 
 ---
 
@@ -205,11 +206,11 @@ Do not assume one rule applies to all stages.
 
 ### 2. Callback Evaluation Is Unreliable
 
-The `SuccessRateEvalCallback` reports artificially high success rates during training (episodes end too quickly). Always evaluate with `eval_stages.py` + `eval_all_cells_rl.py` using the saved checkpoint and the full 300-step episode budget.
+The `SuccessRateEvalCallback` reports artificially high success rates during training (episodes end too quickly). Always evaluate with `robo-chess-eval-stage` + `robo-chess-eval-flow --mode complex` using the saved checkpoint and the full 300-step episode budget.
 
 ### 3. Random Goal Sampling Over-Estimates Performance
 
-`eval_stages.py` uses random board positions, which are biased toward the centre of the board. Corner squares (a1, a8, h1, h8) are harder to reach and under-represented. The "key board eval" (`eval_all_cells_rl.py --mode key`) uses a corner-heavy grid and gives the true production success rate.
+`robo-chess-eval-stage` uses random board positions, which are biased toward the centre of the board. Corner squares (a1, a8, h1, h8) are harder to reach and under-represented. `robo-chess-eval-flow --mode complex` uses a corner-heavy destination set and gives the true production success rate.
 
 ### 4. VERTICAL_QUAT Must Be Consistent
 
@@ -232,7 +233,7 @@ v2 trained for 1M steps. v3 and v4 trained for 600K. The extra 400K steps in v2 
 ## Resume Training from Checkpoint
 
 ```bash
-python scripts/train_rl.py \
+robo-chess-train train \
     --stage transit \
     --model checkpoints/transit_20260524_142519/best_model_transit.zip \
     --timesteps 300000 \
@@ -245,11 +246,12 @@ python scripts/train_rl.py \
 
 ## Updating Deployed Models
 
-1. Train the specialist: `python scripts/train_rl.py --stage ascend`
-2. Evaluate the checkpoint: `python scripts/eval_all_cells_rl.py --mode key`
-3. Edit `configs/deployed_models.yaml`:
+1. Train the specialist: `robo-chess-train train --stage ascend`
+2. Evaluate the checkpoint: `robo-chess-train eval --stage ascend --model <path>`
+3. Run targeted flow coverage: `robo-chess-eval-flow --mode complex --ascend-model <path>`
+4. Edit `configs/deployed_models.yaml`:
    ```yaml
    ascend: "checkpoints/ascend_20260525_133712/final_ascend.zip"
    ```
-4. Validate the paths exist: `python scripts/validate_deployed_models.py`
-5. Test end-to-end: `robo-chess-ui --visualize`
+5. Verify physics and stage accuracy: `robo-chess-eval-physics && robo-chess-eval-stage --stage all`
+6. Test end-to-end: `robo-chess-play`

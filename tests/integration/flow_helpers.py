@@ -1,12 +1,14 @@
-"""Evaluate complete chess game flow through logical and physical layers."""
-import argparse
+"""
+Integration test helpers for multi-move chess game flow evaluation.
+
+Ported from the former scripts/eval_chess_game_flow.py (scripts/ removed).
+"""
+
+from __future__ import annotations
 
 import chess
-import gymnasium as gym
 import numpy as np
 
-from src.chess_env.controller import ScriptedController
-from src.chess_env.model_controller import ModelEmbeddedController
 from src.chess_game.board_mapper import BoardMapper
 from src.chess_game.chess_service import ChessService
 from src.chess_game.move_planner import (
@@ -16,20 +18,15 @@ from src.chess_game.move_planner import (
     RemoveFromBoardCommand,
     TeleportCommand,
 )
-from src.physical.movement_executor import MovementExecutor
-from src.physical.noop_executor import NoOpPhysicalExecutor
 from src.physical.occupancy import PhysicalOccupancy
 from src.physical.piece_registry import PieceRegistry
-from src.physical.piece_teleport import PieceTeleporter
-from src.physical.plan_executor import PhysicalPlanExecutor
-from src.utils.io import load_config
 
-DEFAULT_MOVES = "e2e4,e7e5,g1f3,b8c6"
 POSITION_TOLERANCE_MM = 5.0
 
 
+# ── Helpers ────────────────────────────────────────────────────────────────
+
 def piece_position(env, piece_id: str) -> np.ndarray:
-    """Return piece position."""
     inner = env.unwrapped if hasattr(env, "unwrapped") else env
     previous = inner.active_piece_id
     inner.set_active_piece(piece_id)
@@ -42,7 +39,6 @@ def piece_position(env, piece_id: str) -> np.ndarray:
 
 
 def touched_piece_ids(plan) -> set[str]:
-    """Return touched piece ids."""
     touched = set()
     for command in plan.commands:
         if isinstance(command, ArmMoveCommand):
@@ -55,7 +51,6 @@ def touched_piece_ids(plan) -> set[str]:
 
 
 def command_signature(command) -> str:
-    """Return command signature."""
     if isinstance(command, ArmMoveCommand):
         return f"ARM {command.piece_id} {command.src_square}->{command.dst_square}"
     if isinstance(command, RemoveFromBoardCommand):
@@ -66,17 +61,13 @@ def command_signature(command) -> str:
 
 
 def piece_type_from_id(piece_id: str) -> str:
-    """Return piece type from id."""
     parts = piece_id.split("_")
     if "reserve" in parts:
         return parts[2]
     return parts[1]
 
 
-def assert_tracker_matches_board(
-    board: chess.Board, tracker: LogicalPieceTracker
-) -> None:
-    """Assert tracker matches board."""
+def assert_tracker_matches_board(board: chess.Board, tracker: LogicalPieceTracker) -> None:
     expected_type = {
         chess.PAWN: "pawn",
         chess.KNIGHT: "knight",
@@ -103,27 +94,27 @@ def assert_tracker_matches_board(
             or piece_type_from_id(tracked_piece_id) != piece_type
         ):
             raise SystemExit(
-                f"Tracker mismatch on {square}: board={board_piece.symbol()} tracked={tracked_piece_id}"
+                f"Tracker mismatch on {square}: board={board_piece.symbol()} "
+                f"tracked={tracked_piece_id}"
             )
 
 
 def assert_occupancy_matches_tracker(
     occupancy: PhysicalOccupancy, tracker: LogicalPieceTracker
 ) -> None:
-    """Assert occupancy matches tracker."""
     for square in chess.SQUARE_NAMES:
         tracked_piece_id = tracker.piece_id_at(square)
         physical_piece_id = occupancy.piece_at_square(square)
         if physical_piece_id != tracked_piece_id:
             raise SystemExit(
-                f"Occupancy mismatch on {square}: tracker={tracked_piece_id} physical={physical_piece_id}"
+                f"Occupancy mismatch on {square}: tracker={tracked_piece_id} "
+                f"physical={physical_piece_id}"
             )
 
 
 def assert_physical_positions(
     env, mapper: BoardMapper, occupancy: PhysicalOccupancy, tolerance_mm: float
 ) -> None:
-    """Assert physical positions."""
     for piece_id in PieceRegistry().starting_square_map():
         square = occupancy.square_of_piece(piece_id)
         if square is None:
@@ -141,7 +132,6 @@ def assert_physical_positions(
 def assert_nonmoving_displacement(
     env, before: dict[str, np.ndarray], skipped: set[str], tolerance_mm: float
 ) -> None:
-    """Assert nonmoving displacement."""
     worst_piece = None
     worst_mm = 0.0
     for piece_id, start_pos in before.items():
@@ -163,7 +153,6 @@ def assert_nonmoving_displacement(
 
 
 def print_failure_context(env, fen_before: str, uci: str, plan, result) -> None:
-    """Print failure context output."""
     print("Failure context:")
     print(f"  fen_before={fen_before}")
     print(f"  attempted_uci={uci}")
@@ -188,6 +177,8 @@ def print_failure_context(env, fen_before: str, uci: str, plan, result) -> None:
         print(f"  grip_pos={grip_pos.tolist()}")
 
 
+# ── Main flow runner ───────────────────────────────────────────────────────
+
 def run_flow(
     moves: list[str],
     physical_executor,
@@ -199,7 +190,11 @@ def run_flow(
     occupancy: PhysicalOccupancy | None = None,
     verify_agreement: bool = False,
 ) -> None:
-    """Run flow."""
+    """
+    Run a sequence of UCI chess moves through the full physical execution pipeline.
+
+    Raises SystemExit on any physical failure or state consistency violation.
+    """
     service = ChessService()
     occupancy_piece_ids = set(PieceRegistry().starting_square_map())
     for index, uci in enumerate(moves, start=1):
@@ -240,105 +235,3 @@ def run_flow(
             if isinstance(command, RemoveFromBoardCommand):
                 occupancy_piece_ids.discard(command.piece_id)
         print(f"move {index}: {uci} ok fen={service.fen()}")
-
-
-def main() -> None:
-    """Parse command-line arguments and run the script."""
-    parser = argparse.ArgumentParser(
-        description="Run a deterministic chess game flow through planning and execution."
-    )
-    parser.add_argument(
-        "--moves", default=DEFAULT_MOVES, help="Comma-separated UCI move sequence."
-    )
-    parser.add_argument(
-        "--mock-physical",
-        action="store_true",
-        help="Skip MuJoCo and validate logical planning only.",
-    )
-    parser.add_argument(
-        "--verify-agreement",
-        action="store_true",
-        help="Check board, tracker, occupancy, and MuJoCo positions after every move.",
-    )
-    parser.add_argument("--visualize", action="store_true")
-    parser.add_argument("--delay", type=float, default=0.0)
-    parser.add_argument("--drift-limit", type=float, default=0.010)
-    parser.add_argument("--nonmoving-tolerance-mm", type=float, default=2.0)
-    parser.add_argument(
-        "--use-rl-models",
-        action="store_true",
-        help="Use configured RL movement models where available.",
-    )
-    parser.add_argument("--transit-model", type=str, default=None)
-    parser.add_argument("--descend-model", type=str, default=None)
-    parser.add_argument("--ascend-model", type=str, default=None)
-    args = parser.parse_args()
-
-    moves = [move.strip() for move in args.moves.split(",") if move.strip()]
-    tracker = LogicalPieceTracker()
-    if args.mock_physical:
-        run_flow(
-            moves,
-            NoOpPhysicalExecutor(),
-            tracker,
-            None,
-            args.nonmoving_tolerance_mm,
-            verify_agreement=args.verify_agreement,
-        )
-        print("Chess game-flow evaluation passed.")
-        return
-
-    env = gym.make(
-        "ChessFetchTask-v0",
-        render_mode="human" if args.visualize else None,
-        show_chess_pieces=True,
-        hide_object=True,
-        force_scenario="transit",
-    )
-    try:
-        env.reset()
-        mapper = BoardMapper.from_configs()
-        occupancy = PhysicalOccupancy(PieceRegistry().starting_square_map())
-        render_fn = env.render if args.visualize else None
-        if args.use_rl_models:
-            deployed_cfg = load_config("deployed_models")
-            model_paths = deployed_cfg
-            controller = ModelEmbeddedController(
-                env=env, render_fn=render_fn, render_delay=args.delay
-            )
-            controller.load_available(
-                transit_path=args.transit_model or model_paths.get("transit"),
-                descend_path=args.descend_model or model_paths.get("descend"),
-                ascend_path=args.ascend_model or model_paths.get("ascend"),
-            )
-        else:
-            controller = ScriptedController(
-                env,
-                drift_limit=args.drift_limit,
-                render_fn=render_fn,
-                render_delay=args.delay,
-            )
-        physical_executor = PhysicalPlanExecutor(
-            MovementExecutor(env, controller, mapper, occupancy),
-            PieceTeleporter(env, mapper),
-            occupancy,
-            controller=controller,
-            env=env,
-        )
-        run_flow(
-            moves,
-            physical_executor,
-            tracker,
-            env,
-            args.nonmoving_tolerance_mm,
-            mapper=mapper,
-            occupancy=occupancy,
-            verify_agreement=args.verify_agreement,
-        )
-    finally:
-        env.close()
-    print("Chess game-flow evaluation passed.")
-
-
-if __name__ == "__main__":
-    main()

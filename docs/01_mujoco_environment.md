@@ -286,7 +286,7 @@ Accepts batched arrays for HER (Hindsight Experience Replay) compatibility, even
 
 ### `transition_validate()` — Transition Diagnostics
 
-Returns a dict with grip position, speed, is_velocity_ok, and error from the nominal exit position. Used by diagnostics scripts.
+Returns a dict with grip position, speed, is_velocity_ok, and error from the nominal exit position. Used by diagnostic tooling.
 
 ---
 

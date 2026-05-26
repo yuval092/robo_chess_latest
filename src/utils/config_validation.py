@@ -8,7 +8,15 @@ from src.utils.io import load_config
 
 
 def validate_config() -> None:
-    """Raise AssertionError if required config schema checks fail."""
+    """
+    Raise AssertionError if any required config schema check fails.
+
+    Checks:
+    - Required keys in configs/env.yaml
+    - Board geometry consistency in configs/chess.yaml
+    - Deployed model paths present in configs/deployed_models.yaml
+    - Base training model file exists on disk
+    """
     env = load_config("env")
     chess = load_config("chess")
     deployed = load_config("deployed_models")
@@ -43,13 +51,3 @@ def validate_config() -> None:
 
     base_model = load_config("training")["base_model"]
     assert Path(base_model).exists(), f"Base model missing: {base_model}"
-
-
-def main() -> None:
-    """Run config validation and print a concise result."""
-    validate_config()
-    print("Config schema OK")
-
-
-if __name__ == "__main__":
-    main()

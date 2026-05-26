@@ -118,7 +118,7 @@ Reads defaults from `configs/chess.yaml:game`:
 orchestrator = GameOrchestrator.create_headless()
 ```
 
-Creates an orchestrator with `NoOpPhysicalExecutor` (no arm, instant moves) and no engine. Used in tests and evaluation scripts that only need the chess logic.
+Creates an orchestrator with `NoOpPhysicalExecutor` (no arm, instant moves) and no engine. Used in tests and CLI evaluation tools that only need the chess logic.
 
 ### Data Structures
 
@@ -432,7 +432,7 @@ Returns `f"slot_{len(_captured[color]):02d}"` — the next sequential graveyard 
 A stub physical executor that immediately returns `success=True` for any plan. Used in:
 - `GameOrchestrator.create_headless()`
 - Tests that only test chess logic
-- Evaluation scripts for chess game flow without MuJoCo
+- CLI evaluation commands for chess game flow without MuJoCo
 
 ---
 

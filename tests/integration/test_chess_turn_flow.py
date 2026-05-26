@@ -2,7 +2,7 @@ import chess
 import gymnasium as gym
 import numpy as np
 
-from scripts.eval_chess_game_flow import run_flow
+from tests.integration.flow_helpers import run_flow
 from src.chess_env.controller import ScriptedController
 from src.chess_game.board_mapper import BoardMapper
 from src.chess_game.chess_service import ChessService

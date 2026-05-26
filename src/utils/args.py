@@ -1,54 +1,37 @@
-"""
-Shared argparse utilities for all RoboChess evaluation scripts.
-"""
+"""Shared argparse utilities for RoboChess CLI commands."""
+
+from __future__ import annotations
 
 import argparse
 
-import gymnasium as gym
 
-
-def add_common_args(parser: argparse.ArgumentParser) -> argparse.ArgumentParser:
-    """Add visualization and common flags to any ArgumentParser."""
+def add_model_path_args(parser: argparse.ArgumentParser) -> argparse.ArgumentParser:
+    """Add --transit-model, --descend-model, --ascend-model override flags."""
     parser.add_argument(
-        "--visualize",
-        action="store_true",
-        help="Open a MuJoCo viewer window (requires display)",
+        "--transit-model",
+        metavar="PATH",
+        help="Path to transit model ZIP. Overrides configs/deployed_models.yaml.",
     )
     parser.add_argument(
-        "--delay",
-        type=float,
-        default=0.0,
-        help="Sleep seconds between steps when visualizing (default: 0)",
+        "--descend-model",
+        metavar="PATH",
+        help="Path to descend model ZIP. Overrides configs/deployed_models.yaml.",
     )
     parser.add_argument(
-        "--debug", action="store_true", help="Enable environment debug logging"
-    )
-    parser.add_argument(
-        "--n-episodes",
-        type=int,
-        default=10,
-        help="Number of evaluation episodes (default: 10)",
-    )
-    parser.add_argument(
-        "--drift-limit",
-        type=float,
-        default=0.010,
-        help="Tube constraint radius in meters for descend/ascend (default: 0.010)",
+        "--ascend-model",
+        metavar="PATH",
+        help="Path to ascend model ZIP. Overrides configs/deployed_models.yaml.",
     )
     return parser
 
 
-def make_env(args, force_scenario=None, hide_object=True):
-    """
-    Create the gymnasium environment using parsed args.
-    Handles render_mode selection based on --visualize flag.
-    """
-    render_mode = "human" if args.visualize else None
-    env = gym.make(
-        "ChessFetchTask-v0",
-        render_mode=render_mode,
-        force_scenario=force_scenario,
-        hide_object=hide_object,
-        debug=args.debug,
-    )
-    return env
+def model_overrides_from_args(args: argparse.Namespace) -> dict[str, str]:
+    """Build a stage→path overrides dict from parsed --*-model args."""
+    overrides: dict[str, str] = {}
+    if args.transit_model:
+        overrides["transit"] = args.transit_model
+    if args.descend_model:
+        overrides["descend"] = args.descend_model
+    if args.ascend_model:
+        overrides["ascend"] = args.ascend_model
+    return overrides

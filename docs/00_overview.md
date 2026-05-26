@@ -71,7 +71,8 @@ The project is **simulation-only** — no connection to real hardware. All physi
 | **Waypoints** | `src/chess_env/waypoints.py` | Z-level constants, valid stage transitions |
 | **Config loader** | `src/utils/io.py` | YAML config loading, logger factory |
 | **Training** | `training/` | SAC fine-tuning pipeline (not imported by `src/`) |
-| **Scripts** | `scripts/` | Evaluation, validation, diagnostics, training entrypoints |
+| **CLI Evaluation** | `src/cli/eval_*.py` | Stage accuracy, physics verification, full flow evaluation |
+| **Training CLI** | `training/cli/main.py` | SAC training entry point and model evaluation |
 | **Tests** | `tests/` | pytest suite |
 
 ---
@@ -118,44 +119,28 @@ robo_chess_latest/
 │   │   └── templates/index.html
 │   │
 │   ├── cli/                # Installed entry points
-│   │   ├── run_chess_ui.py   → robo-chess-ui
-│   │   ├── visualize.py      → robo-chess-visualize
-│   │   └── generate_scene.py → robo-chess-generate
+│   │   ├── play.py             → robo-chess-play
+│   │   ├── generate_scene.py   → robo-chess-generate
+│   │   ├── eval_stage.py       → robo-chess-eval-stage
+│   │   ├── eval_physics.py     → robo-chess-eval-physics
+│   │   └── eval_flow.py        → robo-chess-eval-flow
 │   │
 │   └── utils/
-│       ├── io.py           # load_config(), setup_logger()
-│       ├── args.py         # Shared argparse helpers
-│       └── config.py       # Backward-compat shim
+│       ├── io.py               # load_config(), setup_logger()
+│       ├── args.py             # Shared argparse helpers
+│       ├── config.py           # Backward-compat shim
+│       └── config_validation.py # validate_config() for test suite
 │
 ├── training/               # SAC training (not imported by src/)
 │   ├── trainer.py          # SACTrainer
 │   ├── callbacks.py        # DetailedLoggingCallback, SuccessRateEvalCallback
+│   ├── cli/
+│   │   └── main.py         → robo-chess-train
 │   └── envs/               # Per-stage gym.Wrapper wrappers + factory
 │       ├── __init__.py     # make_train_env(), make_eval_env()
 │       ├── transit_env.py
 │       ├── descend_env.py
 │       └── ascend_env.py
-│
-├── scripts/                # Developer tools (eval, validate, train, diagnose)
-│   ├── train_rl.py
-│   ├── eval_stages.py
-│   ├── eval_sequence.py
-│   ├── eval_all_cells_rl.py
-│   ├── eval_all_square_moves.py
-│   ├── eval_chess_game_flow.py
-│   ├── eval_chess_piece_move.py
-│   ├── eval_chess_reachability.py
-│   ├── eval_draw_conditions.py
-│   ├── eval_game_logic.py
-│   ├── eval_grasp_physics.py
-│   ├── eval_special_moves.py
-│   ├── eval_stress.py
-│   ├── eval_targeted.py
-│   ├── analyze_debug_log.py
-│   ├── validate_config.py
-│   ├── validate_deployed_models.py
-│   ├── verify_physics.py
-│   └── diagnostics/        # Deep-dive debug tools
 │
 ├── chess_env/              # MuJoCo assets
 │   ├── assets/
@@ -206,7 +191,7 @@ The following trace follows a single move (e.g., e2→e4) from browser click to 
    Enqueues UIRequest onto the main-thread queue.
    Blocks waiting for response (synchronous from caller's perspective).
 
-4. Main thread (src/cli/run_chess_ui.py : while loop)
+4. Main thread (src/cli/play.py : while loop)
    Calls: backend.process_one(env=env)
    Dequeues the request and calls: orchestrator.submit_human_move("e2", "e4")
 
@@ -275,11 +260,13 @@ The following trace follows a single move (e.g., e2→e4) from browser click to 
 
 | Command | Source | Description |
 |---|---|---|
-| `robo-chess-ui` | `src/cli/run_chess_ui.py:main` | Start Flask + MuJoCo game loop |
-| `robo-chess-visualize` | `src/cli/visualize.py:main` | Watch scripted arm movement (no chess) |
+| `robo-chess-play` | `src/cli/play.py:main` | Start Flask + MuJoCo game loop |
 | `robo-chess-generate` | `src/cli/generate_scene.py:main` | Regenerate MuJoCo XML assets |
-| `python scripts/train_rl.py` | `scripts/train_rl.py:main` | Train one SAC specialist model |
-| `python scripts/eval_stages.py` | `scripts/eval_stages.py` | Evaluate per-stage RL model accuracy |
+| `robo-chess-eval-stage` | `src/cli/eval_stage.py:main` | Per-stage waypoint accuracy (success %, error, crashes); supports `--visualize` |
+| `robo-chess-eval-physics` | `src/cli/eval_physics.py:main` | Physics integrity: geometry, stability, reachability; supports `--visualize` |
+| `robo-chess-eval-flow` | `src/cli/eval_flow.py:main` | Full piece-move flow: simple / complex / full board sweep; supports `--visualize` |
+| `robo-chess-train train` | `training/cli/main.py:main` | Train one SAC specialist model |
+| `robo-chess-train eval` | `training/cli/main.py:main` | Evaluate a trained model (delegates to eval-stage) |
 
 ---
 

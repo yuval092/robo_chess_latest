@@ -352,14 +352,14 @@ descend: "models/descend.zip"
 ascend:  "models/ascend.zip"
 ```
 
-These paths are relative to the project root. They are read by `build_controller()` in `run_chess_ui.py` and by evaluation scripts.
+These paths are relative to the project root. They are read by `build_controller()` in `src/cli/play.py` and by the evaluation CLI commands.
 
 **To deploy a new model:**
-1. Train: `python scripts/train_rl.py --stage ascend`
-2. Evaluate: `python scripts/eval_all_cells_rl.py --mode key`
+1. Train: `robo-chess-train train --stage ascend`
+2. Evaluate: `robo-chess-eval-flow --mode complex --ascend-model <path>`
 3. Update this file with the new checkpoint path
-4. Validate: `python scripts/validate_deployed_models.py`
-5. Test end-to-end: `robo-chess-ui --visualize`
+4. Verify: `robo-chess-eval-stage --stage all`
+5. Test end-to-end: `robo-chess-play`
 
 ---
 
@@ -376,12 +376,12 @@ Config files are loaded fresh on each call — there is no global cache. This me
 
 ---
 
-## Configuration Validation (`scripts/validate_config.py`)
+## Configuration Validation (`src/utils/config_validation.py`)
 
-Checks that all required keys exist in all config files and verifies internal consistency (e.g., board geometry constraints, model file paths). Run before training or evaluation:
+Checks that all required keys exist in all config files and verifies internal consistency (e.g., board geometry constraints, model file paths). The validation runs automatically as part of the test suite:
 
 ```bash
-python scripts/validate_config.py
+pytest tests/test_config_schema.py
 ```
 
-The pytest test suite also runs this via `tests/test_config_schema.py::test_config_schema_is_valid`.
+The pytest test suite runs this via `tests/test_config_schema.py::test_config_schema_is_valid`.
