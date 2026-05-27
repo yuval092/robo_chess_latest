@@ -432,7 +432,6 @@ Returns `f"slot_{len(_captured[color]):02d}"` — the next sequential graveyard 
 A stub physical executor that immediately returns `success=True` for any plan. Used in:
 - `GameOrchestrator.create_headless()`
 - Tests that only test chess logic
-- CLI evaluation commands for chess game flow without MuJoCo
 
 ---
 
@@ -443,19 +442,9 @@ Stockfish is configured via `configs/chess.yaml:engine`:
 ```yaml
 engine:
   stockfish_path: stockfish  # name on PATH, or full path
-  skill_level: 5             # 0 (random) to 20 (full strength)
+  skill_level: 5             # Stockfish Skill Level option, 0-20
   think_time_s: 0.5          # seconds per move
 ```
-
-Skill level mapping (approximate):
-
-| `skill_level` | ELO | Description |
-|---|---|---|
-| 0–2 | ~800 | Blunders pieces, obvious mistakes |
-| 5 | ~1100 | Occasional tactical errors (default) |
-| 10 | ~1600 | Solid club player |
-| 15 | ~2200 | Master level |
-| 20 | ~3400 | Full Stockfish — effectively unbeatable |
 
 Stockfish is started via `chess.engine.SimpleEngine.popen_uci(path)` and configured with `{"Skill Level": skill}`. It is shut down with `engine.quit()` on `ChessService.close()`.
 

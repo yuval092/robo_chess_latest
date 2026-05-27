@@ -28,16 +28,11 @@ A single model would need to handle all three regimes, requiring a more complex 
 models/pretrained/sac-FetchPickAndPlace-v4.zip
 ```
 
-This is a publicly available pretrained SAC checkpoint trained on the `FetchPickAndPlace-v4` Gymnasium environment. It was trained to pick up a cube from a table and move it to a goal position. The policy's MultiInputPolicy expects a 25-dimensional observation.
+This checkpoint is configured as the base model in `configs/training.yaml`. The policy's `MultiInputPolicy` expects a 25-dimensional observation.
 
 ### Why Transfer Works
 
-`FetchPickAndPlace-v4` teaches the robot to:
-1. Move the gripper to an arbitrary 3D position
-2. Navigate around a table environment
-3. Apply smooth, controlled velocities
-
-These skills directly generalise to RoboChess movement stages. The main challenge is that the pretrained policy assumes it is carrying an object; RoboChess stages involve pure gripper movement (no object to pick up). The "Holding Object" trick resolves this.
+RoboChess keeps the `FetchPickAndPlace-v4` observation layout expected by the base policy, but changes the observation contents so the object position equals the gripper position. The policy is therefore asked to solve a gripper-to-goal movement problem with the same input shape it was trained with.
 
 ---
 
@@ -163,17 +158,17 @@ descend: "models/descend.zip"
 ascend:  "models/ascend.zip"
 ```
 
-At startup, `build_controller()` in `run_chess_ui.py` reads this file and calls `controller.load_available(transit_path=..., descend_path=..., ascend_path=...)`.
+At startup, `build_controller()` in `src/cli/play.py` reads this file and calls `controller.load_available(transit_path=..., descend_path=..., ascend_path=...)`.
 
-### Model Selection History
+### Active Checkpoints
 
-The three current models (as of this documentation) are:
+The active model paths are code/config state, not hard-coded in the controller:
 
-| Stage | Notes |
+| Stage | Default path |
 |---|---|
-| `transit` | Trained May 2026; 100% on all key board squares |
-| `descend` | Trained May 2026; 100% on all key board squares |
-| `ascend` | v4 model (34.3% key eval) pending replacement by v5 with `VERTICAL_QUAT` enforcement in training |
+| `transit` | `models/transit.zip` |
+| `descend` | `models/descend.zip` |
+| `ascend` | `models/ascend.zip` |
 
 ### Model File Format
 
@@ -213,7 +208,7 @@ ModelEmbeddedController._run_stage("transit", target_pos):
      obs = env._get_obs()           # 25-D transfer obs
      action, _ = model.predict(obs, deterministic=True)
      action = np.float32(action)
-     action[3] = -1.0               # force gripper closed (for transit/ascend)
+     action[3] = -1.0 if stage in {"transit", "ascend"} else 1.0
 
      env._set_action(action)
      if stage == "transit":
@@ -223,7 +218,7 @@ ModelEmbeddedController._run_stage("transit", target_pos):
      crash = _check_crash(env, stage, grip_pos)
      if crash: break
 
-7. env._use_transfer_obs = False    # restore (even on exception)
+7. env._use_transfer_obs = previous value    # restore (even on exception)
 
 8. Return StageResult(success, steps, crash_reason, final_pos, error_mm)
 ```
@@ -271,7 +266,7 @@ SB3's `SAC.load` validates observation space dimensions but does not re-construc
 |---|---|---|
 | `base_model` | `sac-FetchPickAndPlace-v4.zip` | Starting checkpoint |
 | `num_envs` | 4 | Parallel training environments |
-| `total_timesteps` | 600,000 | Training length (recommend 1M for ascend) |
+| `total_timesteps` | 600,000 | Default training length |
 | `learning_rate` | 5e-5 | Conservative; preserves pretrained features |
 | `batch_size` | 512 | Large batch for stable SAC updates |
 | `target_entropy` | -4.0 | Tuned for 4-D action space |

@@ -417,7 +417,7 @@ This prevents the model from accidentally toggling the gripper mid-stage.
 
 ### VERTICAL_QUAT Enforcement
 
-Only applied for `transit` because the transit model was trained with `VERTICAL_QUAT` enforced in every step. The descend and ascend models were trained without it (the `step()` method enforces it there, but the model sees free wrist actions). Applying it to all stages would break the descend/ascend policies.
+Only applied for `transit` because the transit model was trained with `VERTICAL_QUAT` enforced in every step. Descend and ascend inference does not clamp the mocap quaternion, matching those models' training conditions.
 
 ### Crash Checks
 
@@ -473,4 +473,4 @@ CHAIN_SHORTCUTS = {
 }
 ```
 
-These shortcuts are used by `eval_sequence.py` to specify evaluation scenarios.
+The current CLI uses its own chain shortcuts in `src/cli/eval_stage.py`; this module remains the source of waypoint Z constants and transition validation helpers.

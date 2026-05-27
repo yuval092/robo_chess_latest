@@ -75,7 +75,7 @@ with _xml_path_lock:
 The RL action space is a 4-vector `[dx, dy, dz, gripper]`. `_set_action` translates this into MuJoCo mocap control:
 
 1. **Position control**: `pos_ctrl = action[:3] * POS_CTRL_SCALE` — scales the displacement down to at most 15mm per step.
-2. **Rotation**: Always zero-delta (the wrist quaternion is enforced separately by setting `mocap_quat[0] = VERTICAL_QUAT`).
+2. **Rotation**: Always zero-delta. `_set_action()` does not apply rotational action; setup and selected controllers enforce `VERTICAL_QUAT` where required.
 3. **Gripper enforcement**:
    - When `grasp_mode=False` (transit/descend/ascend without a piece): finger joints are **teleported** to `finger_target_joint`. Both `ctrl` and `qpos`/`qvel` are set directly. This bypasses contact physics.
    - When `grasp_mode=True` (carrying a piece): only `ctrl[0]` and `ctrl[1]` are set. The MuJoCo position actuator drives the fingers, allowing contact forces with the held piece.

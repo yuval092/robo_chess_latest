@@ -26,7 +26,14 @@ Regenerate MuJoCo XML scene assets and STL meshes.
 
 ```bash
 robo-chess-generate {board|pieces|zones|stls|all}
+robo-chess-generate board --write
+robo-chess-generate pieces --write
+robo-chess-generate zones --write
 ```
+
+`board`, `pieces`, and `zones` print their generated XML by default; pass `--write`
+to update `chess_env/assets/pick_and_place.xml`. `all` regenerates the XML
+fragments only. `stls` regenerates the chess STL meshes.
 
 ---
 

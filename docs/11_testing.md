@@ -6,7 +6,7 @@ The test suite covers all major layers of the system: chess logic, physical laye
 
 ```
 tests/
-├── conftest.py                     — Shared fixtures and session-scope helpers
+├── conftest.py                     — Shared pytest configuration
 ├── test_config_schema.py           — Config file validation smoke test
 ├── chess_env/                      — MuJoCo environment and RL infrastructure
 │   ├── test_characterization.py    — Behaviour locks: XML loading, obs space restore
@@ -38,7 +38,7 @@ tests/
 
 ### `tests/conftest.py`
 
-Shared pytest configuration and fixtures. Provides session-scoped helpers (e.g., environment creation) to avoid re-initialising MuJoCo for every test. The conftest contains no user-visible content beyond imports and empty fixture stubs — fixtures are defined locally in each test module for clarity.
+Shared pytest configuration. The conftest currently contains only the shared pytest module docstring; fixtures are defined locally in each test module for clarity.
 
 ### `tests/test_config_schema.py`
 
@@ -248,7 +248,7 @@ def client():
 | `test_new_game_endpoint_resets_snapshot` | After a move, `POST /api/new-game` resets board to starting position |
 | (additional) | `POST /api/move` with valid src/dst returns 200; invalid move returns 400; missing fields returns 400 with error |
 | (additional) | `POST /api/let-computer-play` returns 200 and a valid computer move |
-| (additional) | `POST /api/promote` returns 501; `POST /api/undo` returns 501 |
+| `test_busy_state_is_represented` | Busy state appears in `GET /api/snapshot` |
 
 ### `test_run_chess_ui_backend.py`
 
@@ -256,7 +256,7 @@ Tests `QueuedUIBackend` threading behaviour.
 
 | Test | What it verifies |
 |---|---|
-| `test_new_game_request_resets_env_and_physical_occupancy` | When `backend.new_game()` is called from a thread and `process_one(env=env)` is called from the main thread: `env.reset()` is called once, `physical_executor.reset_occupancy()` is called once, result is returned to the calling thread, and `backend.snapshot()` reflects the new state |
+| `test_new_game_request_resets_env_and_physical_occupancy` | When `backend.new_game()` is called from a thread and `process_one(env=env)` is called from the main thread: `env.reset()` is called once, the physical executor reset hook is called once, result is returned to the calling thread, and `backend.snapshot()` reflects the new state |
 
 Uses `threading.Thread` to simulate the Flask worker/main-thread split. Verifies that the queue bridge correctly serialises the call and delivers the response.
 
@@ -306,7 +306,7 @@ Also verifies:
 
 ### `test_all_square_moves.py`
 
-Exhaustive physical reachability: tests arm moves across a representative subset of all src→dst board square pairs with `ScriptedController`. Verifies the arm can physically reach all board positions without timing out or crashing.
+Physical reachability coverage: tests arm moves across a representative subset of src→dst board square pairs with `ScriptedController`. Verifies the arm can physically reach the sampled board positions without timing out or crashing.
 
 ---
 

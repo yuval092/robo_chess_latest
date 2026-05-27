@@ -61,7 +61,7 @@ All board geoms use `contype="0" conaffinity="0"` — they are purely visual and
 
 ### `build_pieces_fragment()` — 32+64 Piece Bodies
 
-For each piece in `PieceRegistry().all_pieces()` (32 active pieces):
+For each active piece in `PieceRegistry().all_pieces()` (32 active pieces):
 
 ```xml
 <body name="piece_white_pawn_e" pos="X Y Z">  <!-- e2 -->
@@ -78,11 +78,11 @@ For each piece in `PieceRegistry().all_pieces()` (32 active pieces):
 
 Key design decisions:
 - The **cube geom** is the physics body: 30mm cube, mass 0.35 kg, high friction (`2.0`), tight soft contacts (`solimp="0.99 0.999 0.001"`). This is what the gripper actually grasps.
-- The **visual mesh geom** sits `pos="0 0 -0.016"` below the cube centre (placing the piece visually on top of the cube). It has `contype="0" conaffinity="0"` (no collision).
+- The **visual mesh geom** sits `pos="0 0 -0.016"` below the cube centre. It has `contype="0" conaffinity="0"` (no collision).
 - The **free joint** `damping="8.0"` prevents pieces from sliding or tumbling under small perturbations.
 - `rgba="0 0 0 0"` makes the cube geom fully transparent — only the mesh is visible.
 
-For 64 reserve pieces (promotion), the same structure is used but placed at off-board reserve positions.
+For the 64 reserve pieces from `reserve_piece_ids()` (promotion), the same structure is used but placed at off-board reserve positions.
 
 Knights are given an `euler` rotation attribute to face the correct direction:
 ```python
@@ -181,20 +181,27 @@ Writes a binary STL file with:
 The `robo-chess-generate` CLI (`src/cli/generate_scene.py`) provides sub-commands:
 
 ```bash
-# Regenerate XML fragments only (no STL)
-robo-chess-generate scene
+# Print generated XML fragments
+robo-chess-generate board
+robo-chess-generate pieces
+robo-chess-generate zones
+
+# Write generated XML fragments into chess_env/assets/pick_and_place.xml
+robo-chess-generate board --write
+robo-chess-generate pieces --write
+robo-chess-generate zones --write
 
 # Regenerate STL meshes only
 robo-chess-generate stls
 
-# Regenerate everything
+# Regenerate XML fragments only
 robo-chess-generate all
 ```
 
 When to regenerate:
 - **Scene**: after changing `configs/chess.yaml` (board geometry, graveyard layout, piece config)
 - **STLs**: after changing STL geometry constants in `environment_generation.py`
-- Automatic at startup: scene fragments are always validated and regenerated if needed; STLs are not (they must be regenerated manually)
+- Automatic at startup: `regenerate_environment()` validates/regenerates scene fragments only; STLs are not regenerated unless `regenerate_environment(include_stls=True)` or `robo-chess-generate stls` is used.
 
 ---
 

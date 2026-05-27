@@ -51,7 +51,7 @@ trainer.train(model_path="models/pretrained/sac-FetchPickAndPlace-v4.zip",
 
 With `num_envs=4` (the default), `SubprocVecEnv` spawns 4 worker processes using `fork`. Each worker runs its own independent `ChessTaskEnv` instance with its own random seed. Experience from all workers is merged into a shared replay buffer. The effective timestep rate is approximately 4× single-env throughput.
 
-**Note from training history:** Using 2 environments (as in the v2 ascend model) can produce better-generalising models than 10+ environments, likely because fewer parallel environments means each worker gets more varied experience relative to the model update frequency. The v5 ascend training uses 10 environments for speed but matches v2's 1M total timestep budget.
+`num_envs` defaults to 4 in `configs/training.yaml`, but the CLI can override it with `--envs`.
 
 ### Evaluation Environment
 
@@ -114,7 +114,7 @@ The success bonus of +500 dominates any achievable episode reward, creating a st
 
 **Braking reward:** When the gripper is within `braking_dist` of the goal, a velocity penalty is applied. This discourages the arm from rushing past the goal at high speed and encourages the policy to decelerate for a stable hold. The braking distance and weight differ per stage (see [01_mujoco_environment.md](01_mujoco_environment.md#reward-function)).
 
-**Jitter penalty:** Penalises high-norm actions, discouraging oscillatory or noisy movement. Weight of 0.003 was retained from the v2 baseline.
+**Jitter penalty:** Penalises high-norm actions, discouraging oscillatory or noisy movement. The current weight is `0.003`.
 
 ---
 
@@ -188,45 +188,23 @@ robo-chess-eval-stage --stage full_move --episodes 20
 
 Results are reported as success rate, crash breakdown, and per-stage timing.
 
-**Warning from training experience:** The callback-level evaluation during training is unreliable. Episodes are 2–17 steps long (an artifact of the evaluation environment), producing inflated success rates. Always use `robo-chess-eval-stage` and `robo-chess-eval-flow` with the production checkpoint for ground-truth evaluation.
+**Warning:** Callback-level evaluation during training is a checkpoint-selection aid, not a production validation run. Always use `robo-chess-eval-stage` and `robo-chess-eval-flow` with the production checkpoint for deployment decisions.
 
 ---
 
-## Training Lessons Learned
+## Training Notes
 
-The following hard-won lessons were accumulated across multiple training runs:
+### Callback Evaluation Is Unreliable
 
-### 1. Use the Right Checkpoint
+The `SuccessRateEvalCallback` is useful for saving latest/best checkpoints, but deployment should be based on `robo-chess-eval-stage` + `robo-chess-eval-flow --mode complex` using the saved checkpoint and production stage budgets.
 
-- **Transit**: `best_model_transit.zip` outperforms `final_transit.zip`.
-- **Descend**: `final_descend.zip` outperforms `best_model_descend.zip`.
-- **Ascend**: Check both; performance varies between runs.
-
-Do not assume one rule applies to all stages.
-
-### 2. Callback Evaluation Is Unreliable
-
-The `SuccessRateEvalCallback` reports artificially high success rates during training (episodes end too quickly). Always evaluate with `robo-chess-eval-stage` + `robo-chess-eval-flow --mode complex` using the saved checkpoint and the full 300-step episode budget.
-
-### 3. Random Goal Sampling Over-Estimates Performance
+### Random Goal Sampling Over-Estimates Performance
 
 `robo-chess-eval-stage` uses random board positions, which are biased toward the centre of the board. Corner squares (a1, a8, h1, h8) are harder to reach and under-represented. `robo-chess-eval-flow --mode complex` uses a corner-heavy destination set and gives the true production success rate.
 
-### 4. VERTICAL_QUAT Must Be Consistent
+### VERTICAL_QUAT Must Be Consistent
 
-Training without `VERTICAL_QUAT` enforcement and then enforcing it at inference creates a distribution shift. However, a model trained without VERTICAL_QUAT enforcement can still achieve 97%+ at inference with VQ (the v2 ascend result). Models trained with VQ enforcement in `step()` have so far performed worse — this remains under investigation.
-
-### 5. Braking Zones for Ascend Hurt, Not Help
-
-The v2 ascend model had `ascend_braking_dist = success_threshold = 10 mm` (effectively no braking zone outside the success zone). Gravity helps the arm decelerate on ascent. v3 (30 mm braking) and v4 (12 mm braking) both performed significantly worse. v5 returns to v2's original configuration.
-
-### 6. More Environments ≠ Better
-
-v2 used 2 environments and achieved 97.2% on key squares. v3 and v4 used 10 environments and performed worse. The cause is unclear — it may be that fewer environments produce higher-quality, more diverse experience relative to update frequency, or that the `fork` start method behaves differently at scale. v5 uses 10 environments for speed (acceptable if quality is maintained).
-
-### 7. Longer Training Matters for Ascend
-
-v2 trained for 1M steps. v3 and v4 trained for 600K. The extra 400K steps in v2 may have been critical for the ascend model to generalise to corner squares. v5 also uses 1M steps.
+Training and inference should use matching wrist-orientation handling. In the current controller, model inference clamps `VERTICAL_QUAT` only for transit; descend and ascend run without that inference-time clamp.
 
 ---
 

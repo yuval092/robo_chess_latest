@@ -2,7 +2,7 @@
 
 ## Overview
 
-All configuration lives in YAML files under `configs/`. They are loaded at runtime via `src/utils/io.load_config(name)`, which resolves `configs/{name}.yaml` relative to the project root. No config is baked into module-level constants — all parameters are read from these files at startup.
+All configuration lives in YAML files under `configs/`. They are loaded via `src/utils/io.load_config(name)`, which resolves `configs/{name}.yaml` relative to the project root. Most runtime objects read these files during construction; a few helper modules initialise module-level constants from config at import time.
 
 | File | Purpose |
 |---|---|
@@ -62,12 +62,12 @@ These form the key heights used throughout arm control:
 | `dist_reward_weight` | `1.0` | Multiplier for 3D distance-to-goal reward |
 | `z_reward_weight` | `1.5` | Extra weight on Z-axis error (encourages vertical precision) |
 | `xy_reward_weight` | `2.0` | Penalty weight on XY drift from tube centre |
-| `jitter_penalty_weight` | `0.003` | Penalises large actions; matches v2 original training |
+| `jitter_penalty_weight` | `0.003` | Penalises large actions |
 | `floor_penalty` | `-0.5` | Per-step penalty when gripper is near floor |
 | `braking_reward_weight` | `0.15` | Fallback velocity penalty weight |
 | `transit_braking_reward_weight` | `0.50` | Transit: strong velocity penalty near goal |
 | `descend_braking_reward_weight` | `0.30` | Descend: moderate velocity penalty |
-| `ascend_braking_reward_weight` | `0.15` | Ascend: matches v2 original (no meaningful braking outside success zone) |
+| `ascend_braking_reward_weight` | `0.15` | Ascend velocity penalty near goal |
 | `floor_proximity_threshold` | `0.025` | Safety margin above floor that triggers floor penalty |
 
 ### Stage-Specific Braking Distances
@@ -79,7 +79,7 @@ These form the key heights used throughout arm control:
 | `descend_braking_dist` | `0.025` | Descend: arm decelerates within 25 mm of HOVER_Z |
 | `ascend_braking_dist` | `0.010` | Ascend: equals success threshold — effectively no braking zone |
 
-The ascend braking distance intentionally equals the success threshold because gravity assists deceleration during ascent. Adding a meaningful braking zone (tried in v3/v4 with 30mm/12mm) hurt performance.
+The ascend braking distance intentionally equals the success threshold, so there is no meaningful braking zone outside the success zone.
 
 ### Controller Movement Parameters
 
@@ -205,7 +205,7 @@ reachability_expected:
   geometry_tolerance_m: 1.0e-9
 ```
 
-Used by `eval_chess_reachability.py` to verify that all 64 squares map to the expected world coordinates.
+Used by board-mapper/config tests and physics evaluation to verify that all 64 squares map to the expected world coordinates.
 
 ### Piece Geometry
 
@@ -215,7 +215,7 @@ Used by `eval_chess_reachability.py` to verify that all 64 squares map to the ex
 | `pieces.cube_height_m` | `0.030` | Full cube height |
 | `pieces.freejoint_damping` | `8.0` | MuJoCo free joint damping to prevent tumbling |
 
-Visual mesh geoms use `pos="0 0 0.017"` to sit on top of the cube. STL files are pre-scaled in metres.
+Visual mesh geoms use `pos="0 0 -0.016"` relative to the cube body. STL files are pre-scaled in metres.
 
 ### Graveyard Layout
 
@@ -275,9 +275,9 @@ reserves:
 | Key | Default | Description |
 |---|---|---|
 | `engine.stockfish_path` | `stockfish` | Executable name (on PATH) or full path; `null` to disable |
-| `engine.skill_level` | `5` | Skill level 0–20 (0 ≈ 800 ELO, 20 ≈ full Stockfish strength) |
+| `engine.skill_level` | `5` | Stockfish `Skill Level` option, 0–20 |
 | `engine.think_time_s` | `0.5` | Seconds Stockfish may think per move |
-| `engine.fallback_depth` | `3` | Minimax depth when Stockfish is unavailable |
+| `engine.fallback_depth` | `3` | Present in config, but not currently consumed by `ChessService` |
 
 ---
 
@@ -314,7 +314,7 @@ reserves:
 |---|---|---|
 | `base_model` | `"models/pretrained/sac-FetchPickAndPlace-v4.zip"` | Starting checkpoint for fine-tuning |
 | `num_envs` | `4` | Parallel training environments (SubprocVecEnv) |
-| `total_timesteps` | `600000` | Total training steps (recommend 1M for ascend) |
+| `total_timesteps` | `600000` | Default total training steps |
 
 ### SAC Hyperparameters
 
@@ -378,7 +378,7 @@ Config files are loaded fresh on each call — there is no global cache. This me
 
 ## Configuration Validation (`src/utils/config_validation.py`)
 
-Checks that all required keys exist in all config files and verifies internal consistency (e.g., board geometry constraints, model file paths). The validation runs automatically as part of the test suite:
+Checks that required keys exist and verifies internal consistency (e.g., board geometry constraints, deployed model path types, and base training model existence). The validation runs automatically as part of the test suite:
 
 ```bash
 pytest tests/test_config_schema.py
