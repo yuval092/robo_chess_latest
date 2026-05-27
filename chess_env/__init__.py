@@ -1,13 +1,3 @@
-from gymnasium.envs.registration import register
-
-register(
-    id='ChessFetch-v0',
-    entry_point='chess_env.chess_fetch_env:ChessFetchEnv',
-    max_episode_steps=175,  # increased from 100 to allow for complex corner movements
-)
-
-register(
-    id='ChessFetchDense-v0',
-    entry_point='chess_env.chess_fetch_dense_env:ChessFetchDenseEnv',
-    max_episode_steps=250,
-)
+# Legacy RL environment registrations removed — the entry-point modules
+# chess_fetch_env and chess_fetch_dense_env no longer exist.
+# The active scripted environment is registered in src/chess_env/__init__.py.

@@ -1,0 +1,72 @@
+board:
+  cell_size_m: 0.08
+  board_size: 8
+  center_xy: [0.88, 0.2641]
+  width_m: 0.64
+  margin_on_table_m: 0.03
+  orientation:
+    white_side: low_y
+    file_axis: x
+    rank_axis: y
+  use_env_edge_margin_for_board: false
+  validation:
+    required_cell_size_m: 0.08
+    required_board_width_m: 0.64
+    required_table_margin_m: 0.03
+    geometry_tolerance_m: 1.0e-9
+
+reachability_expected:
+  rank1_y_m: -0.0159
+  rank8_y_m: 0.5441
+  file_a_x_m: 0.600
+  file_h_x_m: 1.160
+  geometry_tolerance_m: 1.0e-9
+
+pieces:
+  cube_half_extent_m: 0.015    # Physics collision body half-size
+  cube_height_m: 0.030         # Full cube height; piece centre is at table_z + 0.015
+  # STL files in chess_env/stls/chess/ are already in metres.
+  # Visual geoms use pos="0 0 0.017" to sit on top of the cube, just above cube top at +0.015.
+  # Piece heights: pawn 18mm, rook 20mm, knight 21mm, bishop 24mm, queen 23mm, king 26mm.
+  # No mesh scale attribute is needed.
+  freejoint_damping: 8.0
+
+reserves:
+  graveyard_slot_spacing_m: 0.045
+  promotion_slot_spacing_m: 0.045
+  promotion_pieces_per_type: 8
+  per_color:
+    queen: 8
+    rook: 8
+    bishop: 8
+    knight: 8
+
+graveyards:
+  white:
+    origin_xyz: [0.640, -0.300, 0.015]
+    rows: 4
+    cols: 4
+  black:
+    origin_xyz: [0.640, 0.680, 0.015]
+    rows: 4
+    cols: 4
+
+promotion_reserve:
+  white:
+    origin_xyz: [0.820, -0.300, 0.015]
+    rows: 8
+    cols: 4
+  black:
+    origin_xyz: [0.820, 0.680, 0.015]
+    rows: 8
+    cols: 4
+
+game:
+  human_color: white
+  auto_computer_reply: true
+
+engine:
+  stockfish_path: stockfish  # executable name on PATH, or full path, or null to disable
+  skill_level: 5             # 0 (random-ish) to 20 (full Stockfish strength)
+  think_time_s: 0.5          # seconds Stockfish may think per move
+  fallback_depth: 3          # minimax search depth when Stockfish is unavailable

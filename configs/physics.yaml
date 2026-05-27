@@ -1,7 +1,7 @@
 max_settle_steps: 500
 settle_tolerance: 0.003
 settle_gain: 0.3
-vertical_quat: [1.0, 0.0, 1.0, 0.0]
+vertical_quat: [0.7071068, 0.0, 0.7071068, 0.0]  # unit quaternion; 90° rotation about Y axis (gripper points down)
 initial_qpos: [-0.05, 0.00]
 
 # Simulation Setup

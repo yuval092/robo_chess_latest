@@ -1,6 +1,8 @@
 mujoco
 gymnasium-robotics
+python-chess
 stable-baselines3
 huggingface_hub
 numpy
 PyYAML>=6.0
+Flask
