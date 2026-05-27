@@ -27,20 +27,12 @@ class TaskStateMixin:
     """Provide active-piece, cube, and home posture helpers."""
 
     def get_cube_position(self) -> np.ndarray:
-        """Returns the active piece position, or object0 for legacy scripts."""
-        if self.active_piece_joint_name is not None:
-            return self.get_active_piece_position()
-        obj_joint_id = self.model.joint("object0:joint").id
-        qpos_start = self.model.jnt_qposadr[obj_joint_id]
-        return self.data.qpos[qpos_start : qpos_start + 3].copy()
+        """Returns the selected active piece position."""
+        return self.get_active_piece_position()
 
     def get_cube_quat(self) -> np.ndarray:
-        """Returns the active piece quaternion, or object0 for legacy scripts."""
-        if self.active_piece_joint_name is not None:
-            return self.get_active_piece_quat()
-        obj_joint_id = self.model.joint("object0:joint").id
-        qpos_start = self.model.jnt_qposadr[obj_joint_id]
-        return self.data.qpos[qpos_start + 3 : qpos_start + 7].copy()
+        """Returns the selected active piece quaternion."""
+        return self.get_active_piece_quat()
 
     def set_active_piece(self, piece_id: str) -> None:
         """Run set active piece logic."""

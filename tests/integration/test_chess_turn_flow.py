@@ -3,7 +3,7 @@ import gymnasium as gym
 import numpy as np
 
 from tests.integration.flow_helpers import run_flow
-from src.chess_env.controller import ScriptedController
+from src.chess_env.model_controller import ModelEmbeddedController
 from src.chess_game.board_mapper import BoardMapper
 from src.chess_game.chess_service import ChessService
 from src.chess_game.game_orchestrator import GameOrchestrator
@@ -13,6 +13,7 @@ from src.physical.occupancy import PhysicalOccupancy
 from src.physical.piece_registry import PieceRegistry
 from src.physical.piece_teleport import PieceTeleporter
 from src.physical.plan_executor import PhysicalPlanExecutor
+from src.utils.args import resolve_model_paths
 
 ARM_HOME_JOINTS = (
     "robot0:torso_lift_joint",
@@ -34,6 +35,17 @@ def robot_home_qpos(uw):
     )
 
 
+def make_controller(env):
+    model_paths = resolve_model_paths()
+    controller = ModelEmbeddedController(env)
+    controller.load_all(
+        model_paths["transit"],
+        model_paths["descend"],
+        model_paths["ascend"],
+    )
+    return controller
+
+
 def test_real_physical_single_turn_commits_after_success():
     env = gym.make(
         "ChessFetchTask-v0",
@@ -47,7 +59,7 @@ def test_real_physical_single_turn_commits_after_success():
     registry = PieceRegistry()
     occupancy = PhysicalOccupancy(registry.starting_square_map())
     board_mapper = BoardMapper.from_configs()
-    controller = ScriptedController(env, drift_limit=0.010)
+    controller = make_controller(env)
     movement_executor = MovementExecutor(env, controller, board_mapper, occupancy)
     physical_executor = PhysicalPlanExecutor(
         movement_executor,
@@ -87,7 +99,7 @@ def test_edge_pawn_move_after_prior_home_returns_does_not_timeout():
         env.reset()
         mapper = BoardMapper.from_configs()
         occupancy = PhysicalOccupancy(PieceRegistry().starting_square_map())
-        controller = ScriptedController(env, drift_limit=0.010)
+        controller = make_controller(env)
         physical_executor = PhysicalPlanExecutor(
             MovementExecutor(env, controller, mapper, occupancy),
             PieceTeleporter(env, mapper),

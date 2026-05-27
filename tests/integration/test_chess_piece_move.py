@@ -2,11 +2,12 @@ import gymnasium as gym
 import numpy as np
 import pytest
 
-from src.chess_env.controller import ScriptedController
+from src.chess_env.model_controller import ModelEmbeddedController
 from src.chess_game.board_mapper import BoardMapper
 from src.physical.movement_executor import MovementExecutor
 from src.physical.occupancy import PhysicalOccupancy
 from src.physical.piece_registry import PieceRegistry
+from src.utils.args import resolve_model_paths
 
 
 def piece_xyz(uw, piece):
@@ -16,9 +17,16 @@ def piece_xyz(uw, piece):
 
 
 def make_executor(env, registry):
+    model_paths = resolve_model_paths()
+    controller = ModelEmbeddedController(env)
+    controller.load_all(
+        model_paths["transit"],
+        model_paths["descend"],
+        model_paths["ascend"],
+    )
     return MovementExecutor(
         env,
-        ScriptedController(env, drift_limit=0.010),
+        controller,
         BoardMapper.from_configs(),
         PhysicalOccupancy(registry.starting_square_map()),
     )

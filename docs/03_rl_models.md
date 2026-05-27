@@ -84,11 +84,11 @@ The flag `_use_transfer_obs` toggles between this 25-D observation and the nativ
 
 ---
 
-## `ModelRegistry` (`src/chess_env/model_registry.py`)
+## Model Loading (`src/chess_env/model_controller.py`)
 
 ### Responsibility
 
-Stores SAC model objects keyed by stage name. Handles loading with the correct observation space active.
+`ModelEmbeddedController` stores SAC model objects keyed by stage name and loads them with the correct observation space active.
 
 ### Known Stages
 
@@ -106,13 +106,7 @@ with transfer_obs_enabled(self._wrapped_env):  # Switch to 25-D obs space
 
 `SAC.load` validates the loaded policy against the environment's current observation space. The `transfer_obs_enabled` context manager temporarily switches both the unwrapped env and wrapper to `TRANSFER_OBS_SPACE`, ensuring stable-baselines3 accepts the 25-D policy.
 
-### `get(stage)` → `SAC | None`
-
-Returns the loaded model or `None` if not yet loaded. `None` causes `ModelEmbeddedController` to fall back to the scripted controller for that stage.
-
-### `available_stages()` → `list[str]`
-
-Returns the list of stages with loaded models.
+Movement stages fail fast if their model has not been loaded.
 
 ---
 
@@ -144,7 +138,7 @@ def transfer_obs_enabled(env):
         env.observation_space = saved_wrapper_space
 ```
 
-This is used by `ModelRegistry.load()` and by `ModelEmbeddedController._run_stage()`. It saves and restores all three affected state fields to ensure no cross-contamination between training and inference contexts.
+This is used by `ModelEmbeddedController.load_model()` and by `ModelEmbeddedController._run_stage()`. It saves and restores all three affected state fields to ensure no cross-contamination between training and inference contexts.
 
 ---
 
@@ -158,7 +152,7 @@ descend: "models/descend.zip"
 ascend:  "models/ascend.zip"
 ```
 
-At startup, `build_controller()` in `src/cli/play.py` reads this file and calls `controller.load_available(transit_path=..., descend_path=..., ascend_path=...)`.
+At startup, `build_controller()` in `src/cli/play.py` reads this file and calls `controller.load_all(transit_path=..., descend_path=..., ascend_path=...)`.
 
 ### Active Checkpoints
 

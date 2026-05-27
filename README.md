@@ -40,12 +40,6 @@ shown. For headless operation:
 robo-chess-play --no-visualize
 ```
 
-To use the scripted controller instead of configured RL models:
-
-```bash
-robo-chess-play --use-scripted-controller
-```
-
 Model paths are read from `configs/deployed_models.yaml` and can be overridden:
 
 ```bash
@@ -111,15 +105,14 @@ Installed evaluation commands:
 
 ```bash
 # Per-stage waypoint accuracy
-robo-chess-eval-stage --stage all --controller model --episodes 50
-robo-chess-eval-stage --stage all --controller scripted --episodes 20
+robo-chess-eval-stage --stage all --episodes 50
 
 # Physics and scene integrity
 robo-chess-eval-physics
 
 # Full piece-move flow
-robo-chess-eval-flow --mode simple --src e2 --dst e4 --controller scripted
-robo-chess-eval-flow --mode complex --controller model
+robo-chess-eval-flow --mode simple --src e2 --dst e4
+robo-chess-eval-flow --mode complex
 ```
 
 `robo-chess-eval-flow --mode full` runs all 4,032 distinct source/destination

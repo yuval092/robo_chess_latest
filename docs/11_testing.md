@@ -268,7 +268,7 @@ These tests require a full MuJoCo environment with chess pieces. They are slower
 
 ### `test_chess_piece_move.py`
 
-Physical piece moves on a real board with `ScriptedController`.
+Physical piece moves on a real board with `ModelEmbeddedController`.
 
 ```python
 @pytest.mark.parametrize(
@@ -283,7 +283,7 @@ def test_move_piece_in_crowded_starting_position(...):
 ```
 
 For each parametrized case:
-1. Creates a full `MovementExecutor` with `ScriptedController` and real `BoardMapper`
+1. Creates a full `MovementExecutor` with `ModelEmbeddedController` and real `BoardMapper`
 2. Calls `move_piece_between_squares(piece_id, src, dst)`
 3. Asserts `result.success`
 4. Reads the piece's freejoint position from `data.qpos` and verifies it is within 2mm of the target square's XYZ
@@ -293,7 +293,7 @@ For each parametrized case:
 
 Full game turn with real arm execution — the most comprehensive integration test.
 
-Builds a complete stack: `PieceRegistry → PhysicalOccupancy → BoardMapper → ScriptedController → MovementExecutor → PhysicalPlanExecutor → GameOrchestrator`.
+Builds a complete stack: `PieceRegistry → PhysicalOccupancy → BoardMapper → ModelEmbeddedController → MovementExecutor → PhysicalPlanExecutor → GameOrchestrator`.
 
 | Test | What it verifies |
 |---|---|
@@ -306,7 +306,7 @@ Also verifies:
 
 ### `test_all_square_moves.py`
 
-Physical reachability coverage: tests arm moves across a representative subset of src→dst board square pairs with `ScriptedController`. Verifies the arm can physically reach the sampled board positions without timing out or crashing.
+Physical reachability coverage: tests arm moves across a representative subset of src→dst board square pairs with `ModelEmbeddedController`. Verifies the arm can physically reach the sampled board positions without timing out or crashing.
 
 ---
 

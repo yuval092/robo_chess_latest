@@ -484,6 +484,15 @@ def test_teleport_verification(debug: bool = False, render_mode: str | None = No
         return False
 
 
+def _run_check(results: dict[str, bool], name: str, fn, **kwargs) -> None:
+    """Run one physics check and record a boolean result."""
+    try:
+        results[name] = bool(fn(**kwargs))
+    except Exception as exc:
+        print(f"  - ERROR during {name}: {exc}")
+        results[name] = False
+
+
 # ── Entry point ────────────────────────────────────────────────────────────
 
 def main() -> None:
@@ -538,22 +547,42 @@ def main() -> None:
     results: dict[str, bool] = {}
 
     if not args.skip_geometry:
-        results["XML Integrity"] = test_xml_integrity(debug=args.debug, render_mode=render_mode)
-        results["Table Geometry"] = test_table_geometry(debug=args.debug, render_mode=render_mode)
-        results["Board Visual Geometry"] = test_board_visual_geometry(debug=args.debug, render_mode=render_mode)
-        results["Zone Visual Geometry"] = test_zone_visual_geometry(debug=args.debug, render_mode=render_mode)
-        results["Chess Piece Modeling"] = test_chess_piece_modeling(debug=args.debug, render_mode=render_mode)
-        results["Grasp XML Parameters"] = test_grasp_xml(debug=args.debug, render_mode=render_mode)
-        results["Teleport Verification"] = test_teleport_verification(debug=args.debug, render_mode=render_mode)
+        for name, fn in [
+            ("XML Integrity", test_xml_integrity),
+            ("Table Geometry", test_table_geometry),
+            ("Board Visual Geometry", test_board_visual_geometry),
+            ("Zone Visual Geometry", test_zone_visual_geometry),
+            ("Chess Piece Modeling", test_chess_piece_modeling),
+            ("Grasp XML Parameters", test_grasp_xml),
+            ("Teleport Verification", test_teleport_verification),
+        ]:
+            _run_check(results, name, fn, debug=args.debug, render_mode=render_mode)
 
     if not args.skip_stability:
-        results["Chess Piece Idle Stability"] = test_chess_piece_idle_stability(
-            settle_steps=args.settle_steps, debug=args.debug, render_mode=render_mode
+        _run_check(
+            results,
+            "Chess Piece Idle Stability",
+            test_chess_piece_idle_stability,
+            settle_steps=args.settle_steps,
+            debug=args.debug,
+            render_mode=render_mode,
         )
-        results["Static Stability"] = test_static_stability(debug=args.debug, render_mode=render_mode)
+        _run_check(
+            results,
+            "Static Stability",
+            test_static_stability,
+            debug=args.debug,
+            render_mode=render_mode,
+        )
 
     if not args.skip_reachability:
-        results["Kinematic Reachability"] = test_kinematic_reachability(debug=args.debug, render_mode=render_mode)
+        _run_check(
+            results,
+            "Kinematic Reachability",
+            test_kinematic_reachability,
+            debug=args.debug,
+            render_mode=render_mode,
+        )
 
     if not results:
         print("\nNo checks ran — all categories were skipped.")

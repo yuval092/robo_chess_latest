@@ -415,8 +415,8 @@ class TaskRuntimeMixin:
 
     def step(self, action):
         """
-        Full RL training step. ScriptedController bypasses this method and
-        drives the arm through _mujoco_step() directly.
+        Full RL training step. The embedded controller drives the arm through
+        _mujoco_step() directly during evaluation/runtime inference.
         """
         self.total_env_steps += 1
         self.episode_steps += 1

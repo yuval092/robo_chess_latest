@@ -2,7 +2,7 @@
 
 ## What Is RoboChess?
 
-RoboChess is a physics simulation of a robotic chess player. A **Fetch robot arm** simulated inside MuJoCo physically picks up chess pieces and places them on a board, controlled by either a deterministic scripted controller or three specialist **Soft Actor-Critic (SAC) reinforcement-learning models**. A human plays against the **Stockfish** chess engine through a browser-based web UI; every legal move is executed both logically (python-chess rules) and physically (the arm moves in the MuJoCo scene).
+RoboChess is a physics simulation of a robotic chess player. A **Fetch robot arm** simulated inside MuJoCo physically picks up chess pieces and places them on a board, controlled by three specialist **Soft Actor-Critic (SAC) reinforcement-learning models** for movement plus scripted grasp/place logic. A human plays against the **Stockfish** chess engine through a browser-based web UI; every legal move is executed both logically (python-chess rules) and physically (the arm moves in the MuJoCo scene).
 
 The project is **simulation-only** — no connection to real hardware. All physics are computed by MuJoCo through the `gymnasium-robotics` `FetchPickAndPlace-v4` environment family.
 
@@ -29,8 +29,8 @@ The project is **simulation-only** — no connection to real hardware. All physi
 │  │   + Stockfish)       │   │  │ MovementExecutor  │ │PieceTelep.  │  │  │
 │  │                      │   │  │ ┌──────────────┐  │ │             │  │  │
 │  │  MovePlanner         │   │  │ │Controller    │  │ └─────────────┘  │  │
-│  │  LogicalPieceTracker │   │  │ │ Scripted or  │  │                  │  │
-│  └──────────────────────┘   │  │ │ ModelEmbed.  │  │                  │  │
+│  │  LogicalPieceTracker │   │  │ │ ModelEmbed.  │  │                  │  │
+│  └──────────────────────┘   │  │ │ Controller   │  │                  │  │
 │                              │  │ └──────┬───────┘  │                  │  │
 │                              │  └────────│───────────┘                  │  │
 │                              └───────────│─────────────────────────────┘  │
@@ -62,9 +62,7 @@ The project is **simulation-only** — no connection to real hardware. All physi
 | **Occupancy** | `src/physical/occupancy.py` | Expected physical square occupancy map |
 | **Piece teleport** | `src/physical/piece_teleport.py` | Instantaneous MuJoCo free-joint repositioning |
 | **Piece registry** | `src/physical/piece_registry.py` | Canonical 32+64 physical piece descriptors |
-| **Scripted controller** | `src/chess_env/controller.py` | Deterministic proportional-control arm driver |
-| **RL controller** | `src/chess_env/model_controller.py` | SAC model inference with scripted fallback |
-| **Model registry** | `src/chess_env/model_registry.py` | Load and retrieve specialist SAC models |
+| **Hybrid controller** | `src/chess_env/model_controller.py` | SAC model inference with scripted grasp/place sequencing |
 | **RL environment** | `src/chess_env/task.py` | Observation, reward, reset, done logic |
 | **MuJoCo base** | `src/chess_env/simulation.py` | Extends FetchPickAndPlace-v4 |
 | **Scene generation** | `src/chess_env/environment_generation.py` | Inject XML fragments, generate STL meshes |
@@ -84,9 +82,7 @@ robo_chess_latest/
 ├── src/
 │   ├── chess_env/          # MuJoCo environment & RL infrastructure
 │   │   ├── __init__.py     # Gymnasium registration: ChessFetchTask-v0
-│   │   ├── controller.py   # ScriptedController
 │   │   ├── model_controller.py  # ModelEmbeddedController
-│   │   ├── model_registry.py    # SAC model loader
 │   │   ├── simulation.py   # ChessSimulationEnv
 │   │   ├── task.py         # ChessTaskEnv (RL logic)
 │   │   ├── task_execution.py    # GraspPlaceMixin
@@ -214,7 +210,7 @@ The following trace follows a single move (e.g., e2→e4) from browser click to 
    e. env.set_active_piece("white_pawn_e")
    f. controller.run_full_move(src_xy, dst_xy)
 
-8. Controller (ScriptedController or ModelEmbeddedController)
+8. Controller (`ModelEmbeddedController`)
    Full pick-and-place sequence:
      run_transit(src_xy)   → arm moves to e2 at SAFE_Z (0.530 m)
      run_descend(src_xy)   → arm descends to HOVER_Z (0.460 m) above e2
@@ -272,8 +268,8 @@ The following trace follows a single move (e.g., e2→e4) from browser click to 
 
 ## Key Design Decisions
 
-### Dual-Controller Design
-The arm can be driven by either the `ScriptedController` (deterministic proportional control) or the `ModelEmbeddedController` (SAC specialist models). Both expose the same interface (`run_transit`, `run_descend`, `run_ascend`, `run_grasp`, `run_place`, `run_full_move`). The scripted controller requires no trained models and is always available as a fallback.
+### Hybrid Controller Design
+The arm is driven by `ModelEmbeddedController`. SAC specialist models handle `run_transit`, `run_descend`, and `run_ascend`; scripted logic still handles scenario transitions, `run_grasp`, `run_place`, and `run_full_move`. All runtime and evaluation paths require configured model paths.
 
 ### Specialist Model Architecture
 Instead of training one monolithic model for the full pick-and-place task, three specialist SAC models handle separate movement phases: **transit** (horizontal sweep), **descend** (vertical approach), and **ascend** (vertical lift). Grasp and place remain scripted. This division allows each model to train on a narrow, well-defined task with appropriate reward shaping.

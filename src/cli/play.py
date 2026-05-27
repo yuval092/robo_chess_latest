@@ -7,7 +7,6 @@ import time
 import gymnasium as gym
 
 import src.chess_env  # noqa: F401 — registers ChessFetchTask-v0
-from src.chess_env.controller import ScriptedController
 from src.chess_env.environment_generation import regenerate_environment
 from src.chess_env.model_controller import ModelEmbeddedController
 from src.chess_game.board_mapper import BoardMapper
@@ -21,7 +20,7 @@ from src.physical.piece_teleport import PieceTeleporter
 from src.physical.plan_executor import PhysicalPlanExecutor
 from src.ui.app import create_app
 from src.ui.queued_backend import QueuedUIBackend
-from src.utils.args import add_model_path_args, model_overrides_from_args
+from src.utils.args import add_model_path_args, model_overrides_from_args, resolve_model_paths
 from src.utils.io import load_config
 
 
@@ -29,27 +28,26 @@ def build_controller(
     env,
     visualize: bool,
     delay: float,
-    use_rl_models: bool,
     transit_model: str | None,
     descend_model: str | None,
     ascend_model: str | None,
 ):
     render_fn = env.render if visualize else None
-    env_cfg = load_config("env")
-    if not use_rl_models:
-        return ScriptedController(
-            env,
-            drift_limit=env_cfg["drift_limit_end"],
-            render_fn=render_fn,
-            render_delay=delay,
-        )
-
-    model_paths = load_config("deployed_models")
+    overrides = {
+        stage: path
+        for stage, path in {
+            "transit": transit_model,
+            "descend": descend_model,
+            "ascend": ascend_model,
+        }.items()
+        if path
+    }
+    model_paths = resolve_model_paths(overrides)
     controller = ModelEmbeddedController(env=env, render_fn=render_fn, render_delay=delay)
-    controller.load_available(
-        transit_path=transit_model or model_paths.get("transit"),
-        descend_path=descend_model or model_paths.get("descend"),
-        ascend_path=ascend_model or model_paths.get("ascend"),
+    controller.load_all(
+        transit_path=model_paths["transit"],
+        descend_path=model_paths["descend"],
+        ascend_path=model_paths["ascend"],
     )
     return controller
 
@@ -58,7 +56,6 @@ def build_orchestrator(
     env,
     visualize: bool,
     delay: float,
-    use_rl_models: bool = True,
     transit_model: str | None = None,
     descend_model: str | None = None,
     ascend_model: str | None = None,
@@ -67,7 +64,7 @@ def build_orchestrator(
     occupancy = PhysicalOccupancy(registry.starting_square_map())
     board_mapper = BoardMapper.from_configs()
     controller = build_controller(
-        env, visualize, delay, use_rl_models, transit_model, descend_model, ascend_model
+        env, visualize, delay, transit_model, descend_model, ascend_model
     )
     movement_executor = MovementExecutor(env, controller, board_mapper, occupancy)
     physical_executor = PhysicalPlanExecutor(
@@ -112,11 +109,6 @@ def main():
         default=0.0,
         help="Per-step render delay in seconds (default: 0.0).",
     )
-    parser.add_argument(
-        "--use-scripted-controller",
-        action="store_true",
-        help="Use the scripted waypoint controller instead of the trained RL models.",
-    )
     add_model_path_args(parser)
     args = parser.parse_args()
 
@@ -136,7 +128,6 @@ def main():
         env,
         args.visualize,
         args.delay,
-        use_rl_models=not args.use_scripted_controller,
         transit_model=overrides.get("transit"),
         descend_model=overrides.get("descend"),
         ascend_model=overrides.get("ascend"),

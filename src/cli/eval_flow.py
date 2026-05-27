@@ -13,7 +13,6 @@ import numpy as np
 from tqdm import tqdm
 
 import src.chess_env  # noqa: F401 — registers ChessFetchTask-v0
-from src.chess_env.controller import ScriptedController
 from src.chess_env.model_controller import ModelEmbeddedController
 from src.chess_game.board_mapper import BoardMapper
 from src.physical.movement_executor import MovementExecutor
@@ -21,8 +20,7 @@ from src.physical.occupancy import PhysicalOccupancy
 from src.physical.piece_registry import PieceRegistry
 from src.physical.piece_teleport import PieceTeleporter
 from src.physical.plan_executor import PhysicalPlanExecutor
-from src.utils.args import add_model_path_args, model_overrides_from_args
-from src.utils.io import load_config
+from src.utils.args import add_eval_args, model_overrides_from_args, resolve_model_paths
 
 
 # ── Board cell constants ───────────────────────────────────────────────────
@@ -113,31 +111,24 @@ def _hide_other_pieces(inner, teleporter: PieceTeleporter, piece_id: str) -> Non
 
 def _make_controller(
     env: gym.Env,
-    controller_type: str,
     model_overrides: dict[str, str],
-    drift_limit: float | None,
     render_fn=None,
     delay: float = 0.0,
-) -> ScriptedController | ModelEmbeddedController:
-    deployed_cfg = load_config("deployed_models")
-    if controller_type == "scripted":
-        kw: dict = {}
-        if drift_limit is not None:
-            kw["drift_limit"] = drift_limit
-        return ScriptedController(env, render_fn=render_fn, render_delay=delay, **kw)
+) -> ModelEmbeddedController:
+    model_paths = resolve_model_paths(model_overrides)
     ctrl = ModelEmbeddedController(env=env, render_fn=render_fn, render_delay=delay)
-    for stage in ("transit", "descend", "ascend"):
-        path = model_overrides.get(stage) or deployed_cfg.get(stage)
-        if path:
-            ctrl.load_model(stage, path)
+    ctrl.load_all(
+        transit_path=model_paths["transit"],
+        descend_path=model_paths["descend"],
+        ascend_path=model_paths["ascend"],
+    )
     return ctrl
 
 
 def _setup_eval_env(
     debug: bool,
-    controller_type: str,
-    model_overrides: dict[str, str],
     drift_limit: float | None,
+    model_overrides: dict[str, str],
     piece_id: str,
     visualize: bool = False,
     delay: float = 0.0,
@@ -145,12 +136,14 @@ def _setup_eval_env(
     """Create and reset a flow env with controller, teleporter, occupancy, and movement executor."""
     env = _make_flow_env(debug, visualize=visualize)
     env.reset()
+    if drift_limit is not None:
+        env.unwrapped.env_cfg["eval_drift_limit"] = drift_limit
     inner = env.unwrapped
     mapper = BoardMapper.from_configs()
     teleporter = PieceTeleporter(env, mapper)
     _hide_other_pieces(inner, teleporter, piece_id)
     render_fn = env.render if visualize else None
-    ctrl = _make_controller(env, controller_type, model_overrides, drift_limit, render_fn=render_fn, delay=delay)
+    ctrl = _make_controller(env, model_overrides, render_fn=render_fn, delay=delay)
     occupancy = PhysicalOccupancy({piece_id: None})
     movement = MovementExecutor(env, ctrl, mapper, occupancy)
     return env, inner, teleporter, ctrl, occupancy, movement
@@ -174,123 +167,106 @@ def _run_one_move(
     )
 
 
-# ── Mode implementations ───────────────────────────────────────────────────
+# ── Mode implementation ────────────────────────────────────────────────────
 
-def _run_simple(
-    args: argparse.Namespace,
-    controller_type: str,
-    model_overrides: dict[str, str],
-) -> list[FlowResult]:
-    src = args.src or random.choice(ALL_CELLS)
-    dst = args.dst or random.choice([c for c in ALL_CELLS if c != src])
-
-    print(f"[eval-flow] simple  src={src}  dst={dst}  piece={args.piece}  episodes={args.episodes}")
-
-    env, inner, teleporter, _ctrl, occupancy, movement = _setup_eval_env(
-        args.debug, controller_type, model_overrides, args.drift_limit, args.piece,
-        visualize=args.visualize, delay=args.delay,
+def _format_stages(stage_results) -> str:
+    return ", ".join(
+        f"{name}:{sr.success}:{sr.error_mm:.1f}mm:{sr.crash_reason}"
+        for name, sr in stage_results
     )
-    results: list[FlowResult] = []
-    try:
-        for _ in range(args.episodes):
-            teleporter.teleport_piece_to_square(args.piece, src)
-            occupancy.reset({args.piece: src})
-            r = _run_one_move(movement, args.piece, src, dst)
-            results.append(r)
-            status = "ok" if r.success else f"FAIL ({r.failure_reason})"
-            print(f"  {src}->{dst}: {status}")
-            if not r.success:
-                env.reset()
-                _hide_other_pieces(inner, teleporter, args.piece)
-    finally:
-        env.close()
-
-    return results
 
 
-def _run_complex(
-    args: argparse.Namespace,
-    controller_type: str,
+def _pairs_for_mode(args: argparse.Namespace) -> tuple[list[tuple[str, str]], int]:
+    if args.mode == "simple":
+        src = args.src or random.choice(ALL_CELLS)
+        dst = args.dst or random.choice([cell for cell in ALL_CELLS if cell != src])
+        return [(src, dst)], args.episodes
+    if args.mode == "complex":
+        pairs = [
+            (src, dst)
+            for dst in COMPLEX_DESTINATIONS
+            for src in COMPLEX_SOURCES
+            if src != dst
+        ]
+        reps = args.episodes if args.episodes != 1 else 3
+        return pairs, reps
+    return [(src, dst) for src in ALL_CELLS for dst in ALL_CELLS if src != dst], args.episodes
+
+
+def _run_pairs(
+    *,
+    pairs: list[tuple[str, str]],
+    reps: int,
+    piece_id: str,
     model_overrides: dict[str, str],
+    visualize: bool,
+    delay: float,
+    debug: bool,
+    drift_limit: float | None,
+    check_home: bool,
+    stop_on_failure: bool = False,
+    progress_desc: str = "moves",
 ) -> list[FlowResult]:
-    pairs = [
-        (src, dst)
-        for dst in COMPLEX_DESTINATIONS
-        for src in COMPLEX_SOURCES
-        if src != dst
-    ]
-    reps = args.episodes if args.episodes != 1 else 3
     total = len(pairs) * reps
-
-    print(
-        f"[eval-flow] complex  destinations={len(COMPLEX_DESTINATIONS)}"
-        f"  sources={len(COMPLEX_SOURCES)}  reps={reps}  total={total}"
-    )
-
-    env, inner, teleporter, _ctrl, occupancy, movement = _setup_eval_env(
-        args.debug, controller_type, model_overrides, args.drift_limit, args.piece,
-        visualize=args.visualize, delay=args.delay,
-    )
-    results: list[FlowResult] = []
-    try:
-        with tqdm(total=total, desc="complex", unit="move") as pbar:
-            for src, dst in pairs:
-                for _ in range(reps):
-                    teleporter.teleport_piece_to_square(args.piece, src)
-                    occupancy.reset({args.piece: src})
-                    r = _run_one_move(movement, args.piece, src, dst)
-                    results.append(r)
-                    if not r.success:
-                        env.reset()
-                        _hide_other_pieces(inner, teleporter, args.piece)
-                    ok = sum(x.success for x in results)
-                    pbar.update(1)
-                    pbar.set_postfix({"ok%": f"{100 * ok / len(results):.0f}"})
-    finally:
-        env.close()
-
-    return results
-
-
-def _run_full(
-    args: argparse.Namespace,
-    controller_type: str,
-    model_overrides: dict[str, str],
-) -> list[FlowResult]:
-    pairs = [(s, d) for s in ALL_CELLS for d in ALL_CELLS if s != d]   # 4032 pairs
-    reps = args.episodes
-    total = len(pairs) * reps
-
-    print(
-        f"[eval-flow] full sweep  pairs={len(pairs)}  reps={reps}  total={total}"
-    )
-
     env, inner, teleporter, ctrl, occupancy, movement = _setup_eval_env(
-        args.debug, controller_type, model_overrides, args.drift_limit, args.piece,
-        visualize=args.visualize, delay=args.delay,
+        debug,
+        drift_limit,
+        model_overrides,
+        piece_id,
+        visualize=visualize,
+        delay=delay,
     )
     physical = PhysicalPlanExecutor(movement, teleporter, occupancy, controller=ctrl, env=env)
     results: list[FlowResult] = []
     try:
-        with tqdm(total=total, desc="full sweep", unit="move") as pbar:
+        with tqdm(total=total, desc=progress_desc, unit="move") as pbar:
             for src, dst in pairs:
                 for _ in range(reps):
-                    teleporter.teleport_piece_to_square(args.piece, src)
-                    occupancy.reset({args.piece: src})
-                    r = _run_one_move(movement, args.piece, src, dst)
-                    results.append(r)
-                    if r.success:
-                        physical.return_to_home()
-                    else:
+                    inner.clear_active_piece()
+                    teleporter.teleport_piece_to_square(piece_id, src)
+                    occupancy.reset({piece_id: src})
+                    result = _run_one_move(movement, piece_id, src, dst)
+                    results.append(result)
+
+                    if result.success and check_home:
+                        home_result = physical.return_to_home()
+                        if not home_result.success:
+                            result.success = False
+                            result.failure_reason = f"return_home: {home_result.error}"
+
+                    if not result.success:
                         env.reset()
-                        _hide_other_pieces(inner, teleporter, args.piece)
-                    ok = sum(x.success for x in results)
+                        _hide_other_pieces(inner, teleporter, piece_id)
+                        if stop_on_failure:
+                            pbar.update(1)
+                            return results
+
+                    ok = sum(item.success for item in results)
                     pbar.update(1)
                     pbar.set_postfix({"ok%": f"{100 * ok / len(results):.0f}"})
     finally:
         env.close()
-
     return results
+
+
+def _run_mode(args: argparse.Namespace, model_overrides: dict[str, str]) -> list[FlowResult]:
+    pairs, reps = _pairs_for_mode(args)
+    print(
+        f"[eval-flow] {args.mode}  controller=model-hybrid"
+        f"  pairs={len(pairs)}  reps={reps}  total={len(pairs) * reps}"
+    )
+    return _run_pairs(
+        pairs=pairs,
+        reps=reps,
+        piece_id=args.piece,
+        model_overrides=model_overrides,
+        visualize=args.visualize,
+        delay=args.delay,
+        debug=args.debug,
+        drift_limit=args.drift_limit,
+        check_home=args.mode == "full",
+        progress_desc=args.mode,
+    )
 
 
 # ── Summary printer ────────────────────────────────────────────────────────
@@ -392,90 +368,33 @@ def run_all_square_moves(
     if max_cases is not None:
         pairs = pairs[:max_cases]
 
-    render_mode = "human" if visualize else None
-    env = gym.make(
-        "ChessFetchTask-v0",
-        render_mode=render_mode,
-        show_chess_pieces=True,
-        hide_object=True,
-        force_scenario="transit",
+    results = _run_pairs(
+        pairs=pairs,
+        reps=1,
+        piece_id=piece_id,
+        model_overrides={},
+        visualize=visualize,
+        delay=delay,
         debug=debug,
+        drift_limit=drift_limit,
+        check_home=check_home,
+        stop_on_failure=stop_on_failure,
+        progress_desc="all-square",
     )
-
-    passed = 0
-    failures: list[MoveCheckFailure] = []
-
-    try:
-        env.reset()
-        inner = env.unwrapped
-        mapper = BoardMapper.from_configs()
-        teleporter = PieceTeleporter(env, mapper)
-        _hide_other_pieces(inner, teleporter, piece_id)
-
-        kw: dict = {}
-        if drift_limit is not None:
-            kw["drift_limit"] = drift_limit
-        render_fn = env.render if visualize else None
-        ctrl = ScriptedController(env, render_fn=render_fn, render_delay=delay, **kw)
-        occupancy = PhysicalOccupancy({piece_id: None})
-        movement = MovementExecutor(env, ctrl, mapper, occupancy)
-        physical = PhysicalPlanExecutor(
-            movement, teleporter, occupancy, controller=ctrl, env=env
-        )
-
-        for index, (src, dst) in enumerate(pairs, start=1):
-            inner.clear_active_piece()
-            teleporter.teleport_piece_to_square(piece_id, src)
-            occupancy.reset({piece_id: src})
-
-            result = movement.move_piece_between_squares(piece_id, src, dst)
-
-            def _fmt_stages(stage_results):
-                return ", ".join(
-                    f"{name}:{sr.success}:{sr.error_mm:.1f}mm:{sr.crash_reason}"
-                    for name, sr in stage_results
+    failures = []
+    for result in results:
+        if not result.success:
+            kind = "return_home" if result.failure_reason.startswith("return_home:") else "move"
+            failures.append(
+                MoveCheckFailure(
+                    result.src,
+                    result.dst,
+                    kind,
+                    result.failure_reason,
+                    _format_stages(result.stage_results),
                 )
-
-            if not result.success:
-                failure = MoveCheckFailure(
-                    src, dst, "move", result.error, _fmt_stages(result.stage_results)
-                )
-                failures.append(failure)
-                print(
-                    f"{index}/{len(pairs)} {src}->{dst}: FAIL {failure.error}"
-                    f" [{failure.stages}]"
-                )
-                env.reset()
-                _hide_other_pieces(inner, teleporter, piece_id)
-                if stop_on_failure:
-                    break
-                continue
-
-            if check_home:
-                home_result = physical.return_to_home()
-                if not home_result.success:
-                    failure = MoveCheckFailure(
-                        src, dst, "return_home", home_result.error, ""
-                    )
-                    failures.append(failure)
-                    print(
-                        f"{index}/{len(pairs)} {src}->{dst}: FAIL return_home"
-                        f" {home_result.error}"
-                    )
-                    env.reset()
-                    _hide_other_pieces(inner, teleporter, piece_id)
-                    if stop_on_failure:
-                        break
-                    continue
-
-            passed += 1
-            max_err = max(
-                (sr.error_mm for _, sr in result.stage_results), default=0.0
             )
-            print(f"{index}/{len(pairs)} {src}->{dst}: ok max_stage_err={max_err:.1f}mm")
-    finally:
-        env.close()
-
+    passed = len(results) - len(failures)
     return MoveCheckSummary(total=len(pairs), passed=passed, failures=failures)
 
 
@@ -525,36 +444,7 @@ def _build_parser() -> argparse.ArgumentParser:
             "Default: 1 for simple and full modes, 3 for complex mode."
         ),
     )
-    p.add_argument(
-        "--controller",
-        choices=["scripted", "model"],
-        default="model",
-        help="Controller: scripted (deterministic) or model (RL). (default: model)",
-    )
-    add_model_path_args(p)
-    p.add_argument(
-        "--drift-limit",
-        type=float,
-        default=None,
-        help="Override tube constraint radius in metres (default: from config).",
-    )
-    p.add_argument(
-        "--visualize",
-        action="store_true",
-        help="Open the MuJoCo viewer window while moves run.",
-    )
-    p.add_argument(
-        "--delay",
-        type=float,
-        default=0.0,
-        metavar="SECS",
-        help="Per-step sleep in seconds when --visualize is active (default: 0.0).",
-    )
-    p.add_argument(
-        "--debug",
-        action="store_true",
-        help="Enable verbose per-step environment logs.",
-    )
+    add_eval_args(p)
     return p
 
 
@@ -564,12 +454,7 @@ def main() -> None:
 
     model_overrides = model_overrides_from_args(args)
 
-    if args.mode == "simple":
-        results = _run_simple(args, args.controller, model_overrides)
-    elif args.mode == "complex":
-        results = _run_complex(args, args.controller, model_overrides)
-    else:
-        results = _run_full(args, args.controller, model_overrides)
+    results = _run_mode(args, model_overrides)
 
     _print_summary(results, args.mode)
     sys.exit(0 if all(r.success for r in results) else 1)

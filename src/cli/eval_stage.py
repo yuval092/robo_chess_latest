@@ -3,17 +3,14 @@
 from __future__ import annotations
 
 import argparse
-import sys
 
 import gymnasium as gym
 import numpy as np
 from tqdm import tqdm
 
 import src.chess_env  # noqa: F401 — registers ChessFetchTask-v0
-from src.chess_env.controller import ScriptedController
 from src.chess_env.model_controller import ModelEmbeddedController
-from src.utils.args import add_model_path_args, model_overrides_from_args
-from src.utils.io import load_config
+from src.utils.args import add_eval_args, model_overrides_from_args, resolve_model_paths
 
 
 # ── Chain definitions ──────────────────────────────────────────────────────
@@ -36,7 +33,6 @@ _STAGE_RUN = {
 def _eval_one_stage(
     stage: str,
     episodes: int,
-    controller_type: str,
     model_overrides: dict[str, str],
     drift_limit: float | None,
     debug: bool,
@@ -59,27 +55,13 @@ def _eval_one_stage(
         hide_object=True,
         debug=debug,
     )
+    if drift_limit is not None:
+        env.unwrapped.env_cfg["eval_drift_limit"] = drift_limit
 
     render_fn = env.render if visualize else None
-    deployed_cfg = load_config("deployed_models")
-
-    if controller_type == "scripted":
-        kw = {}
-        if drift_limit is not None:
-            kw["drift_limit"] = drift_limit
-        ctrl = ScriptedController(env, render_fn=render_fn, render_delay=delay, **kw)
-    else:
-        ctrl = ModelEmbeddedController(env=env, render_fn=render_fn, render_delay=delay)
-        model_path = model_overrides.get(stage) or deployed_cfg.get(stage)
-        if not model_path:
-            print(
-                f"[eval-stage] ERROR: No model path for stage '{stage}'. "
-                f"Use --{stage}-model or set configs/deployed_models.yaml.",
-                file=sys.stderr,
-            )
-            env.close()
-            sys.exit(1)
-        ctrl.load_model(stage, model_path)
+    model_paths = resolve_model_paths(model_overrides)
+    ctrl = ModelEmbeddedController(env=env, render_fn=render_fn, render_delay=delay)
+    ctrl.load_model(stage, model_paths[stage])
 
     inner = env.unwrapped
     run_stage = _STAGE_RUN[stage]
@@ -92,8 +74,7 @@ def _eval_one_stage(
     crash_reasons: dict[str, int] = {}
 
     print(
-        f"[eval-stage] stage={stage}  controller={controller_type}"
-        f"  episodes={episodes}"
+        f"[eval-stage] stage={stage}  controller=model-hybrid  episodes={episodes}"
     )
 
     try:
@@ -173,7 +154,6 @@ def _print_summary(results: list[dict]) -> None:
 def run_eval_stage(
     stages: list[str],
     episodes: int,
-    controller: str = "model",
     model_overrides: dict[str, str] | None = None,
     drift_limit: float | None = None,
     debug: bool = False,
@@ -187,7 +167,6 @@ def run_eval_stage(
     ----------
     stages : list of "transit" | "descend" | "ascend"
     episodes : episodes to run per stage
-    controller : "scripted" or "model"
     model_overrides : per-stage model path overrides, e.g. {"transit": "/path/to/model.zip"}
     drift_limit : tube constraint radius override (metres); None = use config default
     debug : enable verbose per-step environment logs
@@ -204,7 +183,6 @@ def run_eval_stage(
         r = _eval_one_stage(
             stage=stage,
             episodes=episodes,
-            controller_type=controller,
             model_overrides=model_overrides,
             drift_limit=drift_limit,
             debug=debug,
@@ -244,8 +222,6 @@ def _build_parser() -> argparse.ArgumentParser:
             "  - Per-crash-reason breakdown\n\n"
             "Examples:\n"
             "  robo-chess-eval-stage --stage transit --episodes 100\n"
-            "  robo-chess-eval-stage --stage all --controller scripted --episodes 20\n"
-            "  robo-chess-eval-stage --stage full_move --controller model\n"
             "  robo-chess-eval-stage --stage transit --transit-model models/transit.zip\n"
         ),
         formatter_class=argparse.RawDescriptionHelpFormatter,
@@ -265,46 +241,7 @@ def _build_parser() -> argparse.ArgumentParser:
         default=50,
         help="Number of episodes to run per stage. (default: 50)",
     )
-    p.add_argument(
-        "--controller",
-        choices=["scripted", "model"],
-        default="model",
-        help=(
-            "Controller to drive the arm. "
-            "scripted: deterministic waypoint tracking. "
-            "model: trained RL specialist models (reads configs/deployed_models.yaml "
-            "unless overridden with --*-model flags). "
-            "(default: model)"
-        ),
-    )
-    add_model_path_args(p)
-    p.add_argument(
-        "--drift-limit",
-        type=float,
-        default=None,
-        metavar="METRES",
-        help=(
-            "Override the tube constraint radius for descend/ascend stages, in metres. "
-            "(default: eval_drift_limit from configs/env.yaml)"
-        ),
-    )
-    p.add_argument(
-        "--visualize",
-        action="store_true",
-        help="Open the MuJoCo viewer window while episodes run.",
-    )
-    p.add_argument(
-        "--delay",
-        type=float,
-        default=0.0,
-        metavar="SECS",
-        help="Per-step sleep in seconds when --visualize is active (default: 0.0).",
-    )
-    p.add_argument(
-        "--debug",
-        action="store_true",
-        help="Enable verbose per-step environment logs for detailed failure analysis.",
-    )
+    add_eval_args(p)
     return p
 
 
@@ -323,7 +260,6 @@ def main() -> None:
     run_eval_stage(
         stages=stages,
         episodes=args.episodes,
-        controller=args.controller,
         model_overrides=model_overrides_from_args(args),
         drift_limit=args.drift_limit,
         debug=args.debug,

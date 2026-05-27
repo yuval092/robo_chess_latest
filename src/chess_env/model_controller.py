@@ -1,25 +1,44 @@
-"""
-ModelEmbeddedController
-=======================
-Drop-in replacement for ScriptedController during movement stages.
+"""Hybrid controller: SAC movement stages plus scripted grasp/place sequencing."""
 
-The three movement stages may be served by specialist SAC models. Grasp,
-place, transitions, and high-level sequencing remain scripted.
-"""
-
+import contextlib
+import io
 import time
 from collections.abc import Callable
+from dataclasses import dataclass
 
 import numpy as np
+from stable_baselines3 import SAC
 
-from src.chess_env.controller import ScriptedController, SequenceResult, StageResult
-from src.chess_env.model_registry import ModelRegistry
 from src.chess_env.simulation import reset_elapsed_steps, unwrap_env
+from src.chess_env.transfer_obs import transfer_obs_enabled
 
 M_TO_MM = 1000.0
+KNOWN_STAGES = frozenset({"transit", "descend", "ascend"})
+
+
+@dataclass
+class StageResult:
+    """Result of a single waypoint stage."""
+
+    success: bool
+    steps: int
+    crash_reason: str | None
+    final_pos: np.ndarray
+    error_mm: float
+
+
+@dataclass
+class SequenceResult:
+    """Result of a full scenario chain."""
+
+    success: bool
+    stage_results: list
+    failed_at: str | None
+    grasp_quality: dict | None
+
 
 class ModelEmbeddedController:
-    """Wraps specialist SAC models behind the ScriptedController interface."""
+    """Run learned transit/descend/ascend with scripted grasp/place transitions."""
 
     def __init__(
         self,
@@ -33,25 +52,18 @@ class ModelEmbeddedController:
         self._render_fn = render_fn
         self._render_delay = render_delay
         self._max_steps = self._env.env_cfg["rl_max_steps_per_stage"]
-
-        self._registry = ModelRegistry(env)
-
-        drift_limit = self._env.env_cfg["eval_drift_limit"]
-        self.scripted_controller = ScriptedController(
-            env,
-            drift_limit=drift_limit,
-            render_fn=render_fn,
-            render_delay=render_delay,
-        )
+        self._models: dict[str, SAC | None] = {stage: None for stage in KNOWN_STAGES}
 
     def load_model(self, stage: str, path: str) -> None:
         """Load a specialist model for one stage."""
-        if stage not in self._registry.KNOWN_STAGES:
+        if stage not in KNOWN_STAGES:
             raise ValueError(f"Unknown stage: {stage}")
         if not path:
             raise ValueError(f"No model path provided for {stage}")
 
-        self._registry.load(stage, path)
+        with transfer_obs_enabled(self._wrapped_env):
+            with contextlib.redirect_stdout(io.StringIO()):
+                self._models[stage] = SAC.load(path, env=self._wrapped_env)
         print(f"[ModelEmbeddedController] Loaded {stage} model from {path}")
 
     def load_all(self, transit_path: str, descend_path: str, ascend_path: str) -> None:
@@ -59,21 +71,6 @@ class ModelEmbeddedController:
         self.load_model("transit", transit_path)
         self.load_model("descend", descend_path)
         self.load_model("ascend", ascend_path)
-
-    def load_available(
-        self,
-        transit_path: str | None = None,
-        descend_path: str | None = None,
-        ascend_path: str | None = None,
-    ) -> None:
-        """Load provided specialist models and keep scripted fallback for missing stages."""
-        for stage, path in {
-            "transit": transit_path,
-            "descend": descend_path,
-            "ascend": ascend_path,
-        }.items():
-            if path:
-                self.load_model(stage, path)
 
     def run_transit(self, target_xy: np.ndarray):
         """Move arm horizontally to target_xy at SAFE_Z."""
@@ -229,19 +226,15 @@ class ModelEmbeddedController:
         )
 
     def _run_stage(self, stage: str, target_pos: np.ndarray):
-        """Run a model-backed stage, or fall back to the scripted controller."""
+        """Run a model-backed movement stage."""
         env = self._env
-        model = self._registry.get(stage)
-
-        if model is None:
-            target_xy = target_pos[:2]
-            if stage == "transit":
-                return self.scripted_controller.run_transit(target_xy)
-            if stage == "descend":
-                return self.scripted_controller.run_descend(target_xy)
-            if stage == "ascend":
-                return self.scripted_controller.run_ascend(target_xy)
+        if stage not in KNOWN_STAGES:
             raise ValueError(f"Unknown stage: {stage}")
+        model = self._models[stage]
+        if model is None:
+            raise RuntimeError(
+                f"No {stage} model loaded. Call load_model() before running {stage}."
+            )
 
         env.goal_pos = target_pos.copy()
         env.goal = target_pos.copy()

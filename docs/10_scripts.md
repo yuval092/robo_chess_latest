@@ -16,7 +16,6 @@ shown by default; pass `--no-visualize` for headless operation.
 
 ```bash
 robo-chess-play [--host HOST] [--port PORT] [--no-visualize] [--delay DELAY]
-                [--use-scripted-controller]
                 [--transit-model PATH] [--descend-model PATH] [--ascend-model PATH]
 ```
 
@@ -63,9 +62,6 @@ STAGE choices:
 
 Options:
   --episodes N          Episodes per stage (default: 50)
-  --controller {scripted,model}
-                        scripted: deterministic waypoints
-                        model: RL specialist models (default: model)
   --transit-model PATH  Override transit model ZIP
   --descend-model PATH  Override descend model ZIP
   --ascend-model PATH   Override ascend model ZIP
@@ -78,10 +74,7 @@ Options:
 **Examples:**
 
 ```bash
-# Quick scripted check on all stages
-robo-chess-eval-stage --stage all --controller scripted --episodes 20
-
-# Evaluate deployed RL model on transit, 100 episodes
+# Evaluate deployed model on transit, 100 episodes
 robo-chess-eval-stage --stage transit --episodes 100
 
 # Evaluate a newly trained model
@@ -162,8 +155,6 @@ Options:
   --dst CELL            Destination cell (simple mode only, e.g. e4). Default: random.
   --piece ID            Physical piece ID to move (default: black_rook_a)
   --episodes N          Repetitions per (src,dst) pair (default: 1; complex default: 3)
-  --controller {scripted,model}
-                        (default: model)
   --transit-model PATH
   --descend-model PATH
   --ascend-model PATH
@@ -176,17 +167,17 @@ Options:
 **Examples:**
 
 ```bash
-# Quick sanity: move e2 → e4 with scripted controller
-robo-chess-eval-flow --mode simple --src e2 --dst e4 --controller scripted
+# Quick sanity: move e2 → e4
+robo-chess-eval-flow --mode simple --src e2 --dst e4
 
 # Random single move with RL models
 robo-chess-eval-flow --mode simple
 
 # Targeted hard-cell coverage
-robo-chess-eval-flow --mode complex --controller model
+robo-chess-eval-flow --mode complex
 
 # Full board sweep (run overnight)
-robo-chess-eval-flow --mode full --controller model
+robo-chess-eval-flow --mode full
 ```
 
 ---
@@ -264,7 +255,7 @@ robo-chess-eval-physics --skip-stability
 
 ```bash
 robo-chess-eval-physics                               # full physics check
-robo-chess-eval-stage --stage all --controller model  # all-stage accuracy
+robo-chess-eval-stage --stage all                    # all-stage accuracy
 robo-chess-eval-flow --mode complex                   # hard-cell coverage
 ```
 

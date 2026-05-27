@@ -114,7 +114,7 @@ Executes a single board-to-board arm move: validates expected occupancy, runs th
 ```python
 MovementExecutor(
     env,
-    controller,           # ScriptedController or ModelEmbeddedController
+    controller,           # ModelEmbeddedController
     board_mapper: BoardMapper,
     occupancy: PhysicalOccupancy,
 )
