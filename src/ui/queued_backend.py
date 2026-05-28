@@ -23,7 +23,6 @@ class QueuedUIBackend:
     """Serialize UI backend calls onto the main simulation thread."""
 
     def __init__(self, orchestrator: GameOrchestrator):
-        """Initialise this object."""
         self._orchestrator = orchestrator
         self._requests: queue.Queue[UIRequest] = queue.Queue()
         self._snapshot = orchestrator.snapshot()

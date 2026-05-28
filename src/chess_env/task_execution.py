@@ -58,7 +58,6 @@ class GraspPlaceMixin:
     def _plunge_to_z(
         self, xy: np.ndarray, target_z: float, step_m: float, should_render: bool
     ) -> tuple[np.ndarray, int]:
-        """Run  plunge to z logic."""
         grip_pos = self._grip_pos()
         commanded_z = grip_pos[2]
         steps = 0
@@ -80,7 +79,6 @@ class GraspPlaceMixin:
         *,
         verify_held: bool = False,
     ) -> tuple[str | None, int]:
-        """Run  retract to hover logic."""
         commanded_z = start_z
         steps = 0
         for _ in range(int(round((self.HOVER_Z - start_z) / step_m)) + 3):
@@ -102,7 +100,6 @@ class GraspPlaceMixin:
     def _hold_locked_target(
         self, target_provider, steps: int, should_render: bool
     ) -> None:
-        """Run  hold locked target logic."""
         for _ in range(steps):
             self._step_locked_grip(target_provider(), should_render)
 
@@ -264,7 +261,6 @@ class GraspPlaceMixin:
         # Settle to let contact impulses stabilize (prevent ringing).
         # Continue tracking live cube XY and re-asserting vertical quat.
         def live_cube_target():
-            """Run live cube target logic."""
             live_cube = self.get_cube_position()
             return np.array([live_cube[0], live_cube[1], self.GRASP_Z])
 

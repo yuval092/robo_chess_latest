@@ -31,7 +31,6 @@ class MovementExecutor:
     def __init__(
         self, env, controller, board_mapper: BoardMapper, occupancy: PhysicalOccupancy
     ):
-        """Initialise this object."""
         self.env = env.unwrapped if hasattr(env, "unwrapped") else env
         self.controller = controller
         self.board_mapper = board_mapper
@@ -44,7 +43,6 @@ class MovementExecutor:
     def move_piece_between_squares(
         self, piece_id: str, src_square: str, dst_square: str
     ) -> PhysicalMoveResult:
-        """Run move piece between squares logic."""
         try:
             self.occupancy.assert_piece_at(piece_id, src_square)
             self.occupancy.assert_square_empty(dst_square)
@@ -68,7 +66,6 @@ class MovementExecutor:
         src_square: str | None = None,
         dst_square: str | None = None,
     ) -> PhysicalMoveResult:
-        """Run move piece xy logic."""
         self.env.set_active_piece(piece_id)
         result = self.controller.run_full_move(src_xy, dst_xy)
         if not result.success:

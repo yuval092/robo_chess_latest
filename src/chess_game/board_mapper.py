@@ -44,7 +44,6 @@ class BoardMapper:
     def __init__(
         self, geometry: BoardGeometry, validation: BoardValidation = _DEFAULT_VALIDATION
     ):
-        """Initialise this object."""
         self.geometry = geometry
         self.validation = validation
         self._validate_geometry()

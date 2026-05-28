@@ -35,7 +35,6 @@ class TaskStateMixin:
         return self.get_active_piece_quat()
 
     def set_active_piece(self, piece_id: str) -> None:
-        """Run set active piece logic."""
         if self._piece_registry is None:
             self._piece_registry = PieceRegistry()
         piece = self._piece_registry.by_id(piece_id)
@@ -44,13 +43,11 @@ class TaskStateMixin:
         self.active_piece_joint_name = piece.joint_name
 
     def clear_active_piece(self) -> None:
-        """Run clear active piece logic."""
         self.active_piece_id = None
         self.active_piece_body_name = None
         self.active_piece_joint_name = None
 
     def get_active_piece_position(self) -> np.ndarray:
-        """Run get active piece position logic."""
         if self.active_piece_joint_name is None:
             raise RuntimeError("No active chess piece selected.")
         joint_id = self.model.joint(self.active_piece_joint_name).id
@@ -58,7 +55,6 @@ class TaskStateMixin:
         return self.data.qpos[qpos_start : qpos_start + 3].copy()
 
     def get_active_piece_quat(self) -> np.ndarray:
-        """Run get active piece quat logic."""
         if self.active_piece_joint_name is None:
             raise RuntimeError("No active chess piece selected.")
         joint_id = self.model.joint(self.active_piece_joint_name).id
@@ -66,7 +62,6 @@ class TaskStateMixin:
         return self.data.qpos[qpos_start + 3 : qpos_start + 7].copy()
 
     def _set_freejoint_pose(self, joint_name: str, xyz: np.ndarray, quat=None) -> None:
-        """Run  set freejoint pose logic."""
         quat = (
             np.array([1.0, 0.0, 0.0, 0.0])
             if quat is None
@@ -82,7 +77,6 @@ class TaskStateMixin:
         self.data.qacc[dof_start : dof_start + 6] = 0.0
 
     def _reserve_position(self, index: int, color: str, piece_type: str) -> np.ndarray:
-        """Run  reserve position logic."""
         reserve_cfg = self.chess_cfg["promotion_reserve"][color]
         spacing = self.chess_cfg["reserves"]["promotion_slot_spacing_m"]
         origin = reserve_cfg["origin_xyz"]
@@ -98,13 +92,11 @@ class TaskStateMixin:
         )
 
     def _hidden_piece_position(self, index: int) -> np.ndarray:
-        """Run  hidden piece position logic."""
         row = index // 12
         col = index % 12
         return np.array([2.2 + row * 0.05, -0.5 + col * 0.05, self.CUBE_HEIGHT / 2.0])
 
     def _reset_chess_piece_bodies(self) -> None:
-        """Run  reset chess piece bodies logic."""
         if self._board_mapper is None:
             self._board_mapper = BoardMapper.from_configs()
         if self._piece_registry is None:
@@ -198,7 +190,6 @@ class TaskStateMixin:
         return True, None
 
     def _mujoco_step(self, action):
-        """Run  mujoco step logic."""
         super()._mujoco_step(action)
         if self._debug_step_callback is not None:
             self._debug_step_callback(self._debug_current_phase)

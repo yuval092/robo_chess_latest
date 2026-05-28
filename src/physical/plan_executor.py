@@ -36,7 +36,6 @@ class PhysicalPlanExecutor:
         controller=None,
         env=None,
     ):
-        """Initialise this object."""
         self.movement_executor = movement_executor
         self.piece_teleporter = piece_teleporter
         self.occupancy = occupancy
@@ -102,7 +101,6 @@ class PhysicalPlanExecutor:
         return True
 
     def return_to_home(self) -> PhysicalExecutionResult:
-        """Run return to home logic."""
         if self.controller is None or self.env is None:
             return PhysicalExecutionResult(True, [], None)
         home_xy = np.array(load_config("env")["home_position_xy"])
@@ -133,5 +131,4 @@ class PhysicalPlanExecutor:
         self.occupancy.reset(starting_square_map)
 
     def reset_occupancy(self) -> None:
-        """Run reset occupancy logic."""
         self.reset_board_state()

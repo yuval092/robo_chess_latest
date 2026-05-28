@@ -19,7 +19,6 @@ class PieceTeleporter:
     """Freejoint teleport helpers for chess piece bodies."""
 
     def __init__(self, env, board_mapper: BoardMapper | None = None):
-        """Initialise this object."""
         self.env = unwrap_env(env)
         self.board_mapper = board_mapper or BoardMapper.from_configs()
         self.chess_cfg = load_config("chess")
@@ -27,7 +26,6 @@ class PieceTeleporter:
     def teleport_piece_to_xyz(
         self, piece_id: str, xyz: np.ndarray, quat: np.ndarray | None = None
     ) -> None:
-        """Run teleport piece to xyz logic."""
         joint_name = f"piece_{piece_id}:joint"
         quat = IDENTITY_QUAT if quat is None else np.asarray(quat, dtype=float)
         xyz = np.asarray(xyz, dtype=float)
@@ -41,12 +39,10 @@ class PieceTeleporter:
         mujoco.mj_forward(self.env.model, self.env.data)
 
     def teleport_piece_to_square(self, piece_id: str, square: str) -> None:
-        """Run teleport piece to square logic."""
         xyz = self.board_mapper.square_to_piece_xyz(chess.parse_square(square))
         self.teleport_piece_to_xyz(piece_id, xyz)
 
     def teleport_piece_to_graveyard(self, piece_id: str, slot_id: str) -> None:
-        """Run teleport piece to graveyard logic."""
         color = self._piece_color(piece_id)
         xyz = self._slot_xyz(
             self.chess_cfg["graveyards"][color],
@@ -56,7 +52,6 @@ class PieceTeleporter:
         self.teleport_piece_to_xyz(piece_id, xyz)
 
     def teleport_piece_to_promotion_reserve(self, piece_id: str, slot_id: str) -> None:
-        """Run teleport piece to promotion reserve logic."""
         color = self._piece_color(piece_id)
         xyz = self._slot_xyz(
             self.chess_cfg["promotion_reserve"][color],
@@ -67,7 +62,6 @@ class PieceTeleporter:
 
     @staticmethod
     def _piece_color(piece_id: str) -> str:
-        """Run  piece color logic."""
         if piece_id.startswith("white_"):
             return "white"
         if piece_id.startswith("black_"):
@@ -76,14 +70,12 @@ class PieceTeleporter:
 
     @staticmethod
     def _slot_index(slot_id: str) -> int:
-        """Run  slot index logic."""
         match = re.fullmatch(r"slot_(\d+)", slot_id)
         if match is None:
             raise ValueError(f"Slot id must be in format 'slot_NN': {slot_id!r}")
         return int(match.group(1))
 
     def _slot_xyz(self, cfg: dict, spacing: float, slot_id: str) -> np.ndarray:
-        """Run  slot xyz logic."""
         slot = self._slot_index(slot_id)
         row = slot // cfg["cols"]
         col = slot % cfg["cols"]

@@ -39,7 +39,6 @@ class LogicalPieceTracker:
     """Tracks stable physical piece ids against logical chess squares."""
 
     def __init__(self, starting_square_map: dict[str, str] | None = None):
-        """Initialise this object."""
         if starting_square_map is None:
             starting_square_map = PieceRegistry().starting_square_map()
         self._piece_to_square: dict[str, str | None] = dict(starting_square_map)
@@ -163,7 +162,6 @@ class MovePlanner:
     }
 
     def __init__(self, board: chess.Board, tracker: LogicalPieceTracker):
-        """Initialise this object."""
         self.board = board
         self.tracker = tracker
 

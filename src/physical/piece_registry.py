@@ -33,23 +33,19 @@ class PieceRegistry:
     FILES = "abcdefgh"
 
     def __init__(self):
-        """Initialise this object."""
         self._pieces = self._build_active_pieces()
         self._by_id = {piece.piece_id: piece for piece in self._pieces}
 
     def all_pieces(self) -> list[PhysicalPiece]:
-        """Run all pieces logic."""
         return list(self._pieces)
 
     def by_id(self, piece_id: str) -> PhysicalPiece:
-        """Run by id logic."""
         try:
             return self._by_id[piece_id]
         except KeyError as exc:
             raise KeyError(f"Unknown physical piece id: {piece_id}") from exc
 
     def starting_square_map(self) -> dict[str, str]:
-        """Run starting square map logic."""
         return {
             piece.piece_id: piece.initial_square
             for piece in self._pieces
@@ -57,12 +53,10 @@ class PieceRegistry:
         }
 
     def ids_for_color(self, color: str) -> list[str]:
-        """Run ids for color logic."""
         return [piece.piece_id for piece in self._pieces if piece.color == color]
 
     @classmethod
     def _build_active_pieces(cls) -> list[PhysicalPiece]:
-        """Run  build active pieces logic."""
         pieces: list[PhysicalPiece] = []
         for color, back_rank, pawn_rank in (("white", "1", "2"), ("black", "8", "7")):
             pieces.extend(cls._build_back_rank(color, back_rank))
@@ -92,7 +86,6 @@ class PieceRegistry:
     
     @staticmethod
     def _piece_id(color: str, piece_type: str, file_name: str) -> str:
-        """Run  piece id logic."""
         if piece_type in {"king", "queen"}:
             return f"{color}_{piece_type}"
         return f"{color}_{piece_type}_{file_name}"
@@ -101,7 +94,6 @@ class PieceRegistry:
     def _make_piece(
         piece_id: str, color: str, piece_type: str, initial_square: str | None
     ) -> PhysicalPiece:
-        """Run  make piece logic."""
         body_name = f"piece_{piece_id}"
         return PhysicalPiece(
             piece_id=piece_id,

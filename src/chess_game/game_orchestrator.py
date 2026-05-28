@@ -47,7 +47,6 @@ class GameOrchestrator:
         auto_computer_reply: bool | None = None,
         engine_cfg: dict | None = None,
     ):
-        """Initialise this object."""
         game_cfg = load_config("chess")["game"]
         self.chess_service = chess_service
         self.physical_executor = physical_executor

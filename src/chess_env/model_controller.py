@@ -47,7 +47,6 @@ class ModelEmbeddedController:
         render_fn: Callable | None = None,
         render_delay: float = 0.0,
     ):
-        """Initialise this object."""
         self._wrapped_env = env
         self._env = unwrap_env(env)
         self._render_fn = render_fn
