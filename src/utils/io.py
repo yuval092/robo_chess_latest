@@ -33,6 +33,12 @@ def resolve_model_paths(overrides: dict[str, str] | None = None) -> dict[str, st
             f"Missing model path(s) for {', '.join(missing)}. "
             f"Set configs/deployed_models.yaml or pass {flags}."
         )
+    not_found = [stage for stage, path in paths.items() if not os.path.exists(path)]
+    if not_found:
+        raise FileNotFoundError(
+            f"Model file(s) not found for: {', '.join(not_found)}. "
+            f"Check paths in configs/deployed_models.yaml."
+        )
     return paths
 
 
