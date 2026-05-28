@@ -65,20 +65,31 @@ class PieceRegistry:
         """Run  build active pieces logic."""
         pieces: list[PhysicalPiece] = []
         for color, back_rank, pawn_rank in (("white", "1", "2"), ("black", "8", "7")):
-            for file_name, piece_type in cls.BACK_RANK:
-                piece_id = cls._piece_id(color, piece_type, file_name)
-                pieces.append(
-                    cls._make_piece(
-                        piece_id, color, piece_type, f"{file_name}{back_rank}"
-                    )
-                )
-            for file_name in cls.FILES:
-                piece_id = f"{color}_pawn_{file_name}"
-                pieces.append(
-                    cls._make_piece(piece_id, color, "pawn", f"{file_name}{pawn_rank}")
-                )
+            pieces.extend(cls._build_back_rank(color, back_rank))
+            pieces.extend(cls._build_pawn_rank(color, pawn_rank))
         return pieces
 
+    @classmethod
+    def _build_back_rank(cls, color: str, back_rank: str) -> list[PhysicalPiece]:
+        return [
+            cls._make_piece(
+                cls._piece_id(color, piece_type, file_name),
+                color,
+                piece_type,
+                f"{file_name}{back_rank}",
+            )
+            for file_name, piece_type in cls.BACK_RANK
+        ]
+
+    @classmethod
+    def _build_pawn_rank(cls, color: str, pawn_rank: str) -> list[PhysicalPiece]:
+        return [
+            cls._make_piece(
+                f"{color}_pawn_{file_name}", color, "pawn", f"{file_name}{pawn_rank}"
+            )
+            for file_name in cls.FILES
+        ]
+    
     @staticmethod
     def _piece_id(color: str, piece_type: str, file_name: str) -> str:
         """Run  piece id logic."""
