@@ -11,7 +11,6 @@ chess_env/assets/shared.xml
 chess_env/assets/robot.xml
 chess_env/stls/chess/*.stl
 chess_env/stls/fetch/*.stl
-chess_env/stls/hand/*.stl
 ```
 
 `ChessSimulationEnv` loads `chess_env/assets/pick_and_place.xml` directly through

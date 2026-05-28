@@ -2,7 +2,6 @@ import chess
 import gymnasium as gym
 import numpy as np
 
-from tests.integration.flow_helpers import run_flow
 from src.chess_env.model_controller import ModelEmbeddedController
 from src.chess_game.board_mapper import BoardMapper
 from src.chess_game.chess_service import ChessService
@@ -13,7 +12,8 @@ from src.physical.occupancy import PhysicalOccupancy
 from src.physical.piece_registry import PieceRegistry
 from src.physical.piece_teleport import PieceTeleporter
 from src.physical.plan_executor import PhysicalPlanExecutor
-from main import resolve_model_paths
+from src.utils.io import resolve_model_paths
+from tests.integration.flow_helpers import run_flow
 
 ARM_HOME_JOINTS = (
     "robot0:torso_lift_joint",

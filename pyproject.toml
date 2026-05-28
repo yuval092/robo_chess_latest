@@ -24,7 +24,7 @@ where = ["."]
 include = ["src*", "chess_env*", "training*"]
 
 [tool.setuptools.package-data]
-"chess_env" = ["assets/*.xml", "stls/**/*.stl"]
+"chess_env" = ["assets/*.xml", "stls/chess/*.stl", "stls/fetch/*.stl"]
 
 [project.scripts]
 robo-chess-train = "training.cli.main:main"

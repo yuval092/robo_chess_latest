@@ -356,7 +356,7 @@ These paths are relative to the project root. They are read by `build_controller
 
 **To deploy a new model:**
 1. Train: `robo-chess-train train --stage ascend`
-2. Evaluate: `python main.py --all-square-test --ascend-model <path>`
+2. Evaluate with pytest, using the checkpoint through `configs/deployed_models.yaml`
 3. Update this file with the new checkpoint path
 4. Verify: `pytest tests/chess_env tests/physical`
 5. Test end-to-end: `python main.py`

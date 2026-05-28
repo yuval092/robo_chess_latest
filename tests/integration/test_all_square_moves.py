@@ -2,7 +2,7 @@ import os
 
 import pytest
 
-from main import run_all_square_moves
+from tests.integration.all_square_runner import run_all_square_moves
 
 
 @pytest.mark.skipif(
@@ -10,5 +10,5 @@ from main import run_all_square_moves
     reason="Set RUN_EXHAUSTIVE_PHYSICAL_MOVES=1 to run the 64x63 physical move sweep.",
 )
 def test_all_square_to_all_square_physical_moves():
-    summary = run_all_square_moves(piece_id="black_rook_a", stop_on_failure=True)
+    summary = run_all_square_moves(stop_on_failure=True)
     assert not summary.failures

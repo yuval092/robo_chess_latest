@@ -11,7 +11,8 @@ robo-chess-train train --stage ascend
 ```
 
 After training, update `configs/deployed_models.yaml` with the checkpoint path,
-then verify behavior with pytest or `python main.py --all-square-test`.
+then verify behavior with pytest. The exhaustive board sweep is an opt-in pytest
+case, not a `main.py` runtime mode.
 
 ---
 
@@ -169,6 +170,10 @@ After training, the following files exist in `checkpoints/{stage}_{timestamp}/`:
 
 The timestamp format is `YYYYMMDD_HHMMSS`. Logs are written to `logs/{stage}_{timestamp}/tensorboard/`.
 
+The bootstrap SAC checkpoint at
+`models/pretrained/sac-FetchPickAndPlace-v4.zip` is intentionally retained for
+future fine-tuning runs.
+
 ---
 
 ## Evaluating a Trained Model
@@ -181,7 +186,7 @@ before deploying:
 pytest tests/chess_env tests/physical
 
 # Full board-pair physical coverage
-python main.py --all-square-test
+RUN_EXHAUSTIVE_PHYSICAL_MOVES=1 pytest tests/integration/test_all_square_moves.py
 ```
 
 The pytest checks validate scene and environment invariants. The all-square
@@ -195,11 +200,11 @@ sweep reports pass/fail for every distinct source and destination pair.
 
 ### Callback Evaluation Is Unreliable
 
-The `SuccessRateEvalCallback` is useful for saving latest/best checkpoints, but deployment should be based on pytest plus `python main.py --all-square-test` using the saved checkpoint and production stage budgets.
+The `SuccessRateEvalCallback` is useful for saving latest/best checkpoints, but deployment should be based on pytest plus the opt-in exhaustive sweep using the saved checkpoint and production stage budgets.
 
 ### Random Goal Sampling Over-Estimates Performance
 
-Random board-position checks can over-estimate performance because corner squares (a1, a8, h1, h8) are harder to reach and under-represented. `python main.py --all-square-test` gives broad production coverage across every distinct source and destination pair.
+Random board-position checks can over-estimate performance because corner squares (a1, a8, h1, h8) are harder to reach and under-represented. The opt-in all-square pytest sweep gives broad production coverage across every distinct source and destination pair.
 
 ### VERTICAL_QUAT Must Be Consistent
 
@@ -225,7 +230,7 @@ robo-chess-train train \
 
 1. Train the specialist: `robo-chess-train train --stage ascend`
 2. Evaluate the checkpoint: `pytest tests/chess_env tests/physical`
-3. Run targeted flow coverage: `python main.py --all-square-test --ascend-model <path>`
+3. Run targeted flow coverage by temporarily pointing `configs/deployed_models.yaml` at the checkpoint and running `RUN_EXHAUSTIVE_PHYSICAL_MOVES=1 pytest tests/integration/test_all_square_moves.py`
 4. Edit `configs/deployed_models.yaml`:
    ```yaml
    ascend: "checkpoints/ascend_20260525_133712/final_ascend.zip"

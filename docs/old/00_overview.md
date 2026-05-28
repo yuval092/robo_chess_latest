@@ -15,7 +15,7 @@ state, and the physical layer executes legal moves in the simulated scene.
 | Physical execution | `src/physical/` | Move execution, occupancy, teleports |
 | Controller | `src/chess_env/model_controller.py` | SAC stage inference plus scripted grasp/place |
 | MuJoCo env | `src/chess_env/` | Fetch-based chess task environment |
-| Runtime | `main.py` | Play mode and all-square sweep |
+| Runtime | `main.py` | Play mode |
 | Training | `training/` | SAC training pipeline and `robo-chess-train train` |
 | Tests | `tests/` | Static asset, physics, game, UI, and integration coverage |
 
@@ -25,7 +25,6 @@ state, and the physical layer executes legal moves in the simulated scene.
 |---|---|
 | `python main.py` | Start the web UI and MuJoCo simulation |
 | `python main.py --no-visualize` | Start play mode headless |
-| `python main.py --all-square-test` | Run all 4,032 source/destination move pairs with `black_rook_a` |
 | `robo-chess-train train` | Train one SAC specialist model |
 
 Scene XML and STL assets are static checked-in source files. Diagnostics that

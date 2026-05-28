@@ -40,15 +40,14 @@ Useful runtime flags: `--host`, `--port`, `--delay`, and `--debug`.
 
 ## Full Board Sweep
 
-Run the exhaustive 64x63 physical move sweep:
+The exhaustive 64x63 physical move sweep is test-only and is skipped unless
+explicitly requested:
 
 ```bash
-python main.py --all-square-test
+RUN_EXHAUSTIVE_PHYSICAL_MOVES=1 pytest tests/integration/test_all_square_moves.py
 ```
 
-The sweep always uses `black_rook_a`, runs headless by default, reports every
-failure, exits 0 only when every move passes, and exits 1 otherwise. Use
-`--visualize-test` to open the MuJoCo viewer during the sweep.
+The sweep uses `black_rook_a` by default and is not part of normal runtime.
 
 ## Training
 
@@ -88,7 +87,7 @@ RUN_EXHAUSTIVE_PHYSICAL_MOVES=1 pytest tests/integration/test_all_square_moves.p
 
 ```text
 robo_chess_latest/
-├── main.py             # Root runtime and all-square sweep entry point
+├── main.py             # Play-mode runtime entry point
 ├── src/
 │   ├── chess_env/      # MuJoCo environment and model controller infrastructure
 │   ├── chess_game/     # Chess rules, Stockfish wrapper, move planning

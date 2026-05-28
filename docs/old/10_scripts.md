@@ -17,13 +17,12 @@ unless `--no-visualize` is supplied. Model paths default to
 ## All-Square Sweep
 
 ```bash
-python main.py --all-square-test [--visualize-test] [--delay SECS] [--debug]
-               [--transit-model PATH] [--descend-model PATH] [--ascend-model PATH]
+RUN_EXHAUSTIVE_PHYSICAL_MOVES=1 pytest tests/integration/test_all_square_moves.py
 ```
 
-This runs all 4,032 distinct source/destination pairs with `black_rook_a`.
-The test is headless by default, continues after failures, prints all failures,
-and exits nonzero unless every move passes.
+This opt-in pytest case runs all 4,032 distinct source/destination pairs with
+`black_rook_a` by default. It is intentionally excluded from normal runtime and
+from default pytest runs because it is long.
 
 ## `robo-chess-train train`
 

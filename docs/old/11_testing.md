@@ -308,6 +308,12 @@ Also verifies:
 
 Physical reachability coverage: tests arm moves across a representative subset of src→dst board square pairs with `ModelEmbeddedController`. Verifies the arm can physically reach the sampled board positions without timing out or crashing.
 
+This exhaustive sweep is skipped by default. Run it explicitly with:
+
+```bash
+RUN_EXHAUSTIVE_PHYSICAL_MOVES=1 pytest tests/integration/test_all_square_moves.py
+```
+
 ---
 
 ## Testing Patterns
@@ -336,17 +342,6 @@ This pattern lets tests verify that:
 - Plans are generated correctly (`executor.plans[0].chess_move_uci == "e2e4"`)
 - Home is called once per move (`executor.home_calls == 1`)
 - Physical failure doesn't commit the board state
-
-### `GameOrchestrator.create_headless()`
-
-For pure chess logic tests that don't even need a fake executor:
-
-```python
-orchestrator = GameOrchestrator.create_headless()
-result = orchestrator.submit_human_move("e2", "e4")
-```
-
-Uses `NoOpPhysicalExecutor` (always returns success) and no Stockfish engine.
 
 ### FEN-based Scenario Testing
 

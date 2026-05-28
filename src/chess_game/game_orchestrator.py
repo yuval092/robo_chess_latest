@@ -8,7 +8,6 @@ import chess
 
 from src.chess_game.chess_service import ChessService, GameStatus, IllegalMoveError
 from src.chess_game.move_planner import LogicalPieceTracker, MovePlanner
-from src.physical.noop_executor import NoOpPhysicalExecutor
 from src.utils.io import load_config
 
 
@@ -63,22 +62,6 @@ class GameOrchestrator:
         self.is_busy = False
         self.error: str | None = None
         self.last_move: str | None = None
-
-    @classmethod
-    def create_headless(
-        cls,
-        human_color: str | None = None,
-        auto_computer_reply: bool | None = None,
-    ) -> GameOrchestrator:
-        """Create a GameOrchestrator backed by NoOpPhysicalExecutor (no chess engine)."""
-        return cls(
-            chess_service=ChessService(),
-            physical_executor=NoOpPhysicalExecutor(),
-            piece_tracker=LogicalPieceTracker(),
-            human_color=human_color,
-            auto_computer_reply=auto_computer_reply,
-            engine_cfg=None,
-        )
 
     def new_game(self) -> GameSnapshot:
         """Reset the game and physical state, restarting the chess engine."""

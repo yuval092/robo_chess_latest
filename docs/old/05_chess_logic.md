@@ -100,7 +100,7 @@ Top-level coordinator for a single chess game session. Combines chess rules, phy
 ```python
 GameOrchestrator(
     chess_service: ChessService,
-    physical_executor,              # PhysicalPlanExecutor or NoOpPhysicalExecutor
+    physical_executor,              # PhysicalPlanExecutor or compatible fake
     piece_tracker: LogicalPieceTracker,
     human_color: str | None = None, # "white", "black", or "both"
     auto_computer_reply: bool | None = None,
@@ -111,14 +111,6 @@ GameOrchestrator(
 Reads defaults from `configs/chess.yaml:game`:
 - `human_color: "white"` — default player colour
 - `auto_computer_reply: true` — computer plays immediately after human move
-
-### `create_headless()` — Factory for Testing
-
-```python
-orchestrator = GameOrchestrator.create_headless()
-```
-
-Creates an orchestrator with `NoOpPhysicalExecutor` (no arm, instant moves) and no engine. Used in tests and CLI evaluation tools that only need the chess logic.
 
 ### Data Structures
 
@@ -424,14 +416,6 @@ prefix = f"{color}_reserve_{piece_type}_"
 ### `next_graveyard_slot(color) → str`
 
 Returns `f"slot_{len(_captured[color]):02d}"` — the next sequential graveyard slot.
-
----
-
-## `NoOpPhysicalExecutor` (`src/physical/noop_executor.py`)
-
-A stub physical executor that immediately returns `success=True` for any plan. Used in:
-- `GameOrchestrator.create_headless()`
-- Tests that only test chess logic
 
 ---
 
