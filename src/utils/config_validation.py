@@ -22,14 +22,6 @@ def validate_config() -> None:
     deployed = load_config("deployed_models")
 
     for key in [
-        "transit_tolerance_m",
-        "vertical_tolerance_m",
-        "step_gain",
-        "min_step_size_m",
-        "max_step_size_m",
-        "transit_max_steps",
-        "vertical_max_steps",
-        "grasp_verify_drift_mm",
         "reconcile_xy_tolerance_m",
         "reconcile_z_tolerance_m",
         "rl_max_steps_per_stage",

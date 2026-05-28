@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 
+import chess
 import numpy as np
 
 from src.chess_game.board_mapper import BoardMapper
@@ -107,7 +108,7 @@ class MovementExecutor:
 
         if dst_square is not None:
             placed_xyz = self.board_mapper.square_to_piece_xyz(
-                __import__("chess").parse_square(dst_square)
+                chess.parse_square(dst_square)
             )
             self.teleporter.teleport_piece_to_xyz(
                 piece_id, placed_xyz, quat=IDENTITY_QUAT

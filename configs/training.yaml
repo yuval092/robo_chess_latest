@@ -1,30 +1,20 @@
-# Base pretrained model (FetchPickAndPlace-v4 transfer weights)
-base_model: "models/pretrained/sac-FetchPickAndPlace-v4.zip"
+base_model: "models/pretrained/sac-FetchPickAndPlace-v4.zip"  # Pretrained FetchPickAndPlace checkpoint used as the fine-tuning starting point
 
-# Parallelism
-num_envs: 4
+num_envs: 4                  # Number of parallel training environments; 1 uses DummyVecEnv, >1 uses SubprocVecEnv
 
-# Training length
-# Use 600K for specialist training sessions (transit/descend/ascend).
-total_timesteps: 600000
+total_timesteps: 600000      # Total environment steps for one specialist training run
 
-# SAC fine-tuning hyperparameters
-learning_rate: 0.00005
-batch_size: 512
-target_entropy: -4.0
-learning_starts: 10000
-buffer_size: 300000
+learning_rate: 0.00005       # SAC actor/critic learning rate
+batch_size: 512              # Mini-batch size sampled from the replay buffer each gradient step
+target_entropy: -4.0         # SAC target entropy for automatic entropy tuning
+learning_starts: 10000       # Steps collected before the first gradient update
+buffer_size: 300000          # Maximum number of transitions stored in the replay buffer
 
-# Entropy reset on model load
-initial_ent_coef: 0.1
-ent_coef_lr: 0.001
+initial_ent_coef: 0.1        # Entropy coefficient reset to this value when loading a checkpoint
+ent_coef_lr: 0.001           # Learning rate for the entropy coefficient optimiser
 
-# Evaluation
-# NOTE: 5 eval episodes is too noisy (a 70% model can pass 5/5 by chance).
-# Use 20+ for reliable best-model tracking. eval_freq every 50K steps.
-eval_freq: 50000
-n_eval_episodes: 20
+eval_freq: 50000             # Evaluate the policy every this many training steps
+n_eval_episodes: 20          # Number of evaluation episodes per checkpoint assessment
 
-# Logging
-log_freq: 2000
-moving_avg_window: 100
+log_freq: 2000               # Log rolling statistics every this many training steps
+moving_avg_window: 100       # Episode window size for rolling reward/success averages

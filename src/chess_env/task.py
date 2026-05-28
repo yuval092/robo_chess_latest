@@ -47,11 +47,6 @@ class ChessTaskEnv(
             hide_object (bool): If True, teleports the piece to a hidden location (used for pure movement).
             debug (bool): Enables verbose per-step state logging.
         """
-        # Consume legacy params to avoid gym warnings
-        kwargs.pop("sample_debug_freq", None)
-        kwargs.pop("total_curriculum_steps", None)
-        kwargs.pop("num_envs", None)
-        kwargs.pop("curriculum_progress_override", None)
 
         # Load configurations
         self.env_cfg = load_config("env")
@@ -118,16 +113,12 @@ class ChessTaskEnv(
         self.current_drift_limit = self._get_current_drift_limit()
         self.FLOOR_LIMIT = self.env_cfg["floor_limit"]
         self.HIDDEN_OBJECT_POS = np.array(self.env_cfg["hidden_object_pos"])
-        self.MAX_SETTLE_STEPS = self.physics_cfg["max_settle_steps"]
         self.SETTLE_TOLERANCE = self.physics_cfg["settle_tolerance"]
-        self.SETTLE_GAIN = self.physics_cfg["settle_gain"]
-        self.SETTLE_STEPS_FINAL = self.physics_cfg["settle_steps_final"]
         self.HALT_VEL_THRESHOLD = self.env_cfg["halt_vel_threshold"]
 
         # --- Actuator Enforcement ---
         self.FINGER_OPEN_JOINT = self.env_cfg["finger_open_joint"]
         self.FINGER_CLOSED_JOINT = self.env_cfg["finger_closed_joint"]
-        self.FINGER_OUTER_OFFSET = self.env_cfg["finger_outer_offset"]
         self.finger_target_joint = self.FINGER_CLOSED_JOINT
 
         # --- Grasp Stage State ---
@@ -142,9 +133,6 @@ class ChessTaskEnv(
         self.HOME_POS = np.array([home_xy[0], home_xy[1], self.SAFE_Z])
 
         # Grasp Thresholds
-        self.GRASP_CONTACT_APPROACH_TOLERANCE = self.env_cfg[
-            "grasp_contact_approach_tolerance"
-        ]
         self.GRASP_ALIGN_TOLERANCE = self.env_cfg["grasp_align_tolerance"]
         self.GRASP_CLOSE_STEPS = self.env_cfg["grasp_close_steps"]
         self.GRASP_RAMP_END = self.env_cfg["grasp_ramp_end"]

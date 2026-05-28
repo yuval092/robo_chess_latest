@@ -166,7 +166,7 @@ Reward components:
 - xy_reward_weight   * ||grip_xy - goal_xy||
 - braking_weight     * speed near goal
 - jitter_penalty     * ||action_xyz||^2
-+ floor_penalty      near table
++ floor_penalty      near table  (floor_penalty = -0.5, so this subtracts)
 + success_bonus      on success
 crash_penalty        on crash
 ```

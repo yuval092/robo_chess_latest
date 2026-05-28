@@ -11,7 +11,6 @@ from src.utils.io import load_config
 
 _cfg = load_config("env")
 SAFE_Z = _cfg["safe_z"]  # 0.530m
-GRASP_Z = _cfg["grasp_z"]  # 0.425m
 HOVER_Z = _cfg["hover_z"]
 
 SCENARIO_EXIT_Z = {

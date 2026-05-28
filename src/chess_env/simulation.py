@@ -65,7 +65,6 @@ class ChessSimulationEnv(MujocoFetchPickAndPlaceEnv):
         self.EDGE_MARGIN = self.env_cfg["edge_margin"]
         self.MIN_GOAL_DIST = self.env_cfg["min_goal_dist"]
         self.CUBE_HEIGHT = self.env_cfg["cube_height"]
-        self.MAX_GRIPPER_WIDTH = self.env_cfg["max_gripper_width"]
 
         # --- Physics Parameters ---
         # Number of physics steps to run before an episode starts to let the arm settle

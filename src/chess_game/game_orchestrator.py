@@ -131,16 +131,6 @@ class GameOrchestrator:
             return self.let_computer_play_current_turn()
         return result
 
-    def run_computer_turn_if_needed(self) -> MoveExecutionResult | None:
-        """Run the computer turn when turn ownership requires it."""
-        if (
-            self.human_color != "both"
-            and self._turn_color_name() == self.human_color
-            or self.chess_service.board.is_game_over()
-        ):
-            return None
-        return self.let_computer_play_current_turn()
-
     def _submit_move(self, move_factory) -> MoveExecutionResult:
         """Execute a move through validation, planning, and physical execution."""
         if self.is_busy:

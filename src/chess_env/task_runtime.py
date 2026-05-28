@@ -117,9 +117,6 @@ class TaskRuntimeMixin:
         self._settle_arm_to_start(arm_start_pos)
 
         # --- PHASE 2: Scripted Transitions ---
-        # Dummy action for _set_action calls during transitions
-        np.zeros(4)
-
         if self.current_scenario == "descend":
             # Descend: closed --> opened (scripted transition before RL)
             self.finger_target_joint = self.FINGER_OPEN_JOINT
@@ -342,7 +339,6 @@ class TaskRuntimeMixin:
             needs_close = (
                 new_scenario in {"ascend", "transit"} and prev_scenario == "descend"
             )
-            np.zeros(4)
 
             if needs_open:
                 self.finger_target_joint = self.FINGER_OPEN_JOINT
@@ -430,7 +426,6 @@ class TaskRuntimeMixin:
         action_copy = np.clip(
             action_copy, self.action_space.low, self.action_space.high
         )
-        action_copy[3] = -1.0
         self._set_action(action_copy)
         self._mujoco_step(action_copy)
 

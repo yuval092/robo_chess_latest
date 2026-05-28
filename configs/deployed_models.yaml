@@ -1,3 +1,3 @@
-transit: "models/transit.zip"
-descend: "models/descend.zip"
-ascend: "models/ascend.zip"
+transit: "models/transit.zip"   # SAC specialist for horizontal arm movement at SAFE_Z
+descend: "models/descend.zip"   # SAC specialist for descending from SAFE_Z to HOVER_Z inside the XY tube
+ascend: "models/ascend.zip"     # SAC specialist for ascending from HOVER_Z back to SAFE_Z inside the XY tube

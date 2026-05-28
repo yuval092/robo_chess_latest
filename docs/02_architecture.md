@@ -20,7 +20,8 @@ the engine and UI from seeing a move as committed when the simulated arm failed.
 `main.py` wires the full system:
 
 ```text
-gym.make("ChessFetchTask-v0", show_chess_pieces=True, hide_object=True)
+gym.make("ChessFetchTask-v0", show_chess_pieces=True, hide_object=True,
+         force_scenario="transit")
   -> ModelEmbeddedController
   -> BoardMapper
   -> PieceRegistry
