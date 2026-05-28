@@ -7,7 +7,7 @@ The simulation is built on top of `MujocoFetchPickAndPlaceEnv` from `gymnasium-r
 - The table is larger (64cm chess board with 3cm margins vs. the stock 25cm workspace)
 - The robot's base position and torso height are re-tuned for board reachability
 - The physics step and action scaling are adjusted for smooth, slow movement
-- The scene XML is procedurally generated and injected at startup
+- The scene XML is checked-in and injected at startup
 - A "tube constraint" limits lateral drift during vertical stages
 - Gripper state is explicitly controlled (teleport mode vs. actuator-driven mode)
 
@@ -382,15 +382,16 @@ The gap between `HOVER_Z` (460mm) and `GRASP_Z` (430mm) = 30mm. The scripted gra
 
 ### `chess_env/assets/pick_and_place.xml`
 
-The main scene XML is based on the FetchPickAndPlace XML and extended with three auto-generated sections, delimited by comment markers:
+The main scene XML is based on the FetchPickAndPlace XML and contains three
+static chess sections:
 
-| Section | Markers | Content |
-|---|---|---|
-| Board squares | `generated board squares start/end` | 64 coloured box geoms |
-| Chess pieces | `generated chess pieces start/end` | 32+64 freejoint body+geom pairs |
-| Zone markers | `generated zone markers start/end` | 4 graveyard/reserve zone geoms |
+| Section | Content |
+|---|---|
+| Board squares | 64 coloured visual-only box geoms |
+| Chess pieces | 32+64 freejoint body+geom pairs |
+| Zone markers | 4 graveyard/reserve visual-only zone geoms |
 
-These sections are regenerated at startup by `ensure_environment_generated()` if the config has changed.
+These sections are edited as normal source and are not regenerated at startup.
 
 ### `chess_env/assets/robot.xml`
 
@@ -398,4 +399,6 @@ Defines the Fetch robot URDF: torso, arm joints, gripper finger joints, mocap bo
 
 ### STL Meshes
 
-Six procedurally generated meshes in `chess_env/stls/chess/`: pawn, rook, knight, bishop, queen, king. All generated from parametric geometry functions in `environment_generation.py`. See [07_scene_generation.md](07_scene_generation.md) for full detail.
+Six checked-in meshes live in `chess_env/stls/chess/`: pawn, rook, knight,
+bishop, queen, king. See [07_scene_generation.md](07_scene_generation.md) for
+asset ownership details.

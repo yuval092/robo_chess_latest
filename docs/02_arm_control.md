@@ -132,4 +132,4 @@ CHAIN_SHORTCUTS = {
 }
 ```
 
-The current CLI uses its own chain shortcuts in `src/cli/eval_stage.py`; this module remains the source of waypoint Z constants and transition validation helpers.
+The current CLI uses its own chain shortcuts in `src/chess_env/waypoints.py`; this module remains the source of waypoint Z constants and transition validation helpers.

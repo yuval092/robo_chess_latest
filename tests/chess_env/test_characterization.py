@@ -11,7 +11,6 @@ import numpy as np
 from stable_baselines3 import SAC
 
 import src.chess_env.model_controller as model_controller
-from src.chess_env.environment_generation import DEFAULT_SCENE_PATH
 from src.chess_game.board_mapper import BoardMapper
 
 
@@ -75,27 +74,8 @@ def test_board_mapper_all_64_square_coordinates() -> None:
             assert np.allclose(mapper.square_name_to_xy(square), expected)
 
 
-def test_ensure_environment_generated_is_idempotent_and_absolute() -> None:
-    """Call environment generation twice and verify identical XML via absolute path."""
-    try:
-        from src.chess_env.environment_generation import ensure_environment_generated
-    except ImportError:
-        from src.chess_env.environment_generation import (
-            regenerate_scene as ensure_environment_generated,
-        )
-
-    scene_path = Path(DEFAULT_SCENE_PATH).resolve()
-    ensure_environment_generated(scene_path)
-    first = scene_path.read_text()
-    ensure_environment_generated(scene_path)
-    second = scene_path.read_text()
-
-    assert scene_path.is_absolute()
-    assert first == second
-
-
 def test_import_src_chess_env_writes_no_files() -> None:
-    """Importing src.chess_env must not mutate generated asset files."""
+    """Importing src.chess_env must not mutate static asset files."""
     tracked = [
         Path("chess_env/assets/pick_and_place.xml"),
         Path("chess_env/stls/chess/pawn.stl"),

@@ -2,7 +2,7 @@
 
 ## Overview
 
-The test suite covers all major layers of the system: chess logic, physical layer, scene generation, MuJoCo environment, UI, and integration. Tests are written with `pytest` and organised into a clear directory structure matching the source tree.
+The test suite covers all major layers of the system: chess logic, physical layer, static scene assets, MuJoCo environment, UI, and integration. Tests are written with `pytest` and organised into a clear directory structure matching the source tree.
 
 ```
 tests/
@@ -10,7 +10,7 @@ tests/
 ├── test_config_schema.py           — Config file validation smoke test
 ├── chess_env/                      — MuJoCo environment and RL infrastructure
 │   ├── test_characterization.py    — Behaviour locks: XML loading, obs space restore
-│   ├── test_environment_generation.py — Scene XML and STL generation correctness
+│   ├── test_static_assets.py        — Static scene XML and STL asset correctness
 │   ├── test_task_chaining.py       — soft_reset, transition_validate, stage chaining
 │   └── test_waypoints.py           — Waypoint constants, chain validation, goal derivation
 ├── chess_game/                     — Chess logic (no MuJoCo required)
@@ -141,14 +141,14 @@ Behaviour-locking tests that protect against regressions from refactoring.
 
 The second test uses `monkeypatch` to inject a fake `SAC.load` that either succeeds or raises, verifying that `transfer_obs_enabled` context manager correctly restores state in both paths.
 
-### `test_environment_generation.py`
+### `test_static_assets.py`
 
-Tests procedural scene generation.
+Tests checked-in scene assets.
 
 | Test | What it verifies |
 |---|---|
-| `test_regenerate_scene_updates_all_chess_fragments` | After `regenerate_scene()`, XML contains exactly 64 board geoms, 4 zone geoms, and 96 piece bodies (32 active + 64 reserve) |
-| `test_generated_stls_are_detailed_and_below_hover_clearance` | Each STL mesh has ≥1000 triangles and all Z vertices are ≤ 60.5mm (below `HOVER_Z` clearance) |
+| `test_static_scene_contains_canonical_chess_sections` | XML contains exactly 64 board geoms, 4 zone geoms, and 96 piece bodies (32 active + 64 reserve) |
+| `test_static_chess_stls_are_detailed_and_below_hover_clearance` | Each STL mesh has >=1000 triangles and all Z vertices are <= 60.5mm (below `HOVER_Z` clearance) |
 
 The STL test reads binary STL files directly and extracts Z values from each triangle's vertices to verify no mesh exceeds the hover clearance height.
 
@@ -204,7 +204,7 @@ These tests directly read `data.qpos` and `data.qvel` from MuJoCo to verify the 
 
 ### `test_piece_xml.py`
 
-Tests that the generated scene XML contains all expected MuJoCo objects.
+Tests that the static scene XML contains all expected MuJoCo objects.
 
 | Test | What it verifies |
 |---|---|

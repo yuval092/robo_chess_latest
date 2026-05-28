@@ -13,7 +13,7 @@ from src.physical.occupancy import PhysicalOccupancy
 from src.physical.piece_registry import PieceRegistry
 from src.physical.piece_teleport import PieceTeleporter
 from src.physical.plan_executor import PhysicalPlanExecutor
-from src.utils.args import resolve_model_paths
+from main import resolve_model_paths
 
 ARM_HOME_JOINTS = (
     "robot0:torso_lift_joint",

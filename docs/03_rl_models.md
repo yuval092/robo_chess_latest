@@ -152,7 +152,7 @@ descend: "models/descend.zip"
 ascend:  "models/ascend.zip"
 ```
 
-At startup, `build_controller()` in `src/cli/play.py` reads this file and calls `controller.load_all(transit_path=..., descend_path=..., ascend_path=...)`.
+At startup, `build_controller()` in `main.py` reads this file and calls `controller.load_all(transit_path=..., descend_path=..., ascend_path=...)`.
 
 ### Active Checkpoints
 

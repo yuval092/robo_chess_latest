@@ -2,7 +2,7 @@ import os
 
 import pytest
 
-from src.cli.eval_flow import run_all_square_moves
+from main import run_all_square_moves
 
 
 @pytest.mark.skipif(

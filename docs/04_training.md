@@ -11,7 +11,7 @@ robo-chess-train train --stage ascend
 ```
 
 After training, update `configs/deployed_models.yaml` with the checkpoint path,
-then verify stage accuracy with `robo-chess-eval-stage`.
+then verify behavior with pytest or `python main.py --all-square-test`.
 
 ---
 
@@ -173,22 +173,21 @@ The timestamp format is `YYYYMMDD_HHMMSS`. Logs are written to `logs/{stage}_{ti
 
 ## Evaluating a Trained Model
 
-After training, run the evaluation suite before deploying:
+After training, run the static/physics checks and the production move sweep
+before deploying:
 
 ```bash
-# Per-stage accuracy (20 episodes each)
-robo-chess-eval-stage --stage all --episodes 20
+# Static asset and physics coverage
+pytest tests/chess_env tests/physical
 
-# Targeted hard-cell coverage (corners, edges, known-bad destinations)
-robo-chess-eval-flow --mode complex
-
-# Full pick-and-place sequence check
-robo-chess-eval-stage --stage full_move --episodes 20
+# Full board-pair physical coverage
+python main.py --all-square-test
 ```
 
-Results are reported as success rate, crash breakdown, and per-stage timing.
+The pytest checks validate scene and environment invariants. The all-square
+sweep reports pass/fail for every distinct source and destination pair.
 
-**Warning:** Callback-level evaluation during training is a checkpoint-selection aid, not a production validation run. Always use `robo-chess-eval-stage` and `robo-chess-eval-flow` with the production checkpoint for deployment decisions.
+**Warning:** Callback-level evaluation during training is a checkpoint-selection aid, not a production validation run. Use pytest and the all-square sweep with the production checkpoint for deployment decisions.
 
 ---
 
@@ -196,11 +195,11 @@ Results are reported as success rate, crash breakdown, and per-stage timing.
 
 ### Callback Evaluation Is Unreliable
 
-The `SuccessRateEvalCallback` is useful for saving latest/best checkpoints, but deployment should be based on `robo-chess-eval-stage` + `robo-chess-eval-flow --mode complex` using the saved checkpoint and production stage budgets.
+The `SuccessRateEvalCallback` is useful for saving latest/best checkpoints, but deployment should be based on pytest plus `python main.py --all-square-test` using the saved checkpoint and production stage budgets.
 
 ### Random Goal Sampling Over-Estimates Performance
 
-`robo-chess-eval-stage` uses random board positions, which are biased toward the centre of the board. Corner squares (a1, a8, h1, h8) are harder to reach and under-represented. `robo-chess-eval-flow --mode complex` uses a corner-heavy destination set and gives the true production success rate.
+Random board-position checks can over-estimate performance because corner squares (a1, a8, h1, h8) are harder to reach and under-represented. `python main.py --all-square-test` gives broad production coverage across every distinct source and destination pair.
 
 ### VERTICAL_QUAT Must Be Consistent
 
@@ -225,11 +224,11 @@ robo-chess-train train \
 ## Updating Deployed Models
 
 1. Train the specialist: `robo-chess-train train --stage ascend`
-2. Evaluate the checkpoint: `robo-chess-train eval --stage ascend --model <path>`
-3. Run targeted flow coverage: `robo-chess-eval-flow --mode complex --ascend-model <path>`
+2. Evaluate the checkpoint: `pytest tests/chess_env tests/physical`
+3. Run targeted flow coverage: `python main.py --all-square-test --ascend-model <path>`
 4. Edit `configs/deployed_models.yaml`:
    ```yaml
    ascend: "checkpoints/ascend_20260525_133712/final_ascend.zip"
    ```
-5. Verify physics and stage accuracy: `robo-chess-eval-physics && robo-chess-eval-stage --stage all`
-6. Test end-to-end: `robo-chess-play`
+5. Verify static assets and physics: `pytest tests/chess_env tests/physical`
+6. Test end-to-end: `python main.py`

@@ -352,14 +352,14 @@ descend: "models/descend.zip"
 ascend:  "models/ascend.zip"
 ```
 
-These paths are relative to the project root. They are read by `build_controller()` in `src/cli/play.py` and by the evaluation CLI commands.
+These paths are relative to the project root. They are read by `build_controller()` in `main.py`.
 
 **To deploy a new model:**
 1. Train: `robo-chess-train train --stage ascend`
-2. Evaluate: `robo-chess-eval-flow --mode complex --ascend-model <path>`
+2. Evaluate: `python main.py --all-square-test --ascend-model <path>`
 3. Update this file with the new checkpoint path
-4. Verify: `robo-chess-eval-stage --stage all`
-5. Test end-to-end: `robo-chess-play`
+4. Verify: `pytest tests/chess_env tests/physical`
+5. Test end-to-end: `python main.py`
 
 ---
 

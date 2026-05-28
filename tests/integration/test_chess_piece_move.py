@@ -7,7 +7,7 @@ from src.chess_game.board_mapper import BoardMapper
 from src.physical.movement_executor import MovementExecutor
 from src.physical.occupancy import PhysicalOccupancy
 from src.physical.piece_registry import PieceRegistry
-from src.utils.args import resolve_model_paths
+from main import resolve_model_paths
 
 
 def piece_xyz(uw, piece):

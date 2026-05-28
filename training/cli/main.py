@@ -1,4 +1,4 @@
-"""robo-chess-train — train or evaluate a specialist SAC model."""
+"""robo-chess-train — train a specialist SAC model."""
 
 from __future__ import annotations
 
@@ -8,7 +8,7 @@ import argparse
 def _build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
         prog="robo-chess-train",
-        description="Train or evaluate a RoboChess specialist RL model.",
+        description="Train a RoboChess specialist RL model.",
     )
     sub = parser.add_subparsers(dest="command", required=True)
 
@@ -55,43 +55,6 @@ def _build_parser() -> argparse.ArgumentParser:
         help="Verbose training and environment logs.",
     )
 
-    # ── eval ───────────────────────────────────────────────────────────────
-    eval_p = sub.add_parser(
-        "eval",
-        help=(
-            "Evaluate a trained model on a movement stage. "
-            "Delegates to robo-chess-eval-stage logic."
-        ),
-    )
-    eval_p.add_argument(
-        "--stage",
-        required=True,
-        choices=["transit", "descend", "ascend"],
-        help="Stage to evaluate.",
-    )
-    eval_p.add_argument(
-        "--model",
-        required=True,
-        help="Path to the model ZIP to evaluate.",
-    )
-    eval_p.add_argument(
-        "--episodes",
-        type=int,
-        default=50,
-        help="Episodes to run (default: 50).",
-    )
-    eval_p.add_argument(
-        "--drift-limit",
-        type=float,
-        default=None,
-        help="Override drift tolerance in metres (default: from config).",
-    )
-    eval_p.add_argument(
-        "--debug",
-        action="store_true",
-        help="Verbose debug logs forwarded to the evaluation runner.",
-    )
-
     return parser
 
 
@@ -111,29 +74,12 @@ def _run_train(args: argparse.Namespace) -> None:
     trainer.train(model_path=args.model, save_dir=args.save_dir)
     print("[robo-chess-train] Training complete.")
 
-
-def _run_eval(args: argparse.Namespace) -> None:
-    from src.cli.eval_stage import run_eval_stage
-
-    run_eval_stage(
-        stages=[args.stage],
-        episodes=args.episodes,
-        controller="model",
-        model_overrides={args.stage: args.model},
-        drift_limit=args.drift_limit,
-        debug=args.debug,
-    )
-
-
 def main() -> None:
     """Entry point for robo-chess-train."""
     parser = _build_parser()
     args = parser.parse_args()
 
-    if args.command == "train":
-        _run_train(args)
-    else:
-        _run_eval(args)
+    _run_train(args)
 
 
 if __name__ == "__main__":

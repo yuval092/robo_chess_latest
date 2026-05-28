@@ -27,15 +27,7 @@ include = ["src*", "chess_env*", "training*"]
 "chess_env" = ["assets/*.xml", "stls/**/*.stl"]
 
 [project.scripts]
-# Production
-robo-chess-play         = "src.cli.play:main"
-robo-chess-generate     = "src.cli.generate_scene:main"
-# Evaluation
-robo-chess-eval-stage   = "src.cli.eval_stage:main"
-robo-chess-eval-physics = "src.cli.eval_physics:main"
-robo-chess-eval-flow    = "src.cli.eval_flow:main"
-# Training
-robo-chess-train        = "training.cli.main:main"
+robo-chess-train = "training.cli.main:main"
 
 [tool.ruff]
 line-length = 88

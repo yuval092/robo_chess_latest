@@ -8,7 +8,6 @@ import mujoco
 import numpy as np
 from gymnasium_robotics.envs.fetch.pick_and_place import MujocoFetchPickAndPlaceEnv
 
-from src.chess_env.environment_generation import ensure_environment_generated
 from src.utils.io import load_config
 
 _xml_path_lock = threading.Lock()
@@ -52,7 +51,6 @@ class ChessSimulationEnv(MujocoFetchPickAndPlaceEnv):
             debug (bool): If True, enables verbose logging of gripper positions and control setpoints.
             **kwargs: Additional arguments passed to the parent MujocoFetchPickAndPlaceEnv.
         """
-        ensure_environment_generated()
         self.env_cfg = load_config("env")
         self.physics_cfg = load_config("physics")
         self.debug = debug
