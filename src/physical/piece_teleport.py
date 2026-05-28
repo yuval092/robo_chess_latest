@@ -23,19 +23,19 @@ class PieceTeleporter:
         self.board_mapper = board_mapper or BoardMapper.from_configs()
         self.chess_cfg = load_config("chess")
 
-    def teleport_piece_to_xyz(
-        self, piece_id: str, xyz: np.ndarray, quat: np.ndarray | None = None
-    ) -> None:
-        joint_name = f"piece_{piece_id}:joint"
-        quat = IDENTITY_QUAT if quat is None else np.asarray(quat, dtype=float)
-        xyz = np.asarray(xyz, dtype=float)
-        joint_id = self.env.model.joint(joint_name).id
+    def teleport_piece_to_xyz(self, piece_id: str, xyz: np.ndarray) -> None:
+        joint_id = self.env.model.joint(f"piece_{piece_id}:joint").id
         qpos_start = self.env.model.jnt_qposadr[joint_id]
-        dof_start = self.env.model.jnt_dofadr[joint_id]
-        self.env.data.qpos[qpos_start : qpos_start + 3] = xyz
-        self.env.data.qpos[qpos_start + 3 : qpos_start + 7] = quat
-        self.env.data.qvel[dof_start : dof_start + 6] = 0.0
-        self.env.data.qacc[dof_start : dof_start + 6] = 0.0
+        dof_start  = self.env.model.jnt_dofadr[joint_id]
+
+        xyz_slice  = slice(qpos_start,     qpos_start + 3)  # free joint: 3 position values
+        quat_slice = slice(qpos_start + 3, qpos_start + 7)  # free joint: 4 quaternion values
+        vel_slice  = slice(dof_start,      dof_start  + 6)  # free joint: 6 velocity DOFs
+
+        self.env.data.qpos[xyz_slice]  = np.asarray(xyz, dtype=float)
+        self.env.data.qpos[quat_slice] = IDENTITY_QUAT
+        self.env.data.qvel[vel_slice]  = 0.0
+        self.env.data.qacc[vel_slice]  = 0.0
         mujoco.mj_forward(self.env.model, self.env.data)
 
     def teleport_piece_to_square(self, piece_id: str, square: str) -> None:
@@ -44,7 +44,7 @@ class PieceTeleporter:
 
     def teleport_piece_to_graveyard(self, piece_id: str, slot_id: str) -> None:
         color = self._piece_color(piece_id)
-        xyz = self._slot_xyz(
+        xyz = self._get_slot_xyz(
             self.chess_cfg["graveyards"][color],
             self.chess_cfg["reserves"]["graveyard_slot_spacing_m"],
             slot_id,
@@ -53,7 +53,7 @@ class PieceTeleporter:
 
     def teleport_piece_to_promotion_reserve(self, piece_id: str, slot_id: str) -> None:
         color = self._piece_color(piece_id)
-        xyz = self._slot_xyz(
+        xyz = self._get_slot_xyz(
             self.chess_cfg["promotion_reserve"][color],
             self.chess_cfg["reserves"]["promotion_slot_spacing_m"],
             slot_id,
@@ -69,20 +69,26 @@ class PieceTeleporter:
         raise ValueError(f"Cannot infer color from piece id {piece_id}")
 
     @staticmethod
-    def _slot_index(slot_id: str) -> int:
+    def _parse_slot_index(slot_id: str) -> int:
+        """Parse a slot id like 'slot_3' into its integer index."""
         match = re.fullmatch(r"slot_(\d+)", slot_id)
         if match is None:
             raise ValueError(f"Slot id must be in format 'slot_NN': {slot_id!r}")
         return int(match.group(1))
 
-    def _slot_xyz(self, cfg: dict, spacing: float, slot_id: str) -> np.ndarray:
-        slot = self._slot_index(slot_id)
-        row = slot // cfg["cols"]
-        col = slot % cfg["cols"]
-        if row >= cfg["rows"]:
+    def _get_slot_xyz(self, slot_layout: dict, slot_gap_m: float, slot_id: str) -> np.ndarray:
+        """Return the XYZ position of a slot in a storage area.
+
+        Slots are arranged in a grid (like a matrix). slot_layout defines the number of rows/cols
+        and the origin. slot_gap_m is the distance between adjacent slot centres.
+        """
+        slot = self._parse_slot_index(slot_id)
+        row = slot // slot_layout["cols"]
+        col = slot % slot_layout["cols"]
+        if row >= slot_layout["rows"]:
             raise ValueError(f"Slot {slot_id} is outside configured slot grid")
-        origin = cfg["origin_xyz"]
+        origin = slot_layout["origin_xyz"]
         return np.array(
-            [origin[0] + row * spacing, origin[1] + col * spacing, origin[2]],
+            [origin[0] + row * slot_gap_m, origin[1] + col * slot_gap_m, origin[2]],
             dtype=float,
         )

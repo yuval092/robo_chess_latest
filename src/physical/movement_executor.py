@@ -4,12 +4,11 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 
-import chess
 import numpy as np
 
 from src.chess_game.board_mapper import BoardMapper
 from src.physical.occupancy import PhysicalOccupancy
-from src.physical.piece_teleport import IDENTITY_QUAT, PieceTeleporter
+from src.physical.piece_teleport import PieceTeleporter
 from src.utils.io import load_config
 
 M_TO_MM = 1000.0
@@ -115,6 +114,5 @@ class MovementExecutor:
         """Snap the piece to the exact target square and update occupancy."""
         if dst_square is None:
             return
-        placed_xyz = self.board_mapper.square_to_piece_xyz(chess.parse_square(dst_square))
-        self.teleporter.teleport_piece_to_xyz(piece_id, placed_xyz, quat=IDENTITY_QUAT)
+        self.teleporter.teleport_piece_to_square(piece_id, dst_square)
         self.occupancy.set_piece_square(piece_id, dst_square)
