@@ -1,4 +1,5 @@
-"""Transfer observation configuration for SAC specialist model inference."""
+"""Converts the chess environment's native observation into the 25-D format
+expected by the pretrained FetchPickAndPlace-v4 SAC models."""
 
 from __future__ import annotations
 
