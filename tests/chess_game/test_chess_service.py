@@ -10,7 +10,7 @@ def test_initial_board_fen_is_standard():
 
 def test_legal_move_e2e4_accepted_and_turn_alternates():
     service = ChessService()
-    move = service.validate_uci("e2e4")
+    move = service.parse_uci("e2e4")
     service.push(move)
 
     assert service.side_to_move() == chess.BLACK
@@ -19,12 +19,12 @@ def test_legal_move_e2e4_accepted_and_turn_alternates():
 
 def test_illegal_move_rejected():
     with pytest.raises(IllegalMoveError):
-        ChessService().validate_uci("e2e5")
+        ChessService().parse_uci("e2e5")
 
 
 def test_square_move_validation():
     service = ChessService()
-    move = service.validate_square_move("e2", "e4")
+    move = service.construct_move_from_squares("e2", "e4")
 
     assert move == chess.Move.from_uci("e2e4")
 
@@ -32,7 +32,7 @@ def test_square_move_validation():
 def test_check_and_checkmate_detection_fools_mate():
     service = ChessService()
     for uci in ["f2f3", "e7e5", "g2g4", "d8h4"]:
-        service.push(service.validate_uci(uci))
+        service.push(service.parse_uci(uci))
 
     status = service.status()
     assert status.is_check
@@ -62,8 +62,8 @@ def test_promotion_requires_promotion_piece():
     service = ChessService("4k3/P7/8/8/8/8/8/4K3 w - - 0 1")
 
     with pytest.raises(IllegalMoveError):
-        service.validate_square_move("a7", "a8")
-    assert service.validate_square_move("a7", "a8", "q") == chess.Move.from_uci("a7a8q")
+        service.construct_move_from_squares("a7", "a8")
+    assert service.construct_move_from_squares("a7", "a8", "q") == chess.Move.from_uci("a7a8q")
 
 
 def test_choose_engine_move_returns_legal_move():
@@ -72,15 +72,3 @@ def test_choose_engine_move_returns_legal_move():
     service.close()
 
     assert move in service.board.legal_moves
-
-
-def test_save_and_load_roundtrip(tmp_path):
-    service = ChessService()
-    service.push(service.validate_uci("e2e4"))
-    path = tmp_path / "game.json"
-
-    service.save_to_file(str(path))
-    loaded = ChessService.load_from_file(str(path))
-
-    assert loaded.fen() == service.fen()
-    assert loaded.san_history() == ["e4"]

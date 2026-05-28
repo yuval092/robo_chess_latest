@@ -2,14 +2,12 @@
 
 from __future__ import annotations
 
-import json
 import logging
 import os
 import select
 import subprocess
 import time
 from dataclasses import dataclass
-from pathlib import Path
 from typing import Any
 
 import chess
@@ -131,7 +129,7 @@ class GameStatus:
 class ChessService:
     def __init__(
         self,
-        starting_fen: str | None = None,
+        starting_fen: str | None = None, # is the state of the chess board at the start of the game in a string.
         engine_cfg: dict[str, Any] | None = None,
     ):
         """Initialise the chess service, optionally starting a Stockfish engine.
@@ -142,7 +140,7 @@ class ChessService:
           think_time_s    — seconds per move (default: 0.5)
         """
         self._board = chess.Board(starting_fen) if starting_fen else chess.Board()
-        self._san_history: list[str] = []
+        self._san_history: list[str] = [] # move history in Standard Algebraic Notation (SAN)
         self._engine: UciEngine | None = None
         self._think_time: float = 0.5
         self._logger = logging.getLogger(__name__)
@@ -176,15 +174,16 @@ class ChessService:
         """Return all legal moves as UCI strings."""
         return [move.uci() for move in self._board.legal_moves]
 
-    def validate_uci(self, uci: str) -> chess.Move:
+    def parse_uci(self, uci: str) -> chess.Move:
         """Parse and validate a UCI move string."""
         try:
             move = chess.Move.from_uci(uci)
         except ValueError as exc:
             raise IllegalMoveError(f"Invalid UCI move: {uci}") from exc
-        return self._validate_move(move)
+        self._validate_move(move)
+        return move
 
-    def validate_square_move(
+    def construct_move_from_squares(
         self, src: str, dst: str, promotion: str | None = None
     ) -> chess.Move:
         """Construct and validate a move from source and destination squares."""
@@ -196,11 +195,12 @@ class ChessService:
         move = chess.Move(
             from_square, to_square, promotion=self._parse_promotion(promotion)
         )
-        return self._validate_move(move)
+        self._validate_move(move)
+        return move
 
     def push(self, move: chess.Move) -> None:
         """Commit a validated move to the board."""
-        move = self._validate_move(move)
+        self._validate_move(move)
         self._san_history.append(self._board.san(move))
         self._board.push(move)
 
@@ -258,35 +258,14 @@ class ChessService:
             )
         return self._engine.choose_move(self._board, self._think_time)
 
-    # ── Persistence ───────────────────────────────────────────────────────────
-
-    def save_to_file(self, path: str) -> None:
-        """Save the current game state to JSON."""
-        data = {
-            "fen": self.fen(),
-            "san_history": self.san_history(),
-            "half_move_clock": self._board.halfmove_clock,
-            "full_move_number": self._board.fullmove_number,
-        }
-        Path(path).write_text(json.dumps(data, indent=2, sort_keys=True))
-
-    @classmethod
-    def load_from_file(cls, path: str) -> ChessService:
-        """Load a game state from JSON."""
-        data = json.loads(Path(path).read_text())
-        service = cls(data["fen"])
-        service._san_history = list(data.get("san_history", []))
-        return service
-
     # ── Internal helpers ──────────────────────────────────────────────────────
 
-    def _validate_move(self, move: chess.Move) -> chess.Move:
+    def _validate_move(self, move: chess.Move) -> None:
         """Raise IllegalMoveError if the move is not legal in the current position."""
         if move not in self._board.legal_moves:
             raise IllegalMoveError(
                 f"Illegal move {move.uci()} for position {self._board.fen()}"
             )
-        return move
 
     @staticmethod
     def _parse_promotion(promotion: str | None) -> int | None:

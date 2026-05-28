@@ -199,7 +199,7 @@ def run_flow(
     occupancy_piece_ids = set(PieceRegistry().starting_square_map())
     for index, uci in enumerate(moves, start=1):
         fen_before = service.fen()
-        move = service.validate_uci(uci)
+        move = service.parse_uci(uci)
         plan = MovePlanner(service.board, tracker).plan(move)
         before_positions = {}
         if env is not None:
@@ -221,7 +221,7 @@ def run_flow(
             )
 
         service.push(move)
-        tracker.apply_committed_move(move, plan)
+        tracker.apply_plan(plan)
         assert_tracker_matches_board(service.board, tracker)
         if verify_agreement and occupancy is not None:
             assert_occupancy_matches_tracker(occupancy, tracker)

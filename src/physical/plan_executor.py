@@ -121,5 +121,3 @@ class PhysicalPlanExecutor:
         self.env.clear_active_piece()
         self.occupancy.reset(starting_square_map)
 
-    def reset_occupancy(self) -> None:
-        self.reset_board_state()

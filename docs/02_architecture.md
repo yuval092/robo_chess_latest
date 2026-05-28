@@ -47,7 +47,7 @@ For a normal move such as `e2e4`:
 2. Flask route calls `QueuedUIBackend.submit_human_move()`.
 3. The request is queued and blocks until the main thread processes it.
 4. `GameOrchestrator.submit_human_move()` verifies turn ownership.
-5. `ChessService.validate_square_move()` verifies legality against
+5. `ChessService.construct_move_from_squares()` verifies legality against
    `python-chess`.
 6. `MovePlanner.plan()` creates a `PhysicalPlan`.
 7. `PhysicalPlanExecutor.execute()` dispatches commands.

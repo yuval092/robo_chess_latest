@@ -26,6 +26,9 @@ class FakePhysicalExecutor:
     def return_to_home(self):
         return FakePhysicalResult(True)
 
+    def reset_board_state(self):
+        pass
+
 
 _ENGINE_CFG = {"stockfish_path": "stockfish", "skill_level": 1}
 

@@ -4,18 +4,7 @@ import threading
 from src.ui.queued_backend import QueuedUIBackend
 
 
-class FakePhysicalExecutor:
-    def __init__(self):
-        self.reset_count = 0
-
-    def reset_occupancy(self):
-        self.reset_count += 1
-
-
 class FakeOrchestrator:
-    def __init__(self):
-        self.physical_executor = FakePhysicalExecutor()
-
     def snapshot(self):
         return "initial"
 
@@ -31,7 +20,7 @@ class FakeEnv:
         self.reset_count += 1
 
 
-def test_new_game_request_resets_env_and_physical_occupancy():
+def test_new_game_request_resets_env():
     orchestrator = FakeOrchestrator()
     backend = QueuedUIBackend(orchestrator)
     env = FakeEnv()
@@ -44,5 +33,4 @@ def test_new_game_request_resets_env_and_physical_occupancy():
 
     assert result_queue.get_nowait() == "new"
     assert env.reset_count == 1
-    assert orchestrator.physical_executor.reset_count == 1
     assert backend.snapshot() == "new"

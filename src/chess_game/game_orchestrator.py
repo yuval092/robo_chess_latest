@@ -8,6 +8,7 @@ import chess
 
 from src.chess_game.chess_service import ChessService, GameStatus, IllegalMoveError
 from src.chess_game.move_planner import LogicalPieceTracker, MovePlanner
+from src.physical.plan_executor import PhysicalPlanExecutor
 from src.utils.io import load_config
 
 
@@ -40,7 +41,7 @@ class GameOrchestrator:
     def __init__(
         self,
         chess_service: ChessService,
-        physical_executor,
+        physical_executor: PhysicalPlanExecutor,
         piece_tracker: LogicalPieceTracker,
         *,
         human_color: str | None = None,
@@ -70,6 +71,7 @@ class GameOrchestrator:
         self.chess_service.close()
         self.chess_service = ChessService(engine_cfg=self._engine_cfg)
         self.piece_tracker = LogicalPieceTracker()
+        self.physical_executor.reset_board_state()
         self.error = None
         self.last_move = None
         return self.snapshot()
@@ -100,7 +102,7 @@ class GameOrchestrator:
         if self.human_color != "both" and self._turn_color_name() != self.human_color:
             return self._rejected("It is not the human side's turn.")
         result = self._submit_move(
-            lambda: self.chess_service.validate_square_move(src, dst, promotion)
+            lambda: self.chess_service.construct_move_from_squares(src, dst, promotion)
         )
         if (
             result.accepted
@@ -150,26 +152,18 @@ class GameOrchestrator:
                     True, False, move.uci(), physical_result.error, self.snapshot()
                 )
             home_result = self.physical_executor.return_to_home()
-            home_failed = not home_result.success
-            if home_failed:
-                self.error = home_result.error
+            self.error = None if home_result.success else home_result.error
             self.chess_service.push(move)
-            self.piece_tracker.apply_committed_move(move, plan)
+            self.piece_tracker.apply_plan(plan)
             self.last_move = move.uci()
-            if home_failed:
-                # Home failure is a non-fatal warning; keep it as the current error.
-                pass
-            else:
-                self.error = None
-            self.is_busy = False
-            return MoveExecutionResult(
-                True, True, move.uci(), self.error, self.snapshot()
-            )
         except Exception as exc:
             self.error = f"INTERNAL_ERROR: {exc}"
             raise
         finally:
             self.is_busy = False
+        return MoveExecutionResult(
+                True, True, move.uci(), self.error, self.snapshot()
+            )
 
     def _rejected(self, error: str) -> MoveExecutionResult:
         """Return a rejected move result with a snapshot."""

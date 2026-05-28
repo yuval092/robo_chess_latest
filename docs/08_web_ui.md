@@ -84,7 +84,6 @@ backend.process_one(env=env, timeout=0.05)
 For `new_game`, `process_one()` first resets MuJoCo and physical board state:
 
 1. `env.reset()`
-2. `physical_executor.reset_board_state()` or `reset_occupancy()`
 3. `orchestrator.new_game()`
 
 Then it updates the cached snapshot.

@@ -69,14 +69,12 @@ Important methods:
 
 | Method | Purpose |
 |---|---|
-| `validate_uci(uci)` | Parse and validate UCI string |
-| `validate_square_move(src, dst, promotion)` | Build and validate from square names |
+| `parse_uci(uci)` | Parse and validate UCI string |
+| `construct_move_from_squares(src, dst, promotion)` | Build and validate from square names |
 | `push(move)` | Revalidate, record SAN, and push to board |
 | `pop()` | Undo latest move and SAN entry |
 | `legal_moves()` | Return UCI strings |
 | `choose_engine_move()` | Ask the configured UCI engine for a legal move |
-| `save_to_file(path)` | Save FEN and SAN history JSON |
-| `load_from_file(path)` | Restore a service from JSON |
 | `close()` | Shut down the engine process |
 
 Invalid moves raise `IllegalMoveError`.
@@ -148,7 +146,7 @@ starts:
 1. `physical_executor.execute(plan)` must succeed.
 2. `physical_executor.return_to_home()` runs.
 3. `chess_service.push(move)` commits the legal board.
-4. `piece_tracker.apply_committed_move(move, plan)` commits logical piece IDs.
+4. `piece_tracker.apply_committed_move(plan)` commits logical piece IDs.
 5. `last_move` and `error` are updated.
 
 If physical execution fails, the chess board is left unchanged and the move is

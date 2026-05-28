@@ -29,6 +29,9 @@ class FakePhysicalExecutor:
         self.home_calls += 1
         return FakePhysicalResult(True)
 
+    def reset_board_state(self):
+        pass
+
 
 def make_orchestrator(executor=None, *, auto=False, human_color="white", service=None):
     return GameOrchestrator(
