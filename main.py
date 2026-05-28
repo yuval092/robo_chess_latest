@@ -2,6 +2,11 @@
 
 from __future__ import annotations
 
+# Must import before gym.make to avoid a CUDA init conflict between MuJoCo's
+# OpenGL context and triton (imported lazily by torch._dynamo on first optimizer use).
+# noqa: F401 to avoid "imported but unused" lint error since we don't directly reference this module.
+import torch._dynamo  # noqa: F401
+
 import argparse
 import sys
 import threading
@@ -25,23 +30,10 @@ from src.ui.queued_backend import QueuedUIBackend
 from src.utils.io import load_config, resolve_model_paths
 
 
-def model_overrides_from_args(args: argparse.Namespace) -> dict[str, str]:
-    return {
-        stage: path
-        for stage, path in {
-            "transit": args.transit_model,
-            "descend": args.descend_model,
-            "ascend": args.ascend_model,
-        }.items()
-        if path
-    }
-
-
 def add_model_path_args(parser: argparse.ArgumentParser) -> None:
     parser.add_argument("--transit-model", metavar="PATH", help="Transit model ZIP override.")
     parser.add_argument("--descend-model", metavar="PATH", help="Descend model ZIP override.")
     parser.add_argument("--ascend-model", metavar="PATH", help="Ascend model ZIP override.")
-
 
 def build_controller(
     env,
@@ -51,17 +43,11 @@ def build_controller(
     descend_model: str | None,
     ascend_model: str | None,
 ) -> ModelEmbeddedController:
-    model_paths = resolve_model_paths(
-        {
-            stage: path
-            for stage, path in {
-                "transit": transit_model,
-                "descend": descend_model,
-                "ascend": ascend_model,
-            }.items()
-            if path
-        }
-    )
+    model_paths = resolve_model_paths({
+        "transit": transit_model,
+        "descend": descend_model,
+        "ascend": ascend_model,
+    })
     controller = ModelEmbeddedController(
         env=env,
         render_fn=env.render if visualize else None,
@@ -116,14 +102,13 @@ def run_play(args: argparse.Namespace) -> int:
         debug=args.debug,
     )
     env.reset()
-    overrides = model_overrides_from_args(args)
     orchestrator = build_orchestrator(
         env,
         args.visualize,
         args.delay,
-        transit_model=overrides.get("transit"),
-        descend_model=overrides.get("descend"),
-        ascend_model=overrides.get("ascend"),
+        transit_model=args.transit_model,
+        descend_model=args.descend_model,
+        ascend_model=args.ascend_model,
     )
     backend = QueuedUIBackend(orchestrator)
     app = create_app(backend)
@@ -162,9 +147,9 @@ def build_parser() -> argparse.ArgumentParser:
         "--no-visualize",
         dest="visualize",
         action="store_false",
+        default=True,
         help="Run play mode without the MuJoCo viewer.",
     )
-    parser.set_defaults(visualize=True)
     parser.add_argument("--delay", type=float, default=0.0, help="Per-step render delay.")
     parser.add_argument("--debug", action="store_true", help="Enable verbose environment logs.")
     add_model_path_args(parser)
