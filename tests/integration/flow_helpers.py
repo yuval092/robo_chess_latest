@@ -40,7 +40,7 @@ def piece_position(env, piece_id: str) -> np.ndarray:
 
 def touched_piece_ids(plan) -> set[str]:
     touched = set()
-    for command in plan.commands:
+    for command in plan:
         if isinstance(command, ArmMoveCommand):
             touched.add(command.piece_id)
         elif isinstance(command, RemoveFromBoardCommand):
@@ -157,7 +157,7 @@ def print_failure_context(env, fen_before: str, uci: str, plan, result) -> None:
     print(f"  fen_before={fen_before}")
     print(f"  attempted_uci={uci}")
     print("  physical_plan:")
-    for command in plan.commands:
+    for command in plan:
         print(f"    - {command_signature(command)}")
     print(f"  physical_error={result.error}")
     for command, command_result in result.command_results:
@@ -231,7 +231,7 @@ def run_flow(
             assert_nonmoving_displacement(
                 env, before_positions, touched_piece_ids(plan), tolerance_mm
             )
-        for command in plan.commands:
+        for command in plan:
             if isinstance(command, RemoveFromBoardCommand):
                 occupancy_piece_ids.discard(command.piece_id)
         print(f"move {index}: {uci} ok fen={service.fen()}")

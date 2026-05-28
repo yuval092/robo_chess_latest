@@ -29,12 +29,6 @@ class RemoveFromBoardCommand:
     graveyard_slot: str
 
 
-@dataclass(frozen=True)
-class PhysicalPlan:
-    chess_move_uci: str
-    commands: list
-
-
 class LogicalPieceTracker:
     """Tracks stable physical piece ids against logical chess squares."""
 
@@ -117,9 +111,9 @@ class LogicalPieceTracker:
         )
         return f"slot_{promoted_out:02d}"
 
-    def apply_committed_move(self, move: chess.Move, plan: PhysicalPlan) -> None:
+    def apply_committed_move(self, move: chess.Move, plan: list) -> None:
         """Apply a committed physical plan to logical occupancy."""
-        for command in plan.commands:
+        for command in plan:
             if isinstance(command, RemoveFromBoardCommand):
                 self._remove_piece(command.piece_id)
             elif isinstance(command, ArmMoveCommand):
@@ -165,7 +159,7 @@ class MovePlanner:
         self.board = board
         self.tracker = tracker
 
-    def plan(self, move: chess.Move) -> PhysicalPlan:
+    def plan(self, move: chess.Move) -> list:
         """Translate a chess move into a physical plan."""
         if move not in self.board.legal_moves:
             raise ValueError(f"Cannot plan illegal move {move.uci()}")
@@ -180,7 +174,7 @@ class MovePlanner:
 
         if self.board.is_castling(move):
             commands.extend(self._castle_commands(move, moving_piece_id, src, dst))
-            return PhysicalPlan(move.uci(), commands)
+            return commands
 
         captured_piece_id = self._captured_piece_id(move)
         if captured_piece_id is not None:
@@ -208,7 +202,7 @@ class MovePlanner:
             )
             commands.append(TeleportCommand(promoted_piece_id, "square", dst))
 
-        return PhysicalPlan(move.uci(), commands)
+        return commands
 
     def _castle_commands(
         self, move: chess.Move, king_id: str, king_src: str, king_dst: str

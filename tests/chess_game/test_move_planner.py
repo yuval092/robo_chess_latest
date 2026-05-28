@@ -21,7 +21,7 @@ def test_normal_move_emits_one_arm_command():
 
     plan = planner_for(board, tracker).plan(move)
 
-    assert plan.commands == [ArmMoveCommand("white_pawn_e", "e2", "e4")]
+    assert plan == [ArmMoveCommand("white_pawn_e", "e2", "e4")]
     assert board.fen() == chess.STARTING_FEN
 
 
@@ -33,7 +33,7 @@ def test_capture_emits_remove_then_arm():
 
     plan = planner_for(board, tracker).plan(chess.Move.from_uci("e4d5"))
 
-    assert plan.commands == [
+    assert plan == [
         RemoveFromBoardCommand("black_pawn_d", "slot_00"),
         ArmMoveCommand("white_pawn_e", "e4", "d5"),
     ]
@@ -47,7 +47,7 @@ def test_castling_emits_king_then_rook_arm_moves():
 
     plan = planner_for(board, tracker).plan(chess.Move.from_uci("e1g1"))
 
-    assert plan.commands == [
+    assert plan == [
         ArmMoveCommand("white_king", "e1", "g1"),
         ArmMoveCommand("white_rook_h", "h1", "f1"),
     ]
@@ -61,7 +61,7 @@ def test_en_passant_removes_passed_over_pawn():
 
     plan = planner_for(board, tracker).plan(chess.Move.from_uci("e5d6"))
 
-    assert plan.commands == [
+    assert plan == [
         RemoveFromBoardCommand("black_pawn_d", "slot_00"),
         ArmMoveCommand("white_pawn_e", "e5", "d6"),
     ]
@@ -74,7 +74,7 @@ def test_promotion_emits_arm_and_two_teleports():
 
     plan = planner_for(board, tracker).plan(chess.Move.from_uci("a7a8q"))
 
-    assert plan.commands == [
+    assert plan == [
         ArmMoveCommand("white_pawn_a", "a7", "a8"),
         TeleportCommand("white_pawn_a", "promotion_reserve", "slot_00"),
         TeleportCommand("white_reserve_queen_1", "square", "a8"),
@@ -89,7 +89,7 @@ def test_capture_promotion_removes_capture_first():
 
     plan = planner_for(board, tracker).plan(chess.Move.from_uci("a7b8q"))
 
-    assert plan.commands == [
+    assert plan == [
         RemoveFromBoardCommand("black_rook_b", "slot_00"),
         ArmMoveCommand("white_pawn_a", "a7", "b8"),
         TeleportCommand("white_pawn_a", "promotion_reserve", "slot_00"),
@@ -112,7 +112,7 @@ def test_planner_never_emits_arm_commands_to_off_board_locations():
 
     plan = MovePlanner(board, tracker).plan(chess.Move.from_uci("a7b8q"))
 
-    for command in plan.commands:
+    for command in plan:
         if isinstance(command, ArmMoveCommand):
             assert command.src_square in chess.SQUARE_NAMES
             assert command.dst_square in chess.SQUARE_NAMES

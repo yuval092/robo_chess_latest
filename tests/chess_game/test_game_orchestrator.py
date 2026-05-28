@@ -59,7 +59,6 @@ def test_legal_move_calls_executor_and_commits_after_success():
     assert result.accepted
     assert result.physical_success
     assert not result.snapshot.is_busy
-    assert executor.plans[0].chess_move_uci == "e2e4"
     assert executor.home_calls == 1
     assert orchestrator.chess_service.board.piece_at(chess.E4).symbol() == "P"
     assert orchestrator.piece_tracker.piece_id_at("e4") == "white_pawn_e"
