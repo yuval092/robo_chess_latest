@@ -3,7 +3,6 @@
 import contextlib
 import io
 import time
-from collections.abc import Callable
 from dataclasses import dataclass
 
 import numpy as np
@@ -44,12 +43,10 @@ class ModelEmbeddedController:
     def __init__(
         self,
         env,
-        render_fn: Callable | None = None,
         render_delay: float = 0.0,
     ):
         self._wrapped_env = env
         self._env = unwrap_env(env)
-        self._render_fn = render_fn
         self._render_delay = render_delay
         self._max_steps = self._env.env_cfg["rl_max_steps_per_stage"]
         self._models: dict[str, SAC | None] = {stage: None for stage in KNOWN_STAGES}
@@ -245,7 +242,7 @@ class ModelEmbeddedController:
 
 
     def _execute_step(self, stage: str, model: SAC) -> None:
-        """Predict an action, apply it to the environment, and render if needed."""
+        """Predict an action, apply it to the environment."""
         env = self._env
         obs = env._get_obs()
         action, _ = model.predict(obs, deterministic=True)
@@ -259,10 +256,8 @@ class ModelEmbeddedController:
             env.data.mocap_quat[0][:] = env.VERTICAL_QUAT
         env._mujoco_step(action)
 
-        if self._render_fn is not None:
-            self._render_fn()
-            if self._render_delay > 0:
-                time.sleep(self._render_delay)
+        if self._render_delay > 0:
+            time.sleep(self._render_delay)
 
     def _run_inference_loop(
         self, stage: str, target_pos: np.ndarray, model: SAC

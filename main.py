@@ -45,7 +45,6 @@ def build_controller(
     })
     controller = ModelEmbeddedController(
         env=env,
-        render_fn=env.render if visualize else None,
         render_delay=delay,
     )
     controller.load_all(
