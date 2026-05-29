@@ -43,7 +43,7 @@ def make_controller(env):
 
 def test_real_physical_single_turn_commits_after_success():
     env = gym.make(
-        "ChessFetchTask-v0",
+        "ChessFetchTask-Play-v0",
         render_mode=None,
         show_chess_pieces=True,
         hide_object=True,
@@ -74,7 +74,7 @@ def test_real_physical_single_turn_commits_after_success():
 
 def test_edge_pawn_move_after_prior_home_returns_does_not_timeout():
     env = gym.make(
-        "ChessFetchTask-v0",
+        "ChessFetchTask-Play-v0",
         render_mode=None,
         show_chess_pieces=True,
         hide_object=True,

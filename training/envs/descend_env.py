@@ -1,7 +1,7 @@
 """Training wrapper for the descend specialist policy."""
 import gymnasium as gym
 
-from src.chess_env.transfer_obs import TRANSFER_OBS_SPACE
+from src.chess_env.base_env import TRANSFER_OBS_SPACE
 
 
 class DescendTrainEnv(gym.Wrapper):

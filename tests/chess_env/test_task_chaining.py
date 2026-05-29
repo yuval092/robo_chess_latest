@@ -2,11 +2,13 @@ import gymnasium as gym
 import numpy as np
 import pytest
 
-from src.chess_env.waypoints import SAFE_Z
+from src.utils.io import load_config
+
+SAFE_Z = load_config("env")["safe_z"]
 
 
 def test_transition_validate():
-    env = gym.make("ChessFetchTask-v0", render_mode=None)
+    env = gym.make("ChessFetchTask-Play-v0", render_mode=None)
     env.reset()
     diag = env.unwrapped.transition_validate()
     assert "grip_speed_mm_s" in diag
@@ -22,7 +24,7 @@ def test_transition_validate():
 
 
 def test_soft_reset_flow():
-    env = gym.make("ChessFetchTask-v0", render_mode=None)
+    env = gym.make("ChessFetchTask-Play-v0", render_mode=None)
     env.reset()
 
     # Simulate a success state
@@ -51,7 +53,7 @@ def test_soft_reset_flow():
 
 
 def test_soft_reset_finger_validation():
-    env = gym.make("ChessFetchTask-v0", render_mode=None)
+    env = gym.make("ChessFetchTask-Play-v0", render_mode=None)
     env.reset()
     uw = env.unwrapped
 

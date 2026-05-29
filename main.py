@@ -14,7 +14,7 @@ import time
 
 import gymnasium as gym
 
-import src.chess_env  # noqa: F401 - registers ChessFetchTask-v0
+import src.chess_env  # noqa: F401 - registers chess Train/Play envs
 from src.chess_env.model_controller import ModelEmbeddedController
 from src.chess_game.chess_service import ChessService
 from src.chess_game.game_orchestrator import GameOrchestrator
@@ -79,11 +79,9 @@ def build_orchestrator(
 
 def run_game(args: argparse.Namespace) -> int:
     env = gym.make(
-        "ChessFetchTask-v0",
+        "ChessFetchTask-Play-v0",
         render_mode="human" if args.visualize else None,
         show_chess_pieces=True,
-        hide_object=True,
-        force_scenario="transit",
         debug=args.debug,
     )
     env.reset()

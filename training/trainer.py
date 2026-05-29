@@ -7,7 +7,7 @@ from stable_baselines3 import SAC
 from stable_baselines3.common.callbacks import CallbackList
 from stable_baselines3.common.vec_env import DummyVecEnv, SubprocVecEnv
 
-import src.chess_env  # noqa: F401 - register ChessFetchTask-v0
+import src.chess_env  # noqa: F401 - register chess Train/Play envs
 from src.utils.io import load_config
 from training.callbacks import DetailedLoggingCallback, SuccessRateEvalCallback
 from training.envs import make_eval_env, make_train_env

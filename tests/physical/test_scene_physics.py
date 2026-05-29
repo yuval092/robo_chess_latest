@@ -3,7 +3,7 @@ import gymnasium as gym
 import mujoco
 import numpy as np
 
-import src.chess_env  # noqa: F401 - registers ChessFetchTask-v0
+import src.chess_env  # noqa: F401 - registers chess Train/Play envs
 from src.chess_game.board_mapper import BoardMapper
 from src.physical.piece_registry import PieceRegistry, reserve_piece_ids
 from src.utils.io import load_config
@@ -24,7 +24,7 @@ def _qpos_xyz(uw, joint_name):
 
 
 def test_table_surface_geometry_and_legs() -> None:
-    env = gym.make("ChessFetchTask-v0", render_mode=None)
+    env = gym.make("ChessFetchTask-Play-v0", render_mode=None)
     try:
         model = env.unwrapped.model
         cfg = load_config("env")
@@ -52,7 +52,7 @@ def test_table_surface_geometry_and_legs() -> None:
 
 
 def test_board_visual_geoms_match_board_mapper() -> None:
-    env = gym.make("ChessFetchTask-v0", render_mode=None)
+    env = gym.make("ChessFetchTask-Play-v0", render_mode=None)
     try:
         model = env.unwrapped.model
         mapper = BoardMapper.from_configs()
@@ -81,7 +81,7 @@ def test_board_visual_geoms_match_board_mapper() -> None:
 
 
 def test_zone_geoms_are_world_space_visual_only_and_aligned() -> None:
-    env = gym.make("ChessFetchTask-v0", render_mode=None)
+    env = gym.make("ChessFetchTask-Play-v0", render_mode=None)
     try:
         model = env.unwrapped.model
         cfg = load_config("chess")
@@ -124,7 +124,7 @@ def test_zone_geoms_are_world_space_visual_only_and_aligned() -> None:
 
 
 def test_object0_static_stability() -> None:
-    env = gym.make("ChessFetchTask-v0", render_mode=None, force_scenario="transit")
+    env = gym.make("ChessFetchTask-Play-v0", render_mode=None, force_scenario="transit")
     try:
         env.reset()
         joint_id = env.unwrapped.model.joint("object0:joint").id
@@ -141,7 +141,7 @@ def test_object0_static_stability() -> None:
 
 
 def test_all_board_squares_are_kinematically_reachable() -> None:
-    env = gym.make("ChessFetchTask-v0", render_mode=None)
+    env = gym.make("ChessFetchTask-Play-v0", render_mode=None)
     try:
         env.reset()
         cfg = load_config("env")
@@ -165,7 +165,7 @@ def test_all_board_squares_are_kinematically_reachable() -> None:
 
 
 def test_grasp_xml_parameters() -> None:
-    env = gym.make("ChessFetchTask-v0", render_mode=None)
+    env = gym.make("ChessFetchTask-Play-v0", render_mode=None)
     try:
         model = env.unwrapped.model
         cube_body_id = _body_id(model, "object0")
@@ -184,7 +184,7 @@ def test_grasp_xml_parameters() -> None:
 
 
 def test_hidden_object_teleport_verification() -> None:
-    env = gym.make("ChessFetchTask-v0", render_mode=None, hide_object=True)
+    env = gym.make("ChessFetchTask-Play-v0", render_mode=None, hide_object=True)
     try:
         env.reset()
         joint_id = env.unwrapped.model.joint("object0:joint").id
@@ -197,7 +197,7 @@ def test_hidden_object_teleport_verification() -> None:
 
 
 def test_all_active_and_reserve_piece_bodies_exist() -> None:
-    env = gym.make("ChessFetchTask-v0", render_mode=None, show_chess_pieces=True)
+    env = gym.make("ChessFetchTask-Play-v0", render_mode=None, show_chess_pieces=True)
     try:
         env.reset()
         model = env.unwrapped.model
@@ -219,7 +219,7 @@ def test_all_active_and_reserve_piece_bodies_exist() -> None:
 
 
 def test_piece_joint_cube_and_visual_properties() -> None:
-    env = gym.make("ChessFetchTask-v0", render_mode=None, show_chess_pieces=True)
+    env = gym.make("ChessFetchTask-Play-v0", render_mode=None, show_chess_pieces=True)
     try:
         env.reset()
         model = env.unwrapped.model
@@ -245,7 +245,7 @@ def test_piece_joint_cube_and_visual_properties() -> None:
 
 
 def test_each_piece_type_uses_correct_mesh() -> None:
-    env = gym.make("ChessFetchTask-v0", render_mode=None, show_chess_pieces=True)
+    env = gym.make("ChessFetchTask-Play-v0", render_mode=None, show_chess_pieces=True)
     try:
         env.reset()
         model = env.unwrapped.model
@@ -274,7 +274,7 @@ def test_each_piece_type_uses_correct_mesh() -> None:
 
 
 def test_show_chess_pieces_reset_places_active_pieces_on_starting_squares() -> None:
-    env = gym.make("ChessFetchTask-v0", render_mode=None, show_chess_pieces=True)
+    env = gym.make("ChessFetchTask-Play-v0", render_mode=None, show_chess_pieces=True)
     try:
         env.reset()
         uw = env.unwrapped
@@ -292,7 +292,7 @@ def test_show_chess_pieces_reset_places_active_pieces_on_starting_squares() -> N
 
 
 def test_default_reset_hides_active_pieces_for_legacy_object0_evaluations() -> None:
-    env = gym.make("ChessFetchTask-v0", render_mode=None)
+    env = gym.make("ChessFetchTask-Play-v0", render_mode=None)
     try:
         env.reset()
         uw = env.unwrapped

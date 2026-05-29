@@ -2,7 +2,7 @@
 import gymnasium as gym
 from stable_baselines3.common.monitor import Monitor
 
-import src.chess_env  # noqa: F401 - register ChessFetchTask-v0
+import src.chess_env  # noqa: F401 - register chess Train/Play envs
 from training.envs.ascend_env import AscendTrainEnv
 from training.envs.descend_env import DescendTrainEnv
 from training.envs.transit_env import TransitTrainEnv
@@ -24,7 +24,7 @@ def make_train_env(
     def _init():
         """Create and return a monitored wrapped environment."""
         base = gym.make(
-            "ChessFetchTask-v0",
+            "ChessFetchTask-Train-v0",
             force_scenario=stage,
             drift_curriculum_steps=drift_curriculum_steps,
             debug=debug,
@@ -41,7 +41,7 @@ def make_eval_env(stage: str, eval_drift_limit: float = 0.005, debug: bool = Fal
     def _init():
         """Create and return a monitored wrapped environment."""
         base = gym.make(
-            "ChessFetchTask-v0",
+            "ChessFetchTask-Train-v0",
             force_scenario=stage,
             force_drift_limit=eval_drift_limit,
             debug=debug,

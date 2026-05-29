@@ -42,7 +42,7 @@ def make_executor(env, registry):
 )
 def test_move_piece_in_crowded_starting_position(piece_id, src, dst, dst_square):
     env = gym.make(
-        "ChessFetchTask-v0",
+        "ChessFetchTask-Play-v0",
         render_mode=None,
         show_chess_pieces=True,
         hide_object=True,
@@ -75,7 +75,7 @@ def test_move_piece_in_crowded_starting_position(piece_id, src, dst, dst_square)
 
 def test_move_rejects_empty_source_and_occupied_destination_before_motion():
     env = gym.make(
-        "ChessFetchTask-v0",
+        "ChessFetchTask-Play-v0",
         render_mode=None,
         show_chess_pieces=True,
         hide_object=True,

@@ -9,7 +9,7 @@ import gymnasium as gym
 import numpy as np
 from tqdm import tqdm
 
-import src.chess_env  # noqa: F401 - registers ChessFetchTask-v0
+import src.chess_env  # noqa: F401 - registers chess Train/Play envs
 from src.chess_env.model_controller import ModelEmbeddedController
 from src.physical.occupancy import PhysicalOccupancy
 from src.physical.piece_registry import PieceRegistry
@@ -47,7 +47,7 @@ class FlowResult:
 
 def _make_flow_env(debug: bool, visualize: bool) -> gym.Env:
     return gym.make(
-        "ChessFetchTask-v0",
+        "ChessFetchTask-Play-v0",
         render_mode="human" if visualize else None,
         show_chess_pieces=True,
         hide_object=True,

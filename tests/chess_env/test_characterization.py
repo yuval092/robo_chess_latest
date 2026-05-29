@@ -15,10 +15,10 @@ from src.chess_game.board_mapper import BoardMapper
 
 
 def test_pick_and_place_xml_loads_in_mujoco() -> None:
-    """Construct the ChessFetchTask-v0 MuJoCo env without XML load errors."""
+    """Construct the chess Play MuJoCo env without XML load errors."""
     import src.chess_env  # noqa: F401
 
-    env = gym.make("ChessFetchTask-v0", render_mode=None)
+    env = gym.make("ChessFetchTask-Play-v0", render_mode=None)
     env.close()
 
 
@@ -35,7 +35,7 @@ def test_model_load_restores_observation_space_after_success_and_failure(
 
     monkeypatch.setattr(SAC, "load", fake_load)
 
-    env = gym.make("ChessFetchTask-v0", render_mode=None)
+    env = gym.make("ChessFetchTask-Play-v0", render_mode=None)
     unwrapped = env.unwrapped
     wrapped_space = env.observation_space
     unwrapped_space = unwrapped.observation_space

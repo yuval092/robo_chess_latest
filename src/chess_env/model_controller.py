@@ -9,8 +9,8 @@ from dataclasses import dataclass
 import numpy as np
 from stable_baselines3 import SAC
 
+from src.chess_env.base_env import transfer_obs_enabled
 from src.chess_env.simulation import reset_elapsed_steps, unwrap_env
-from src.chess_env.transfer_obs import transfer_obs_enabled
 
 M_TO_MM = 1000.0
 GRIPPER_CLOSED = -1.0

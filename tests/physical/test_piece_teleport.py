@@ -15,7 +15,7 @@ def piece_xyz(uw, piece_id):
 
 
 def test_set_active_piece_routes_cube_position_to_selected_piece():
-    env = gym.make("ChessFetchTask-v0", render_mode=None, show_chess_pieces=True)
+    env = gym.make("ChessFetchTask-Play-v0", render_mode=None, show_chess_pieces=True)
     env.reset()
     uw = env.unwrapped
 
@@ -26,7 +26,7 @@ def test_set_active_piece_routes_cube_position_to_selected_piece():
 
 
 def test_teleport_piece_to_square_sets_pose_and_zeroes_velocity():
-    env = gym.make("ChessFetchTask-v0", render_mode=None, show_chess_pieces=True)
+    env = gym.make("ChessFetchTask-Play-v0", render_mode=None, show_chess_pieces=True)
     env.reset()
     uw = env.unwrapped
     mapper = BoardMapper.from_configs()
@@ -45,7 +45,7 @@ def test_teleport_piece_to_square_sets_pose_and_zeroes_velocity():
 
 
 def test_teleport_piece_to_graveyard_slot():
-    env = gym.make("ChessFetchTask-v0", render_mode=None, show_chess_pieces=True)
+    env = gym.make("ChessFetchTask-Play-v0", render_mode=None, show_chess_pieces=True)
     env.reset()
     teleporter = PieceTeleporter(env)
 
