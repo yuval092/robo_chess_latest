@@ -2,22 +2,9 @@ board:
   cell_size_m: 0.08                 # Physical width of one chess square in metres
   board_size: 8                     # Number of squares along one edge (standard 8x8)
   center_xy: [0.88, 0.2641]         # World XY coordinate of the board centre
-  validation:
-    required_cell_size_m: 0.08      # Asserted to equal cell_size_m; catches accidental drift
-    required_board_width_m: 0.64    # Asserted to equal board_size * cell_size_m
-    required_table_margin_m: 0.03   # Minimum board-edge-to-table-edge clearance asserted on startup
-    geometry_tolerance_m: 1.0e-9    # Floating-point tolerance for geometry assertions
-
-reachability_expected:              # Expected world extents; validated in tests to confirm arm reach
-  rank1_y_m: -0.0159
-  rank8_y_m: 0.5441
-  file_a_x_m: 0.600
-  file_h_x_m: 1.160
-  geometry_tolerance_m: 1.0e-9
 
 pieces:
   cube_height_m: 0.030              # Full height of the collision cube; piece centre rests at table_z + 0.015
-  freejoint_damping: 8.0            # MuJoCo freejoint damping value applied to every chess piece body
 
 reserves:
   graveyard_slot_spacing_m: 0.045   # Centre-to-centre spacing between slots in the graveyard grid

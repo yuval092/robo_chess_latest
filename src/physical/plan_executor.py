@@ -7,6 +7,8 @@ from dataclasses import dataclass
 
 import numpy as np
 
+from src.chess_env.model_controller import ModelEmbeddedController
+from src.chess_game.board_mapper import BoardMapper
 from src.chess_game.move_planner import (
     ArmMoveCommand,
     RemoveFromBoardCommand,
@@ -27,19 +29,15 @@ class PhysicalExecutionResult:
 
 
 class PhysicalPlanExecutor:
-    def __init__(
-        self,
-        movement_executor: MovementExecutor,
-        piece_teleporter: PieceTeleporter,
-        occupancy: PhysicalOccupancy,
-        controller=None,
-        env=None,
-    ):
-        self.movement_executor = movement_executor
-        self.piece_teleporter = piece_teleporter
-        self.occupancy = occupancy
-        self.controller = controller
+    def __init__(self, env, controller: ModelEmbeddedController, occupancy: PhysicalOccupancy | None = None):
         self.env = env.unwrapped if hasattr(env, "unwrapped") else env
+        self.controller = controller
+        board_mapper = BoardMapper.from_configs()
+        self.occupancy = occupancy or PhysicalOccupancy(PieceRegistry().starting_square_map())
+        self.piece_teleporter = PieceTeleporter(env, board_mapper)
+        self.movement_executor = MovementExecutor(
+            env, controller, board_mapper, self.occupancy, self.piece_teleporter
+        )
         self._handlers: dict[type, Callable] = {
             RemoveFromBoardCommand: self._handle_remove,
             ArmMoveCommand: self._handle_arm_move,
@@ -98,8 +96,6 @@ class PhysicalPlanExecutor:
         self.occupancy.set_piece_square(command.piece_id, new_square)
 
     def return_to_home(self) -> PhysicalExecutionResult:
-        if self.controller is None or self.env is None:
-            return PhysicalExecutionResult(True, [], None)
         home_xy = np.array(load_config("env")["home_position_xy"])
         result = self.controller.run_transit(home_xy)
         command_results = [("return_to_home", result)]
@@ -120,4 +116,3 @@ class PhysicalPlanExecutor:
         self.env._reset_chess_piece_bodies()
         self.env.clear_active_piece()
         self.occupancy.reset(starting_square_map)
-

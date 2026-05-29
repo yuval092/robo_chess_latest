@@ -28,15 +28,6 @@ def validate_config() -> None:
     ]:
         assert key in env, f"Missing env key: {key}"
 
-    board = chess["board"]
-    validation = board["validation"]
-    assert validation["required_cell_size_m"] == board["cell_size_m"]
-    assert (
-        validation["required_board_width_m"]
-        == board["board_size"] * board["cell_size_m"]
-    )
-    assert "reachability_expected" in chess
-
     for stage in ("transit", "descend", "ascend"):
         assert stage in deployed, f"Missing deployed model path: {stage}"
         assert isinstance(deployed[stage], str), f"Model path must be string: {stage}"

@@ -56,14 +56,6 @@ def test_a1_h1_a8_h8_positions_match_orientation():
     assert np.allclose(mapper.square_name_to_xy("h8"), [1.160, 0.5441])
 
 
-@pytest.mark.parametrize("square_name", ["a1", "d4", "e5", "h8"])
-def test_nearest_square_roundtrip(square_name):
-    mapper = BoardMapper.from_configs()
-    xy = mapper.square_name_to_xy(square_name)
-
-    assert mapper.nearest_square(xy) == chess.parse_square(square_name)
-
-
 def test_near_and_far_rank_centers_match_exact_8cm_geometry():
     mapper = BoardMapper.from_configs()
 

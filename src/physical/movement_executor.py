@@ -6,6 +6,7 @@ from dataclasses import dataclass
 
 import numpy as np
 
+from src.chess_env.model_controller import ModelEmbeddedController
 from src.chess_game.board_mapper import BoardMapper
 from src.physical.occupancy import PhysicalOccupancy
 from src.physical.piece_teleport import PieceTeleporter
@@ -28,13 +29,18 @@ class MovementExecutor:
     """Physical board-to-board move executor for selected chess pieces."""
 
     def __init__(
-        self, env, controller, board_mapper: BoardMapper, occupancy: PhysicalOccupancy
+        self,
+        env,
+        controller: ModelEmbeddedController,
+        board_mapper: BoardMapper,
+        occupancy: PhysicalOccupancy,
+        teleporter: PieceTeleporter | None = None,
     ):
         self.env = env.unwrapped if hasattr(env, "unwrapped") else env
         self.controller = controller
         self.board_mapper = board_mapper
         self.occupancy = occupancy
-        self.teleporter = PieceTeleporter(env, board_mapper)
+        self.teleporter = teleporter or PieceTeleporter(env, board_mapper)
         cfg = load_config("env")
         self._reconcile_xy_tol = cfg["reconcile_xy_tolerance_m"]
         self._reconcile_z_tol = cfg["reconcile_z_tolerance_m"]

@@ -16,14 +16,9 @@ import gymnasium as gym
 
 import src.chess_env  # noqa: F401 - registers ChessFetchTask-v0
 from src.chess_env.model_controller import ModelEmbeddedController
-from src.chess_game.board_mapper import BoardMapper
 from src.chess_game.chess_service import ChessService
 from src.chess_game.game_orchestrator import GameOrchestrator
 from src.chess_game.move_planner import LogicalPieceTracker
-from src.physical.movement_executor import MovementExecutor
-from src.physical.occupancy import PhysicalOccupancy
-from src.physical.piece_registry import PieceRegistry
-from src.physical.piece_teleport import PieceTeleporter
 from src.physical.plan_executor import PhysicalPlanExecutor
 from src.ui.app import create_app
 from src.ui.queued_backend import QueuedUIBackend
@@ -69,20 +64,10 @@ def build_orchestrator(
     descend_model: str | None = None,
     ascend_model: str | None = None,
 ) -> GameOrchestrator:
-    registry = PieceRegistry()
-    occupancy = PhysicalOccupancy(registry.starting_square_map())
-    board_mapper = BoardMapper.from_configs()
     controller = build_controller(
         env, visualize, delay, transit_model, descend_model, ascend_model
     )
-    movement_executor = MovementExecutor(env, controller, board_mapper, occupancy)
-    physical_executor = PhysicalPlanExecutor(
-        movement_executor,
-        PieceTeleporter(env, board_mapper),
-        occupancy,
-        controller=controller,
-        env=env,
-    )
+    physical_executor = PhysicalPlanExecutor(env, controller)
     engine_cfg = load_config("chess").get("engine")
     return GameOrchestrator(
         ChessService(engine_cfg=engine_cfg),

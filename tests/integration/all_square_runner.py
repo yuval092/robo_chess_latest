@@ -11,8 +11,6 @@ from tqdm import tqdm
 
 import src.chess_env  # noqa: F401 - registers ChessFetchTask-v0
 from src.chess_env.model_controller import ModelEmbeddedController
-from src.chess_game.board_mapper import BoardMapper
-from src.physical.movement_executor import MovementExecutor
 from src.physical.occupancy import PhysicalOccupancy
 from src.physical.piece_registry import PieceRegistry
 from src.physical.piece_teleport import PieceTeleporter
@@ -91,9 +89,6 @@ def _setup_all_square_env(
     if drift_limit is not None:
         env.unwrapped.env_cfg["eval_drift_limit"] = drift_limit
     inner = env.unwrapped
-    mapper = BoardMapper.from_configs()
-    teleporter = PieceTeleporter(env, mapper)
-    _hide_other_pieces(inner, teleporter, piece_id)
     model_paths = resolve_model_paths(model_overrides)
     controller = ModelEmbeddedController(
         env=env,
@@ -106,11 +101,9 @@ def _setup_all_square_env(
         ascend_path=model_paths["ascend"],
     )
     occupancy = PhysicalOccupancy({piece_id: None})
-    movement = MovementExecutor(env, controller, mapper, occupancy)
-    physical = PhysicalPlanExecutor(
-        movement, teleporter, occupancy, controller=controller, env=env
-    )
-    return env, inner, teleporter, occupancy, movement, physical
+    physical = PhysicalPlanExecutor(env, controller, occupancy)
+    _hide_other_pieces(inner, physical.piece_teleporter, piece_id)
+    return env, inner, physical.piece_teleporter, physical.occupancy, physical.movement_executor, physical
 
 
 def _run_pairs(

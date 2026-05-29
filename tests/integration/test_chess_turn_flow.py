@@ -3,14 +3,9 @@ import gymnasium as gym
 import numpy as np
 
 from src.chess_env.model_controller import ModelEmbeddedController
-from src.chess_game.board_mapper import BoardMapper
 from src.chess_game.chess_service import ChessService
 from src.chess_game.game_orchestrator import GameOrchestrator
 from src.chess_game.move_planner import LogicalPieceTracker
-from src.physical.movement_executor import MovementExecutor
-from src.physical.occupancy import PhysicalOccupancy
-from src.physical.piece_registry import PieceRegistry
-from src.physical.piece_teleport import PieceTeleporter
 from src.physical.plan_executor import PhysicalPlanExecutor
 from src.utils.io import resolve_model_paths
 from tests.integration.flow_helpers import run_flow
@@ -56,18 +51,8 @@ def test_real_physical_single_turn_commits_after_success():
     )
     env.reset()
     home_qpos = robot_home_qpos(env.unwrapped)
-    registry = PieceRegistry()
-    occupancy = PhysicalOccupancy(registry.starting_square_map())
-    board_mapper = BoardMapper.from_configs()
     controller = make_controller(env)
-    movement_executor = MovementExecutor(env, controller, board_mapper, occupancy)
-    physical_executor = PhysicalPlanExecutor(
-        movement_executor,
-        PieceTeleporter(env, board_mapper),
-        occupancy,
-        controller=controller,
-        env=env,
-    )
+    physical_executor = PhysicalPlanExecutor(env, controller)
     orchestrator = GameOrchestrator(
         ChessService(),
         physical_executor,
@@ -81,7 +66,7 @@ def test_real_physical_single_turn_commits_after_success():
     assert result.physical_success
     assert orchestrator.chess_service.board.piece_at(chess.E4).symbol() == "P"
     assert orchestrator.piece_tracker.piece_id_at("e4") == "white_pawn_e"
-    assert occupancy.square_of_piece("white_pawn_e") == "e4"
+    assert physical_executor.occupancy.square_of_piece("white_pawn_e") == "e4"
     assert result.snapshot.fen == orchestrator.chess_service.fen()
     assert np.allclose(robot_home_qpos(env.unwrapped), home_qpos)
     env.close()
@@ -97,16 +82,8 @@ def test_edge_pawn_move_after_prior_home_returns_does_not_timeout():
     )
     try:
         env.reset()
-        mapper = BoardMapper.from_configs()
-        occupancy = PhysicalOccupancy(PieceRegistry().starting_square_map())
         controller = make_controller(env)
-        physical_executor = PhysicalPlanExecutor(
-            MovementExecutor(env, controller, mapper, occupancy),
-            PieceTeleporter(env, mapper),
-            occupancy,
-            controller=controller,
-            env=env,
-        )
+        physical_executor = PhysicalPlanExecutor(env, controller)
 
         run_flow(
             ["g2g4", "h7h6", "a2a4"],
@@ -114,8 +91,8 @@ def test_edge_pawn_move_after_prior_home_returns_does_not_timeout():
             LogicalPieceTracker(),
             env,
             5.0,
-            mapper=mapper,
-            occupancy=occupancy,
+            mapper=physical_executor.movement_executor.board_mapper,
+            occupancy=physical_executor.occupancy,
             verify_agreement=True,
         )
     finally:

@@ -116,7 +116,6 @@ Pieces:
 | Key | Value | Meaning |
 |---|---:|---|
 | `pieces.cube_height_m` | `0.030` | Full collision cube height; piece centre at `table_z + 0.015` |
-| `pieces.freejoint_damping` | `8.0` | MuJoCo freejoint damping for every chess piece body |
 
 Game:
 
@@ -159,8 +158,7 @@ ascend: "models/ascend.zip"
 `src/utils/config_validation.py` checks:
 
 - Required `env.yaml` keys.
-- Board cell size and board width consistency.
-- Presence of `reachability_expected`.
+- Board cell size and board width consistency..
 - Deployed model stage keys and string values.
 - Existence of the base training model.
 

@@ -224,15 +224,13 @@ def test_piece_joint_cube_and_visual_properties() -> None:
         env.reset()
         model = env.unwrapped.model
         registry = PieceRegistry()
-        damping = load_config("chess")["pieces"]["freejoint_damping"]
-
         for piece in registry.all_pieces():
             joint_id = mujoco.mj_name2id(
                 model, mujoco.mjtObj.mjOBJ_JOINT, piece.joint_name
             )
             assert model.jnt_type[joint_id] == mujoco.mjtJoint.mjJNT_FREE
             dof_start = model.jnt_dofadr[joint_id]
-            assert np.allclose(model.dof_damping[dof_start : dof_start + 6], damping)
+            assert np.allclose(model.dof_damping[dof_start : dof_start + 6], 8.0)
 
             cube_id = _geom_id(model, piece.cube_geom_name)
             assert np.allclose(model.geom_size[cube_id], [0.015, 0.015, 0.015])
