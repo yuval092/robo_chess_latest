@@ -158,38 +158,38 @@ class MovePlanner:
         commands: list = []
 
         if self.board.is_castling(move):
-            commands.extend(self._castle_commands(move, moving_piece_id, src, dst))
+            commands.extend(self._build_castle_commands(move, moving_piece_id, src, dst))
             return commands
 
         captured_piece_id = self._captured_piece_id(move)
         if captured_piece_id is not None:
-            captured_piece = self.board.piece_at(self._captured_square(move))
-            color = (
-                "white"
-                if captured_piece and captured_piece.color == chess.WHITE
-                else "black"
-            )
-            commands.append(
-                RemoveFromBoardCommand(
-                    captured_piece_id, self.tracker.next_graveyard_slot(color)
-                )
-            )
+            commands.append(self._build_capture_command(move, captured_piece_id))
 
         commands.append(ArmMoveCommand(moving_piece_id, src, dst))
 
         if move.promotion is not None:
-            color = "white" if self.board.turn == chess.WHITE else "black"
-            promoted_type = self.PROMOTION_NAMES[move.promotion]
-            promoted_piece_id = self.tracker.find_reserve_piece(color, promoted_type)
-            reserve_slot = self.tracker.next_promotion_reserve_slot(color)
-            commands.append(
-                TeleportCommand(moving_piece_id, "promotion_reserve", reserve_slot)
-            )
-            commands.append(TeleportCommand(promoted_piece_id, "square", dst))
+            commands.extend(self._build_promotion_commands(move, moving_piece_id, dst))
 
         return commands
+    
+    def _build_promotion_commands(self, move: chess.Move, pawn_id: str, dst: str) -> list[TeleportCommand]:
+        """Build teleport commands to swap the pawn out for a reserve promotion piece."""
+        color = "white" if self.board.turn == chess.WHITE else "black"
+        promoted_type = self.PROMOTION_NAMES[move.promotion]
+        promoted_piece_id = self.tracker.find_reserve_piece(color, promoted_type)
+        reserve_slot = self.tracker.next_promotion_reserve_slot(color)
+        return [
+            TeleportCommand(pawn_id, "promotion_reserve", reserve_slot),
+            TeleportCommand(promoted_piece_id, "square", dst),
+        ]
 
-    def _castle_commands(
+    def _build_capture_command(self, move: chess.Move, captured_piece_id: str) -> RemoveFromBoardCommand:
+        """Build the remove command for a captured piece."""
+        captured_piece = self.board.piece_at(self._captured_square(move))
+        color = "white" if captured_piece.color == chess.WHITE else "black"
+        return RemoveFromBoardCommand(captured_piece_id, self.tracker.next_graveyard_slot(color))
+
+    def _build_castle_commands(
         self, move: chess.Move, king_id: str, king_src: str, king_dst: str
     ) -> list[ArmMoveCommand]:
         """Build physical commands for a castle move."""
