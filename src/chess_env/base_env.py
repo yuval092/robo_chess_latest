@@ -439,13 +439,13 @@ class ChessBaseEnv(ChessSimulationEnv):
 
         self.grasp_mode = False
 
-        start_pos = self._sample_board_position()
+        start_pos = self._random_board_position()
         start_xy = start_pos[:2]
 
         if self.current_scenario == "transit":
-            goal_pos = self._sample_board_position()
+            goal_pos = self._random_board_position()
             while np.linalg.norm(goal_pos[:2] - start_xy) < self.MIN_GOAL_DIST:
-                goal_pos = self._sample_board_position()
+                goal_pos = self._random_board_position()
             self.tube_center_xy = None
 
             if self.force_start_pos is not None:
@@ -484,7 +484,7 @@ class ChessBaseEnv(ChessSimulationEnv):
             self.data.qvel[dof_start : dof_start + 6] = 0.0
         else:
             self.data.qpos[qpos_start : qpos_start + 2] = start_xy
-            self.data.qpos[qpos_start + 2] = self.TABLE_Z + (self.CUBE_HEIGHT / 2.0)
+            self.data.qpos[qpos_start + 2] = self.TABLE_SURFACE_Z + (self.CUBE_HEIGHT / 2.0)
             self.data.qpos[qpos_start + 3 : qpos_start + 7] = [1, 0, 0, 0]
             self.data.qvel[dof_start : dof_start + 6] = 0.0
 

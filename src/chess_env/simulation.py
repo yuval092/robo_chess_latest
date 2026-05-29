@@ -44,42 +44,37 @@ class ChessSimulationEnv(MujocoFetchPickAndPlaceEnv):
     """
 
     def __init__(self, debug=False, **kwargs):
-        """
-        Initializes the simulation environment.
-
-        Args:
-            debug (bool): If True, enables verbose logging of gripper positions and control setpoints.
-            **kwargs: Additional arguments passed to the parent MujocoFetchPickAndPlaceEnv.
-        """
         self.env_cfg = load_config("env")
         self.physics_cfg = load_config("physics")
         self.debug = debug
+        self._init_table_constants()
+        self._init_physics_constants()
+        self._load_chess_model(**kwargs)
 
-        # --- Table Geometry ---
-        # We use a larger table (64cm x 64cm) than the standard Fetch task.
+    def _init_table_constants(self) -> None:
+        """Set board geometry constants from env config."""
         self.TABLE_CENTER_XY = np.array(self.env_cfg["table_center_xy"])
         self.TABLE_HALF_X = self.env_cfg["table_half_x"]
         self.TABLE_HALF_Y = self.env_cfg["table_half_y"]
         self.TABLE_SURFACE_Z = self.env_cfg["table_surface_z"]
-        self.TABLE_Z = self.TABLE_SURFACE_Z  # Alias for backward compatibility
         self.EDGE_MARGIN = self.env_cfg["edge_margin"]
         self.MIN_GOAL_DIST = self.env_cfg["min_goal_dist"]
         self.CUBE_HEIGHT = self.env_cfg["cube_height"]
 
-        # --- Physics Parameters ---
-        # Number of physics steps to run before an episode starts to let the arm settle
-        self.ENV_SETUP_STEPS = self.physics_cfg["env_setup_steps"]
-        # Max attempts to find a valid board position for sampling goals
-        self.MAX_GOAL_RETRIES = self.physics_cfg["max_goal_retries"]
-        # Scaling factor for the relative mocap actions (limits movement speed)
-        self.POS_CTRL_SCALE = self.physics_cfg["pos_ctrl_scale"]
+        margin = self.EDGE_MARGIN
+        center_x, center_y = self.TABLE_CENTER_XY
+        self.BOARD_MIN_XY = np.array([center_x - self.TABLE_HALF_X + margin, center_y - self.TABLE_HALF_Y + margin])
+        self.BOARD_MAX_XY = np.array([center_x + self.TABLE_HALF_X - margin, center_y + self.TABLE_HALF_Y - margin])
 
-        # Force the gripper to point straight down (verticality constraint)
+    def _init_physics_constants(self) -> None:
+        """Set physics and control constants from physics config."""
+        self.ENV_SETUP_STEPS = self.physics_cfg["env_setup_steps"]
+        self.POS_CTRL_SCALE = self.physics_cfg["pos_ctrl_scale"]
         raw_quat = np.array(self.physics_cfg["vertical_quat"])
         self.VERTICAL_QUAT = raw_quat / np.linalg.norm(raw_quat)
 
-        # --- Model Injection ---
-        # We override the model XML path before calling super().__init__ to use our custom assets.
+    def _load_chess_model(self, **kwargs) -> None:
+        """Inject our chess board XML, call super().__init__, then restore the original path."""
         project_root = Path(__file__).resolve().parents[2]
         asset_path = str(project_root / "chess_env" / "assets" / "pick_and_place.xml")
 
@@ -88,120 +83,56 @@ class ChessSimulationEnv(MujocoFetchPickAndPlaceEnv):
             _fpp_module.MODEL_XML_PATH = asset_path
             try:
                 super().__init__(**kwargs)
-                # Adjust the robot's default base position to center it on the larger board
                 init_qpos = self.physics_cfg["initial_qpos"]
                 self.initial_qpos[0] = init_qpos[0]
                 self.initial_qpos[1] = init_qpos[1]
             finally:
                 _fpp_module.MODEL_XML_PATH = _original_path
 
-    def _sample_board_position(self):
-        """
-        Samples a random (X, Y) coordinate within the board boundaries.
-        Returns coordinates at the table surface altitude.
-        """
-        low_x = self.TABLE_CENTER_XY[0] - self.TABLE_HALF_X + self.EDGE_MARGIN
-        high_x = self.TABLE_CENTER_XY[0] + self.TABLE_HALF_X - self.EDGE_MARGIN
-        low_y = self.TABLE_CENTER_XY[1] - self.TABLE_HALF_Y + self.EDGE_MARGIN
-        high_y = self.TABLE_CENTER_XY[1] + self.TABLE_HALF_Y - self.EDGE_MARGIN
-        x = self.np_random.uniform(low_x, high_x)
-        y = self.np_random.uniform(low_y, high_y)
-        return np.array([x, y, self.TABLE_SURFACE_Z])
 
-    def _sample_goal(self):
-        """
-        Samples a goal position that is at least MIN_GOAL_DIST away from the object.
-        Used by the parent class during reset.
-        """
-        obj_joint_id = self.model.joint("object0:joint").id
-        qpos_start = self.model.jnt_qposadr[obj_joint_id]
-        obj_pos = self.data.qpos[qpos_start : qpos_start + 2]
-        for _ in range(self.MAX_GOAL_RETRIES):
-            goal = self._sample_board_position()
-            dist_xy = np.linalg.norm(goal[:2] - obj_pos)
-            if dist_xy >= self.MIN_GOAL_DIST:
-                return goal
-        return goal
+    def _random_board_position(self) -> np.ndarray:
+        """Sample a random XY within the playable board area, at table surface Z."""
+        x, y = self.np_random.uniform(self.BOARD_MIN_XY, self.BOARD_MAX_XY)
+        return np.array([x, y, self.TABLE_SURFACE_Z])
 
     def _render_callback(self):
         """Suppress Fetch's moving target0 goal marker in chess visualizations."""
         pass
 
-    def _reset_sim(self):
-        """
-        Resets the simulation state. Samples a new object position on the board.
-        """
-        result = super()._reset_sim()
-        obj_pos = self._sample_board_position()
-        obj_pos[2] += self.CUBE_HEIGHT / 2.0  # Adjust for cube's center-of-mass
-
-        obj_joint_id = self.model.joint("object0:joint").id
-        qpos_start = self.model.jnt_qposadr[obj_joint_id]
-        dof_start = self.model.jnt_dofadr[obj_joint_id]
-
-        # Place cube and zero its velocity
-        self.data.qpos[qpos_start : qpos_start + 3] = obj_pos
-        self.data.qpos[qpos_start + 3 : qpos_start + 7] = [1, 0, 0, 0]
-        self.data.qvel[dof_start : dof_start + 6] = 0.0
-
-        mujoco.mj_forward(self.model, self.data)
-        return result
-
     def _set_action(self, action):
-        """
-        Converts the RL model output [dx, dy, dz, gripper] into MuJoCo mocap control.
-
-        The position actions are scaled to ensure smooth movement, and the orientation
-        is locked to point vertically downward.
-
-        Finger positions are absolutely enforced at the simulation level based on
-        finger_target_joint.
-        """
+        """Translate [dx, dy, dz, gripper] action into scaled mocap delta + finger enforcement."""
         assert action.shape == (4,)
-        action = action.copy()
-        pos_ctrl = action[:3]
+        pos_ctrl = action[:3].copy() * self.POS_CTRL_SCALE
+        self._enforce_fingers()
+        self._utils.mocap_set_action(
+            self.model, self.data, np.concatenate([pos_ctrl, np.zeros(4)])
+        )
 
-        # 1. Scaled relative movement (limits max displacement per step)
-        pos_ctrl *= self.POS_CTRL_SCALE
+    def _enforce_fingers(self) -> None:
+        """Set finger actuator targets; in teleport mode also force joint positions directly.
 
-        # 2. ZERO DELTA ROTATION (Maintains vertical orientation)
-        rot_ctrl = np.zeros(4)
+        grasp_mode=True: actuator-driven only — MuJoCo's Kp controller handles contact
+        forces so the cube can push back against the fingers.
+        grasp_mode=False: teleport mode — joint positions are forced directly so fingers
+        never drift during pure-movement phases.
+        """
+        target = self.finger_target_joint
+        self.data.ctrl[0] = target
+        self.data.ctrl[1] = target
 
-        # 3. Finger Enforcement
-        # Retrieve target joint position (to be set by Task class)
-        target_qpos = getattr(self, "finger_target_joint", 0.0)
-
-        if getattr(self, "grasp_mode", False):
-            # Actuator-driven mode: set ctrl target only.
-            # Let MuJoCo's Kp controller drive the fingers with contact physics enabled.
-            # The cube can push back against the fingers; contact forces are computed.
-            self.data.ctrl[0] = target_qpos
-            self.data.ctrl[1] = target_qpos
-            # IMPORTANT: do NOT call set_joint_qpos or set_joint_qvel here.
-        else:
-            # Teleport mode: absolute enforcement (no cube contact during movement phases).
-            self.data.ctrl[0] = target_qpos
-            self.data.ctrl[1] = target_qpos
-
-            # Force the joint position directly
+        if not self.grasp_mode:
             self._utils.set_joint_qpos(
-                self.model, self.data, "robot0:l_gripper_finger_joint", target_qpos
+                self.model, self.data, "robot0:l_gripper_finger_joint", target
             )
             self._utils.set_joint_qpos(
-                self.model, self.data, "robot0:r_gripper_finger_joint", target_qpos
+                self.model, self.data, "robot0:r_gripper_finger_joint", target
             )
-
-            # Zero joint velocities for fingers
             self._utils.set_joint_qvel(
                 self.model, self.data, "robot0:l_gripper_finger_joint", 0.0
             )
             self._utils.set_joint_qvel(
                 self.model, self.data, "robot0:r_gripper_finger_joint", 0.0
             )
-
-        # Apply mocap position update
-        mocap_action = np.concatenate([pos_ctrl, rot_ctrl])
-        self._utils.mocap_set_action(self.model, self.data, mocap_action)
 
     def _env_setup(self, initial_qpos):
         """

@@ -115,7 +115,7 @@ Pieces:
 
 | Key | Value | Meaning |
 |---|---:|---|
-| `pieces.cube_height_m` | `0.030` | Full collision cube height; piece centre at `table_z + 0.015` |
+| `pieces.cube_height_m` | `0.030` | Full collision cube height; piece centre at `table_surface_z + 0.015` |
 
 Game:
 
@@ -139,7 +139,6 @@ Engine:
 | `vertical_quat` | `[0.7071068, 0, 0.7071068, 0]` | Unit quaternion for downward gripper orientation |
 | `initial_qpos` | `[-0.05, 0.00]` | Initial Fetch base slide positions |
 | `env_setup_steps` | `10` | Physics settle steps during initial env setup |
-| `max_goal_retries` | `100` | Random goal sampling attempts |
 | `pos_ctrl_scale` | `0.015` | Max arm displacement (m) per action step |
 | `settle_tolerance` | `0.003` | Gripper position tolerance (m) for `_move_mocap_to` |
 

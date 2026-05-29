@@ -44,7 +44,7 @@ The exhaustive 64x63 physical move sweep is test-only and is skipped unless
 explicitly requested:
 
 ```bash
-RUN_EXHAUSTIVE_PHYSICAL_MOVES=1 pytest tests/integration/test_all_square_moves.py
+RUN_EXHAUSTIVE_PHYSICAL_MOVES=1 pytest tests/integration/test_all_square_moves.py -s
 ```
 
 The sweep uses `black_rook_a` by default and is not part of normal runtime.
