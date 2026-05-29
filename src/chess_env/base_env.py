@@ -23,20 +23,10 @@ from src.chess_game.board_mapper import BoardMapper
 from src.physical.piece_registry import PieceRegistry, reserve_piece_ids
 from src.utils.io import load_config
 
-HOME_POSTURE_JOINTS = (
-    "robot0:torso_lift_joint",
-    "robot0:shoulder_pan_joint",
-    "robot0:shoulder_lift_joint",
-    "robot0:upperarm_roll_joint",
-    "robot0:elbow_flex_joint",
-    "robot0:forearm_roll_joint",
-    "robot0:wrist_flex_joint",
-    "robot0:wrist_roll_joint",
-    "robot0:l_gripper_finger_joint",
-    "robot0:r_gripper_finger_joint",
-)
+IDENTITY_QUAT = np.array([1.0, 0.0, 0.0, 0.0])
 
-TRANSFER_OBS_SPACE = spaces.Dict(
+
+PRETRAINED_OBS_SPACE = spaces.Dict(
     {
         "observation": spaces.Box(-np.inf, np.inf, shape=(25,), dtype=np.float64),
         "achieved_goal": spaces.Box(-np.inf, np.inf, shape=(3,), dtype=np.float64),
@@ -44,27 +34,20 @@ TRANSFER_OBS_SPACE = spaces.Dict(
     }
 )
 
-
-def enable_transfer_obs(env) -> None:
-    """Enable transfer observations on both the wrapper and unwrapped env."""
-    unwrapped = env.unwrapped
-    unwrapped._use_transfer_obs = True
-    unwrapped.observation_space = TRANSFER_OBS_SPACE
-    env.observation_space = TRANSFER_OBS_SPACE
-
-
 @contextmanager
-def transfer_obs_enabled(env) -> Generator[None, None, None]:
-    """Enable transfer observations and restore wrapper/unwrapped state on exit."""
+def pretrained_obs_format_enabled(env) -> Generator[None, None, None]:
+    """Enable pretrained obs formatervations and restore wrapper/unwrapped state on exit."""
     unwrapped = env.unwrapped
-    saved_flag = unwrapped._use_transfer_obs
+    saved_flag = unwrapped._use_pretrained_obs_format
     saved_unwrapped_space = unwrapped.observation_space
     saved_wrapper_space = env.observation_space
     try:
-        enable_transfer_obs(env)
+        unwrapped._use_pretrained_obs_format = True
+        unwrapped.observation_space = PRETRAINED_OBS_SPACE
+        env.observation_space = PRETRAINED_OBS_SPACE
         yield
     finally:
-        unwrapped._use_transfer_obs = saved_flag
+        unwrapped._use_pretrained_obs_format = saved_flag
         unwrapped.observation_space = saved_unwrapped_space
         env.observation_space = saved_wrapper_space
 
@@ -80,49 +63,47 @@ class ChessBaseEnv(ChessSimulationEnv):
         debug=False,
         **kwargs,
     ):
-        self.env_cfg = load_config("env")
-        self.physics_cfg = load_config("physics")
+        # _get_obs() is called during super().__init__() — only these three are needed early.
+        self._use_pretrained_obs_format = False
+        self.current_scenario = None
+        self.goal_pos = None
+        super().__init__(debug=debug, **kwargs)
+        self._init_scenario_params(force_scenario, hide_object, show_chess_pieces, debug)
+        self._init_observation_space()
+        self._init_task_constants()
+        self._init_logger(debug)
+
+    def _init_scenario_params(
+        self, force_scenario, hide_object, show_chess_pieces, debug
+    ) -> None:
+        """Set configs, scenario flags, and episode counters."""
         self.chess_cfg = load_config("chess")
 
         self.force_scenario = force_scenario
         self.hide_object = hide_object
         self.show_chess_pieces = show_chess_pieces
-        self.base_debug = debug
-        self.debug = debug
 
         if debug:
             print(f"[DEBUG INIT] Pid {os.getpid()} | Scenario: {force_scenario}")
 
-        self.current_scenario = None
         self.tube_center_xy = None
-        self.gripper_forced_state = None
-        self.goal_pos = None
         self.episode_steps = 0
         self.total_env_steps = 0
         self.episode_number = 0
-        self._use_transfer_obs = False
 
-        super().__init__(debug=debug, **kwargs)
-
+    def _init_observation_space(self) -> None:
+        """Set the native chess observation space (overridden by training env for pretrained obs format)."""
         self.observation_space = spaces.Dict(
             {
-                "grip_pos": spaces.Box(-np.inf, np.inf, shape=(3,), dtype="float32"),
                 "grip_vel": spaces.Box(-np.inf, np.inf, shape=(3,), dtype="float32"),
-                "l_finger": spaces.Box(-np.inf, np.inf, shape=(), dtype="float32"),
-                "goal_pos": spaces.Box(-np.inf, np.inf, shape=(3,), dtype="float32"),
                 "observation": spaces.Box(-np.inf, np.inf, shape=(7,), dtype="float32"),
-                "achieved_goal": spaces.Box(
-                    -np.inf, np.inf, shape=(3,), dtype="float32"
-                ),
-                "desired_goal": spaces.Box(
-                    -np.inf, np.inf, shape=(3,), dtype="float32"
-                ),
-                "scenario_id": spaces.Discrete(4),
+                "achieved_goal": spaces.Box(-np.inf, np.inf, shape=(3,), dtype="float32"),
+                "desired_goal": spaces.Box(-np.inf, np.inf, shape=(3,), dtype="float32"),
             }
         )
 
-        self.CUBE_HEIGHT = self.env_cfg["cube_height"]
-        self.CUBE_Z = self.env_cfg["cube_z"]
+    def _init_task_constants(self) -> None:
+        """Set scenario Z-levels, finger limits, and runtime state from config."""
         self.GRASP_Z = self.env_cfg["grasp_z"]
         self.HOVER_Z = self.env_cfg["hover_z"]
         self.SAFE_Z = self.env_cfg["safe_z"]
@@ -135,31 +116,27 @@ class ChessBaseEnv(ChessSimulationEnv):
         self.FINGER_OPEN_JOINT = self.env_cfg["finger_open_joint"]
         self.FINGER_CLOSED_JOINT = self.env_cfg["finger_closed_joint"]
         self.finger_target_joint = self.FINGER_CLOSED_JOINT
-
         self.grasp_mode = False
-
-        self._debug_step_callback = None
-        self._debug_current_phase = "idle"
 
         home_xy = self.env_cfg["home_position_xy"]
         self.HOME_POS = np.array([home_xy[0], home_xy[1], self.SAFE_Z])
 
-        # Overrides typically used by evaluation / scripted control
         self.force_start_pos = None
         self.force_cube_pos = None
-        self._board_mapper = None
-        self._piece_registry = None
+        self._board_mapper = BoardMapper.from_configs()
+        self._piece_registry = PieceRegistry()
         self.active_piece_id = None
-        self.active_piece_body_name = None
         self.active_piece_joint_name = None
 
+    def _init_logger(self, debug: bool) -> None:
+        """Set up per-process file logger (debug mode) or null logger (normal mode)."""
         log_cfg = self.env_cfg["logging"]
         log_dir = log_cfg["log_dir"]
-        os.makedirs(log_dir, exist_ok=True)
 
         self.logger = logging.getLogger(f"chess_task_{os.getpid()}")
         if not self.logger.handlers:
             if debug:
+                os.makedirs(log_dir, exist_ok=True)
                 handler = logging.FileHandler(
                     os.path.join(log_dir, f"env_{os.getpid()}.log")
                 )
@@ -175,21 +152,13 @@ class ChessBaseEnv(ChessSimulationEnv):
     # ── Observation ──────────────────────────────────────────────────────────
 
     def _get_obs(self):
-        """Minimal physics-state dict; switches to 25-D transfer obs when requested."""
-        if self._use_transfer_obs:
-            return self._build_transfer_observation()
+        """Minimal physics-state dict; switches to 25-D pretrained obs format when requested."""
+        if self._use_pretrained_obs_format:
+            return self._build_pretrained_observation()
 
-        grip_pos = self._grip_pos().copy().astype(np.float32)
-        grip_vel = (
-            self._utils.get_site_xvelp(self.model, self.data, "robot0:grip")
-            .copy()
-            .astype(np.float32)
-        )
-        l_finger = np.float32(
-            self._utils.get_joint_qpos(
-                self.model, self.data, "robot0:l_gripper_finger_joint"
-            ).item()
-        )
+        grip_pos = self.get_grip_pos().copy().astype(np.float32)
+        grip_vel = self.get_grip_vel().astype(np.float32)
+        l_finger = np.float32(self.get_finger_angle())
         goal_pos = (
             self.goal_pos.copy().astype(np.float32)
             if self.goal_pos is not None
@@ -197,21 +166,15 @@ class ChessBaseEnv(ChessSimulationEnv):
         )
 
         obs_vec = np.concatenate([grip_pos, grip_vel, [l_finger]])
-        scen_map = {None: 0, "transit": 1, "descend": 2, "ascend": 3}
-        scenario_id = scen_map.get(self.current_scenario, 0)
 
         return {
             "observation": obs_vec,
             "achieved_goal": grip_pos,
             "desired_goal": goal_pos,
-            "grip_pos": grip_pos,
             "grip_vel": grip_vel,
-            "l_finger": l_finger,
-            "goal_pos": goal_pos,
-            "scenario_id": scenario_id,
         }
 
-    def _build_transfer_observation(self):
+    def _build_pretrained_observation(self):
         """25-D observation matching FetchPickAndPlace-v4's MultiInputPolicy layout."""
         (
             grip_pos,
@@ -226,11 +189,7 @@ class ChessBaseEnv(ChessSimulationEnv):
         ) = self.generate_mujoco_observations()
 
         fake_object_pos = grip_pos.copy()
-        goal = (
-            self.goal
-            if (hasattr(self, "goal") and self.goal is not None)
-            else np.zeros(3)
-        )
+        goal = self.goal if self.goal is not None else np.zeros(3)
         rel_to_goal = goal.astype(np.float64) - grip_pos
 
         obs_vec = np.concatenate(
@@ -255,84 +214,60 @@ class ChessBaseEnv(ChessSimulationEnv):
 
     # ── Low-level helpers (used by both reset and grasp/place) ──────────────
 
-    def _grip_pos(self) -> np.ndarray:
+    def get_grip_pos(self) -> np.ndarray:
         """Return the current world position of the gripper site."""
         return self._utils.get_site_xpos(self.model, self.data, "robot0:grip").copy()
 
-    def _move_mocap_to(
+    def get_grip_vel(self) -> np.ndarray:
+        """Return the current world velocity of the gripper site."""
+        return self._utils.get_site_xvelp(self.model, self.data, "robot0:grip").copy()
+
+    def get_finger_angle(self) -> float:
+        """Return the current left finger joint angle."""
+        return self._utils.get_joint_qpos(
+            self.model, self.data, "robot0:l_gripper_finger_joint"
+        ).item()
+
+    def _move_grip_to(
         self,
         target_pos: np.ndarray,
-        target_quat: np.ndarray,
         max_steps: int = 150,
         tolerance: float = 0.001,
     ) -> bool:
         """Drive the arm so robot0:grip reaches target_pos. Handles site-to-body offsets."""
-        zero_action = np.zeros(4)
-        should_render = self.render_mode == "human"
         for _ in range(max_steps):
-            grip_pos = self._grip_pos()
-            error = target_pos - grip_pos
-            if np.linalg.norm(error) < tolerance:
+            if np.linalg.norm(target_pos - self.get_grip_pos()) < tolerance:
                 return True
+            self._step_grip_toward(target_pos)
 
-            self._set_action(zero_action)
-            self.data.mocap_pos[0][:3] += error
-            self.data.mocap_quat[0][:] = target_quat
-            self._mujoco_step(None)
-            if should_render:
-                self.render()
+        return bool(np.linalg.norm(self.get_grip_pos() - target_pos) < tolerance)
 
-        final_pos = self._grip_pos()
-        return bool(np.linalg.norm(final_pos - target_pos) < tolerance)
-
-    def _step_locked_grip(self, target_pos: np.ndarray, should_render: bool) -> None:
-        """Reset mocap to the body, then pull the grip site to a target pose for one step."""
+    def _step_grip_toward(self, target_pos: np.ndarray) -> None:
+        """Reset mocap to the body, then pull the grip site toward target_pos for one step."""
         self._set_action(np.zeros(4))
-        error = target_pos - self._grip_pos()
-        self.data.mocap_pos[0][:3] += error
+        self.data.mocap_pos[0][:3] += target_pos - self.get_grip_pos()
         self.data.mocap_quat[0][:] = self.VERTICAL_QUAT
         self._mujoco_step(None)
-        if should_render:
-            self.render()
+
 
     def _mujoco_step(self, action):
         super()._mujoco_step(action)
-        if self._debug_step_callback is not None:
-            self._debug_step_callback(self._debug_current_phase)
+        if self.render_mode == "human":
+            self.render()
 
-    def _set_gripper_state(self):
-        """Physically set the joint positions of the fingers based on the target state."""
-        target = self.finger_target_joint
-        self._utils.set_joint_qpos(
-            self.model, self.data, "robot0:l_gripper_finger_joint", target
-        )
-        self._utils.set_joint_qpos(
-            self.model, self.data, "robot0:r_gripper_finger_joint", target
-        )
-        self.data.qvel[self.model.joint("robot0:l_gripper_finger_joint").dofadr[0]] = (
-            0.0
-        )
-        self.data.qvel[self.model.joint("robot0:r_gripper_finger_joint").dofadr[0]] = (
-            0.0
-        )
+    def _commit_finger_target(self):
+        """Enforce fingers and forward-propagate physics.
 
-        # Sync actuator ctrl so the position actuator doesn't fight the teleport
-        l_id = mujoco.mj_name2id(
-            self.model, mujoco.mjtObj.mjOBJ_ACTUATOR, "robot0:l_gripper_finger_joint"
-        )
-        r_id = mujoco.mj_name2id(
-            self.model, mujoco.mjtObj.mjOBJ_ACTUATOR, "robot0:r_gripper_finger_joint"
-        )
-        self.data.ctrl[l_id] = target
-        self.data.ctrl[r_id] = target
-
+        Use during reset/soft_reset where no physics step follows immediately.
+        For in-step enforcement _apply_finger_target (called by _set_action) suffices.
+        """
+        self._apply_finger_target()
         mujoco.mj_forward(self.model, self.data)
 
     def _settle_arm_to_start(self, arm_start_pos):
         """Move the arm to the starting position; prevents physics explosions and gravity sag."""
-        self._move_mocap_to(
+        self._move_grip_to(
             arm_start_pos,
-            self.VERTICAL_QUAT,
             max_steps=100,
             tolerance=self.SETTLE_TOLERANCE,
         )
@@ -356,11 +291,7 @@ class ChessBaseEnv(ChessSimulationEnv):
     # ── Chess-piece body placement ──────────────────────────────────────────
 
     def _set_freejoint_pose(self, joint_name: str, xyz: np.ndarray, quat=None) -> None:
-        quat = (
-            np.array([1.0, 0.0, 0.0, 0.0])
-            if quat is None
-            else np.asarray(quat, dtype=float)
-        )
+        quat = IDENTITY_QUAT if quat is None else np.asarray(quat, dtype=float)
         xyz = np.asarray(xyz, dtype=float)
         joint_id = self.model.joint(joint_name).id
         qpos_start = self.model.jnt_qposadr[joint_id]
@@ -368,7 +299,6 @@ class ChessBaseEnv(ChessSimulationEnv):
         self.data.qpos[qpos_start : qpos_start + 3] = xyz
         self.data.qpos[qpos_start + 3 : qpos_start + 7] = quat
         self.data.qvel[dof_start : dof_start + 6] = 0.0
-        self.data.qacc[dof_start : dof_start + 6] = 0.0
 
     def _reserve_position(self, index: int, color: str, piece_type: str) -> np.ndarray:
         reserve_cfg = self.chess_cfg["promotion_reserve"][color]
@@ -391,12 +321,11 @@ class ChessBaseEnv(ChessSimulationEnv):
         return np.array([2.2 + row * 0.05, -0.5 + col * 0.05, self.CUBE_HEIGHT / 2.0])
 
     def _reset_chess_piece_bodies(self) -> None:
-        if self._board_mapper is None:
-            self._board_mapper = BoardMapper.from_configs()
-        if self._piece_registry is None:
-            self._piece_registry = PieceRegistry()
+        hidden_index = self._place_board_pieces(hidden_index=0)
+        self._place_reserve_pieces(hidden_index)
 
-        hidden_index = 0
+    def _place_board_pieces(self, hidden_index: int) -> int:
+        """Place each active piece on its starting square or off-screen. Returns next hidden_index."""
         for piece in self._piece_registry.all_pieces():
             if self.show_chess_pieces:
                 xyz = self._board_mapper.square_to_piece_xyz(
@@ -406,7 +335,10 @@ class ChessBaseEnv(ChessSimulationEnv):
                 xyz = self._hidden_piece_position(hidden_index)
                 hidden_index += 1
             self._set_freejoint_pose(piece.joint_name, xyz)
+        return hidden_index
 
+    def _place_reserve_pieces(self, hidden_index: int) -> None:
+        """Place each promotion reserve piece in its reserve slot or off-screen."""
         for piece_id, color, piece_type in reserve_piece_ids():
             joint_name = f"piece_{piece_id}:joint"
             if self.show_chess_pieces:
@@ -423,70 +355,76 @@ class ChessBaseEnv(ChessSimulationEnv):
         """Episode reset: scenario selection, object placement, scripted gripper transitions."""
         self.episode_steps = 0
         self.episode_number += 1
-
-        self.debug = self.base_debug
-        if self.debug:
-            self.logger.setLevel(logging.DEBUG)
-        else:
-            self.logger.setLevel(logging.INFO)
-
-        if self.force_scenario is not None:
-            self.current_scenario = self.force_scenario
-        else:
-            self.current_scenario = self.np_random.choice(
-                ["transit", "descend", "ascend"]
-            )
-
         self.grasp_mode = False
 
-        start_pos = self._random_board_position()
-        start_xy = start_pos[:2]
+        # Must run before super()._reset_sim() — the parent calls _sample_goal()
+        # which reads self.goal_pos, so it must be set first.
+        arm_start_pos, start_xy = self._setup_episode()
+        super()._reset_sim()
+        self._place_objects(start_xy)
+        self._prepare_arm_for_episode(arm_start_pos)
+
+        if not self._validate_finger_state():
+            return False
+
+        self._on_reset_settled(arm_start_pos)
+        if self.debug:
+            self._log_reset_state()
+        return True
+
+    def _setup_episode(self) -> tuple[np.ndarray, np.ndarray]:
+        """Pick scenario and compute all episode positions.
+
+        Sets self.current_scenario, self.goal_pos, self.tube_center_xy, self.goal.
+        Returns (arm_start_pos, start_xy):
+          arm_start_pos — where the arm settles and fingers transition during reset.
+          start_xy      — board XY used to position the cube object.
+        """
+        self.current_scenario = (
+            self.force_scenario
+            if self.force_scenario is not None
+            else self.np_random.choice(["transit", "descend", "ascend"])
+        )
+
+        start_xy = self._random_board_position()[:2]
 
         if self.current_scenario == "transit":
             goal_pos = self._random_board_position()
             while np.linalg.norm(goal_pos[:2] - start_xy) < self.MIN_GOAL_DIST:
                 goal_pos = self._random_board_position()
             self.tube_center_xy = None
+            self.goal_pos = np.array([*goal_pos[:2], self.SAFE_Z])
 
             if self.force_start_pos is not None:
                 arm_start_pos = self.force_start_pos.copy()
             elif self.show_chess_pieces:
                 arm_start_pos = self.HOME_POS.copy()
             else:
-                arm_start_pos = np.array([start_xy[0], start_xy[1], self.SAFE_Z])
-
-            self.goal_pos = np.array([goal_pos[0], goal_pos[1], self.SAFE_Z])
-        elif self.current_scenario == "descend":
+                arm_start_pos = np.array([*start_xy, self.SAFE_Z])
+        else:  # descend or ascend — same XY tube, mirrored Z values
             self.tube_center_xy = start_xy.copy()
-            arm_start_pos = np.array([start_xy[0], start_xy[1], self.SAFE_Z])
-            self.goal_pos = np.array([start_xy[0], start_xy[1], self.HOVER_Z])
-        elif self.current_scenario == "ascend":
-            self.tube_center_xy = start_xy.copy()
-            arm_start_pos = np.array([start_xy[0], start_xy[1], self.HOVER_Z])
-            self.goal_pos = np.array([start_xy[0], start_xy[1], self.SAFE_Z])
+            arm_z, goal_z = (
+                (self.SAFE_Z, self.HOVER_Z) if self.current_scenario == "descend"
+                else (self.HOVER_Z, self.SAFE_Z)
+            )
+            arm_start_pos = np.array([*start_xy, arm_z])
+            self.goal_pos = np.array([*start_xy, goal_z])
 
-        if self.goal_pos is not None:
-            self.goal = self.goal_pos.copy()
+        self.goal = self.goal_pos.copy()
+        return arm_start_pos, start_xy
 
-        super()._reset_sim()
-
-        obj_joint_id = self.model.joint("object0:joint").id
-        qpos_start = self.model.jnt_qposadr[obj_joint_id]
-        dof_start = self.model.jnt_dofadr[obj_joint_id]
-
+    def _place_objects(self, start_xy: np.ndarray) -> None:
+        """Place the dummy cube and all chess piece bodies, then forward-propagate."""
         if self.hide_object:
-            self.data.qpos[qpos_start : qpos_start + 3] = self.HIDDEN_OBJECT_POS
-            self.data.qpos[qpos_start + 3 : qpos_start + 7] = [1, 0, 0, 0]
-            self.data.qvel[dof_start : dof_start + 6] = 0.0
+            self._set_freejoint_pose("object0:joint", self.HIDDEN_OBJECT_POS)
         elif self.force_cube_pos is not None:
-            self.data.qpos[qpos_start : qpos_start + 3] = self.force_cube_pos[:3]
-            self.data.qpos[qpos_start + 3 : qpos_start + 7] = [1, 0, 0, 0]
-            self.data.qvel[dof_start : dof_start + 6] = 0.0
+            self._set_freejoint_pose("object0:joint", self.force_cube_pos[:3])
         else:
-            self.data.qpos[qpos_start : qpos_start + 2] = start_xy
-            self.data.qpos[qpos_start + 2] = self.TABLE_SURFACE_Z + (self.CUBE_HEIGHT / 2.0)
-            self.data.qpos[qpos_start + 3 : qpos_start + 7] = [1, 0, 0, 0]
-            self.data.qvel[dof_start : dof_start + 6] = 0.0
+            cube_xyz = np.array([
+                start_xy[0], start_xy[1],
+                self.TABLE_SURFACE_Z + self.CUBE_HEIGHT / 2.0,
+            ])
+            self._set_freejoint_pose("object0:joint", cube_xyz)
 
         self._reset_chess_piece_bodies()
         mujoco.mj_forward(self.model, self.data)
@@ -497,87 +435,71 @@ class ChessBaseEnv(ChessSimulationEnv):
         )
         mujoco.mj_forward(self.model, self.data)
 
-        # Phase 1: settle arm CLOSED for stability
+    def _prepare_arm_for_episode(self, arm_start_pos: np.ndarray) -> None:
+        """Settle arm at start position with scenario-appropriate finger state."""
         self._utils.set_mocap_quat(
             self.model, self.data, "robot0:mocap", self.VERTICAL_QUAT
         )
+        # Always start settled with fingers closed for physics stability.
         self.finger_target_joint = self.FINGER_CLOSED_JOINT
-        self._set_gripper_state()
+        self._commit_finger_target()
         self._settle_arm_to_start(arm_start_pos)
 
-        # Phase 2: scripted finger transitions
         if self.current_scenario == "descend":
-            self.finger_target_joint = self.FINGER_OPEN_JOINT
-            self._set_gripper_state()
-            self._move_mocap_to(
-                arm_start_pos, self.VERTICAL_QUAT, max_steps=150, tolerance=0.003
-            )
+            self._set_fingers_and_move_to(arm_start_pos, self.FINGER_OPEN_JOINT)
         elif self.current_scenario == "ascend":
-            self.finger_target_joint = self.FINGER_OPEN_JOINT
-            self._set_gripper_state()
-            self._move_mocap_to(
-                arm_start_pos, self.VERTICAL_QUAT, max_steps=100, tolerance=0.003
-            )
-            self.finger_target_joint = self.FINGER_CLOSED_JOINT
-            self._set_gripper_state()
-            self._move_mocap_to(
-                arm_start_pos, self.VERTICAL_QUAT, max_steps=150, tolerance=0.003
-            )
+            self._set_fingers_and_move_to(arm_start_pos, self.FINGER_OPEN_JOINT, max_steps=100)
+            self._set_fingers_and_move_to(arm_start_pos, self.FINGER_CLOSED_JOINT)
         else:
-            self.finger_target_joint = self.FINGER_CLOSED_JOINT
-            self._move_mocap_to(
-                arm_start_pos, self.VERTICAL_QUAT, max_steps=150, tolerance=0.003
-            )
+            self._set_fingers_and_move_to(arm_start_pos, self.FINGER_CLOSED_JOINT)
 
-        # Phase 3: validate final finger state
-        l_pos = self._utils.get_joint_qpos(
-            self.model, self.data, "robot0:l_gripper_finger_joint"
-        ).item()
+    def _set_fingers_and_move_to(
+        self, target: np.ndarray, finger_state: float, max_steps: int = 150
+    ) -> None:
+        """Set finger target, enforce it, then move the grip to target."""
+        self.finger_target_joint = finger_state
+        self._commit_finger_target()
+        self._move_grip_to(target, max_steps=max_steps, tolerance=0.003)
+
+    def _validate_finger_state(self) -> bool:
+        """Return False and log an error if the finger didn't reach its target."""
+        l_pos = self.get_finger_angle()
         if abs(l_pos - self.finger_target_joint) > 0.0005:
             self.logger.error(
-                f"Reset Failed: Finger joint at {l_pos:.6f}, target {self.finger_target_joint:.6f} (Scenario: {self.current_scenario})"
+                f"Reset Failed: Finger joint at {l_pos:.6f}, "
+                f"target {self.finger_target_joint:.6f} (Scenario: {self.current_scenario})"
             )
             return False
-
-        self._on_reset_settled(arm_start_pos)
-
-        if self.debug:
-            obj_pos_now = self.data.qpos[qpos_start : qpos_start + 3]
-            grip_pos_now = self._grip_pos()
-            arm_joints = [
-                "robot0:shoulder_pan_joint",
-                "robot0:shoulder_lift_joint",
-                "robot0:upperarm_roll_joint",
-                "robot0:elbow_flex_joint",
-                "robot0:forearm_roll_joint",
-                "robot0:wrist_flex_joint",
-                "robot0:wrist_roll_joint",
-            ]
-            joint_qpos = []
-            for jname in arm_joints:
-                try:
-                    joint_qpos.append(
-                        self._utils.get_joint_qpos(self.model, self.data, jname).item()
-                    )
-                except Exception:
-                    joint_qpos.append(float("nan"))
-            jq_str = ", ".join([f"{x:.4f}" for x in joint_qpos])
-            tube_str = (
-                f"{self.tube_center_xy}" if self.tube_center_xy is not None else "N/A"
-            )
-            msg = (
-                f"\n{'=' * 80}\n"
-                f"[EPISODE {self.episode_number} START] Scenario: {self.current_scenario.upper()}\n"
-                f"  GripPos:    [{', '.join([f'{x:.4f}' for x in grip_pos_now])}]\n"
-                f"  Goal:       [{', '.join([f'{x:.4f}' for x in self.goal_pos])}]\n"
-                f"  TubeCenter: {tube_str}\n"
-                f"  ObjPos:     [{', '.join([f'{x:.4f}' for x in obj_pos_now])}]\n"
-                f"  ArmJoints:  [{jq_str}]\n"
-                f"{'=' * 80}"
-            )
-            self.logger.debug(msg)
-
         return True
+
+    def _log_reset_state(self) -> None:
+        """Log a full state dump at the start of a debug episode."""
+        obj_qpos_start = self.model.jnt_qposadr[self.model.joint("object0:joint").id]
+        obj_pos_now = self.data.qpos[obj_qpos_start : obj_qpos_start + 3]
+        arm_joints = [
+            "robot0:shoulder_pan_joint", "robot0:shoulder_lift_joint",
+            "robot0:upperarm_roll_joint", "robot0:elbow_flex_joint",
+            "robot0:forearm_roll_joint", "robot0:wrist_flex_joint",
+            "robot0:wrist_roll_joint",
+        ]
+        joint_qpos = []
+        for jname in arm_joints:
+            try:
+                joint_qpos.append(self._utils.get_joint_qpos(self.model, self.data, jname).item())
+            except Exception:
+                joint_qpos.append(float("nan"))
+
+        tube_str = f"{self.tube_center_xy}" if self.tube_center_xy is not None else "N/A"
+        self.logger.debug(
+            f"\n{'=' * 80}\n"
+            f"[EPISODE {self.episode_number} START] Scenario: {self.current_scenario.upper()}\n"
+            f"  GripPos:    [{', '.join(f'{x:.4f}' for x in self.get_grip_pos())}]\n"
+            f"  Goal:       [{', '.join(f'{x:.4f}' for x in self.goal_pos)}]\n"
+            f"  TubeCenter: {tube_str}\n"
+            f"  ObjPos:     [{', '.join(f'{x:.4f}' for x in obj_pos_now)}]\n"
+            f"  ArmJoints:  [{', '.join(f'{x:.4f}' for x in joint_qpos)}]\n"
+            f"{'=' * 80}"
+        )
 
     def _on_reset_settled(self, arm_start_pos: np.ndarray) -> None:
         """Hook for subclasses to react once the reset arm is settled. Default no-op."""
@@ -585,156 +507,100 @@ class ChessBaseEnv(ChessSimulationEnv):
 
     # ── Soft reset (scenario swap mid-episode without teleporting the arm) ──
 
-    def transition_validate(self, nominal_exit_pos: np.ndarray | None = None) -> dict:
-        """Return arm state diagnostics at a scenario transition point."""
-        grip_pos = self._grip_pos()
-        grip_vel = self._utils.get_site_xvelp(
-            self.model, self.data, "robot0:grip"
-        ).copy()
-        speed = float(np.linalg.norm(grip_vel))
-        l_finger = self._utils.get_joint_qpos(
-            self.model, self.data, "robot0:l_gripper_finger_joint"
-        ).item()
-
-        result = {
-            "grip_pos": grip_pos.tolist(),
-            "grip_speed_mm_s": speed * 1000,
-            "is_velocity_ok": speed < self.HALT_VEL_THRESHOLD,
-            "error_from_nominal_mm": None,
-            "finger_state": l_finger,
-        }
-        if nominal_exit_pos is not None:
-            result["error_from_nominal_mm"] = float(
-                np.linalg.norm(grip_pos - nominal_exit_pos) * 1000
-            )
-        return result
-
     def soft_reset(
         self,
         new_scenario: str,
         new_goal_pos: np.ndarray,
         nominal_exit_pos: np.ndarray,
         nominal_xy: np.ndarray | None = None,
-    ) -> tuple[dict, dict]:
+    ) -> dict:
         """Transition to a new scenario without teleporting the arm."""
-        # Fetch: 3 slides + 1 torso + 2 head + 7 arm + 2 fingers
-        ROBOT_DOF = 15
-        HALT_HOLD_MAX_STEPS = 30
-        ALIGN_TOLERANCE_M = 0.004
-        ALIGN_MAX_STEPS = 80
-        ALIGN_GAIN = 1.0
-        ALIGN_MAX_STEP_M = 0.012
+        self._halt_arm()
+        self._align_to_exit_pos(nominal_exit_pos)
 
-        # Phase 1: drive arm to a dead stop
-        self._debug_current_phase = "softreset_p1_halt"
-        zero_action = np.zeros(4)
-        should_render = self.render_mode == "human"
-        self.data.qvel[:ROBOT_DOF] = 0.0
-        self.data.qacc[:ROBOT_DOF] = 0.0
+        prev_scenario = self.current_scenario
+        self._update_scenario_state(new_scenario, new_goal_pos, nominal_xy)
+
+        if not self.grasp_mode:
+            self._transition_fingers_for_scenario(nominal_exit_pos, new_scenario, prev_scenario)
+
+        return self._get_obs()
+
+    def _update_scenario_state(
+        self, new_scenario: str, new_goal_pos: np.ndarray, nominal_xy: np.ndarray | None
+    ) -> None:
+        """Switch scenario context: goal, tube centre, wrist orientation, and step counter."""
+        if new_scenario in {"descend", "ascend"} and nominal_xy is None:
+            raise ValueError(f"nominal_xy required for {new_scenario}")
+
+        self.current_scenario = new_scenario
+        self.goal_pos = new_goal_pos.copy()
+        self.goal = self.goal_pos.copy()
+        self.episode_steps = 0
+        self.tube_center_xy = nominal_xy.copy() if new_scenario in {"descend", "ascend"} else None
+        self._utils.set_mocap_quat(self.model, self.data, "robot0:mocap", self.VERTICAL_QUAT)
+
+    def _zero_robot_dynamics(self) -> None:
+        """Zero robot joint velocity and acceleration, then forward-propagate.
+
+        Only zeros robot DOFs (not object joints) so piece physics is preserved.
+        """
+        # 3 slides + 1 torso + 2 head + 7 arm + 2 fingers
+        robot_dof = 15
+        self.data.qvel[:robot_dof] = 0.0
+        self.data.qacc[:robot_dof] = 0.0
         mujoco.mj_forward(self.model, self.data)
-        halt_steps = 0
-        grip_vel = self._utils.get_site_xvelp(self.model, self.data, "robot0:grip")
-        if np.linalg.norm(grip_vel) >= self.HALT_VEL_THRESHOLD:
-            for _ in range(HALT_HOLD_MAX_STEPS):
-                grip_vel = self._utils.get_site_xvelp(
-                    self.model, self.data, "robot0:grip"
-                )
-                if np.linalg.norm(grip_vel) < self.HALT_VEL_THRESHOLD:
-                    break
-                self._set_action(zero_action)
-                self._mujoco_step(None)
-                if should_render:
-                    self.render()
-                halt_steps += 1
 
-        self.data.qvel[:ROBOT_DOF] = 0.0
-        self.data.qacc[:ROBOT_DOF] = 0.0
-        mujoco.mj_forward(self.model, self.data)
+    def _halt_arm(self) -> None:
+        """Zero robot velocity and wait up to 30 steps for the arm to stop."""
+        self._zero_robot_dynamics()
 
-        grip_vel = self._utils.get_site_xvelp(self.model, self.data, "robot0:grip")
-        speed = float(np.linalg.norm(grip_vel))
+        for _ in range(30):
+            if np.linalg.norm(self.get_grip_vel()) < self.HALT_VEL_THRESHOLD:
+                break
+            self._set_action(np.zeros(4))
+            self._mujoco_step(None)
+
+        self._zero_robot_dynamics()
+
+        speed = float(np.linalg.norm(self.get_grip_vel()))
         if speed >= self.HALT_VEL_THRESHOLD:
             raise RuntimeError(
                 f"soft_reset HALT_FAILED: speed={speed * 1000:.3f}mm/s >= "
                 f"threshold={self.HALT_VEL_THRESHOLD * 1000:.1f}mm/s"
             )
 
-        # Phase 2: waypoint alignment via physics-simulated smooth movement
-        self._debug_current_phase = "softreset_p2_align"
-        converged = False
-        align_steps = 0
-        for loop_step in range(ALIGN_MAX_STEPS):
-            grip_pos = self._grip_pos()
-            error = nominal_exit_pos - grip_pos
-            dist = np.linalg.norm(error)
-            if dist < ALIGN_TOLERANCE_M:
-                self.data.qvel[:ROBOT_DOF] = 0.0
-                self.data.qacc[:ROBOT_DOF] = 0.0
-                mujoco.mj_forward(self.model, self.data)
-                converged = True
-                break
-            step_vec = ALIGN_GAIN * error
-            if np.linalg.norm(step_vec) > ALIGN_MAX_STEP_M:
-                step_vec = step_vec / np.linalg.norm(step_vec) * ALIGN_MAX_STEP_M
+    def _align_to_exit_pos(self, nominal_exit_pos: np.ndarray) -> None:
+        """Nudge arm to nominal_exit_pos via capped physics steps."""
+        ALIGN_MAX_STEPS = 80
+        ALIGN_MAX_STEP_M = 0.012
+        ALIGN_TOLERANCE_M = 0.004
+        for _ in range(ALIGN_MAX_STEPS):
+            error = nominal_exit_pos - self.get_grip_pos()
+            if np.linalg.norm(error) < ALIGN_TOLERANCE_M:
+                self._zero_robot_dynamics()
+                return
+            step_vec = error / max(np.linalg.norm(error), 1e-9) * min(np.linalg.norm(error), ALIGN_MAX_STEP_M)
             self.data.mocap_pos[0][:3] += step_vec
             self._mujoco_step(None)
-            if should_render:
-                self.render()
-            align_steps = loop_step + 1
 
-        if not converged:
+        raise RuntimeError(f"soft_reset ALIGN_FAILED: did not converge to {nominal_exit_pos}")
+
+    def _transition_fingers_for_scenario(
+        self, nominal_exit_pos: np.ndarray, new_scenario: str, prev_scenario: str
+    ) -> None:
+        """Open or close fingers for the new scenario, then validate the result."""
+        needs_open = new_scenario == "descend" and prev_scenario != "descend"
+        needs_close = new_scenario in {"ascend", "transit"} and prev_scenario == "descend"
+
+        if needs_open:
+            self._set_fingers_and_move_to(nominal_exit_pos, self.FINGER_OPEN_JOINT, max_steps=40)
+        elif needs_close:
+            self._set_fingers_and_move_to(nominal_exit_pos, self.FINGER_CLOSED_JOINT, max_steps=40)
+
+        l_pos = self.get_finger_angle()
+        if abs(l_pos - self.finger_target_joint) > 0.0005:
             raise RuntimeError(
-                f"soft_reset ALIGN_FAILED: did not converge to {nominal_exit_pos}"
+                f"soft_reset FINGER_VALIDATION_FAILED: "
+                f"actual={l_pos:.6f}, target={self.finger_target_joint:.6f}"
             )
-
-        # Phase 3: state update
-        self._debug_current_phase = "softreset_p3_state"
-        prev_scenario = self.current_scenario
-        self.current_scenario = new_scenario
-        self.goal_pos = new_goal_pos.copy()
-        self.goal = self.goal_pos.copy()
-        self.episode_steps = 0
-
-        if new_scenario in {"descend", "ascend"}:
-            if nominal_xy is None:
-                raise ValueError(f"nominal_xy required for {new_scenario}")
-            self.tube_center_xy = nominal_xy.copy()
-        else:
-            self.tube_center_xy = None
-
-        self._utils.set_mocap_quat(
-            self.model, self.data, "robot0:mocap", self.VERTICAL_QUAT
-        )
-
-        # Phase 4: scripted gripper transition
-        self._debug_current_phase = "softreset_p4_gripper"
-        if not self.grasp_mode:
-            needs_open = new_scenario == "descend" and prev_scenario != "descend"
-            needs_close = (
-                new_scenario in {"ascend", "transit"} and prev_scenario == "descend"
-            )
-
-            if needs_open:
-                self.finger_target_joint = self.FINGER_OPEN_JOINT
-                self._set_gripper_state()
-                self._move_mocap_to(
-                    nominal_exit_pos, self.VERTICAL_QUAT, max_steps=40, tolerance=0.004
-                )
-            elif needs_close:
-                self.finger_target_joint = self.FINGER_CLOSED_JOINT
-                self._set_gripper_state()
-                self._move_mocap_to(
-                    nominal_exit_pos, self.VERTICAL_QUAT, max_steps=40, tolerance=0.004
-                )
-
-            l_pos = self._utils.get_joint_qpos(
-                self.model, self.data, "robot0:l_gripper_finger_joint"
-            ).item()
-            if abs(l_pos - self.finger_target_joint) > 0.0005:
-                raise RuntimeError(
-                    f"soft_reset FINGER_VALIDATION_FAILED: "
-                    f"actual={l_pos:.6f}, target={self.finger_target_joint:.6f}"
-                )
-
-        info = {"halt_steps": halt_steps, "align_steps": align_steps}
-        return self._get_obs(), info

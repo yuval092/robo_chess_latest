@@ -57,6 +57,9 @@ class UciEngine:
             self._proc.wait(timeout=1.0)
         except Exception:
             self._proc.kill()
+        finally:
+            self._proc.stdin and self._proc.stdin.close()
+            self._proc.stdout and self._proc.stdout.close()
 
     def _send(self, command: str) -> None:
         if self._proc.stdin is None:

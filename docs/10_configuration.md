@@ -25,7 +25,6 @@ Geometry and Z levels:
 | Key | Value | Meaning |
 |---|---:|---|
 | `cube_height` | `0.030` | Collision cube height |
-| `cube_z` | `0.415` | Resting cube center Z (`table_surface_z + cube_height/2`) |
 | `table_surface_z` | `0.400` | Table top; equals `floor_limit` |
 | `floor_limit` | `0.400` | Minimum gripper Z for transit; below this triggers `FLOOR_HIT` |
 | `table_center_xy` | `[0.88, 0.2641]` | Table/board center |

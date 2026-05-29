@@ -99,7 +99,6 @@ as if the gripper is already holding the object and needs to carry it to the goa
 `src/chess_env/transfer_obs.py` provides:
 
 - `TRANSFER_OBS_SPACE`
-- `enable_transfer_obs(env)`
 - `transfer_obs_enabled(env)` for temporary load/inference contexts
 
 ## Scenarios

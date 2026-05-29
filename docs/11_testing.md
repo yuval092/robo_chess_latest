@@ -58,7 +58,7 @@ These tests are mostly independent of MuJoCo.
 |---|---|
 | `test_characterization.py` | XML loads; transfer observation state restores after model loading success/failure |
 | `test_static_assets.py` | Static XML sections, piece bodies, STL detail/clearance constraints |
-| `test_task_chaining.py` | `transition_validate()`, `soft_reset()`, finger transition diagnostics |
+| `test_task_chaining.py` | `soft_reset()`, finger transition diagnostics |
 | `test_waypoints.py` | Scenario transition validation and goal derivation |
 
 These protect environment and model-interface invariants.

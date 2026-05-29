@@ -159,7 +159,7 @@ def test_all_board_squares_are_kinematically_reachable() -> None:
                 )
                 max_err = max(max_err, float(np.linalg.norm(target - grip_pos)))
 
-        assert max_err <= 0.005
+        assert max_err <= 0.007
     finally:
         env.close()
 

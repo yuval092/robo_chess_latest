@@ -103,12 +103,12 @@ class ChessSimulationEnv(MujocoFetchPickAndPlaceEnv):
         """Translate [dx, dy, dz, gripper] action into scaled mocap delta + finger enforcement."""
         assert action.shape == (4,)
         pos_ctrl = action[:3].copy() * self.POS_CTRL_SCALE
-        self._enforce_fingers()
+        self._apply_finger_target()
         self._utils.mocap_set_action(
             self.model, self.data, np.concatenate([pos_ctrl, np.zeros(4)])
         )
 
-    def _enforce_fingers(self) -> None:
+    def _apply_finger_target(self) -> None:
         """Set finger actuator targets; in teleport mode also force joint positions directly.
 
         grasp_mode=True: actuator-driven only — MuJoCo's Kp controller handles contact
@@ -117,22 +117,24 @@ class ChessSimulationEnv(MujocoFetchPickAndPlaceEnv):
         never drift during pure-movement phases.
         """
         target = self.finger_target_joint
-        self.data.ctrl[0] = target
-        self.data.ctrl[1] = target
+        self._set_finger_ctrl("robot0:l_gripper_finger_joint", target)
+        self._set_finger_ctrl("robot0:r_gripper_finger_joint", target)
 
         if not self.grasp_mode:
-            self._utils.set_joint_qpos(
-                self.model, self.data, "robot0:l_gripper_finger_joint", target
-            )
-            self._utils.set_joint_qpos(
-                self.model, self.data, "robot0:r_gripper_finger_joint", target
-            )
-            self._utils.set_joint_qvel(
-                self.model, self.data, "robot0:l_gripper_finger_joint", 0.0
-            )
-            self._utils.set_joint_qvel(
-                self.model, self.data, "robot0:r_gripper_finger_joint", 0.0
-            )
+            self._set_finger_state("robot0:l_gripper_finger_joint", target)
+            self._set_finger_state("robot0:r_gripper_finger_joint", target)
+
+    def _set_finger_ctrl(self, joint_name: str, target: float) -> None:
+        """Set the actuator ctrl target for a finger joint looked up by name."""
+        actuator_id = mujoco.mj_name2id(
+            self.model, mujoco.mjtObj.mjOBJ_ACTUATOR, joint_name
+        )
+        self.data.ctrl[actuator_id] = target
+
+    def _set_finger_state(self, joint_name: str, angle: float) -> None:
+        """Snap a finger joint to the given angle and zero its velocity."""
+        self._utils.set_joint_qpos(self.model, self.data, joint_name, angle)
+        self._utils.set_joint_qvel(self.model, self.data, joint_name, 0.0)
 
     def _env_setup(self, initial_qpos):
         """

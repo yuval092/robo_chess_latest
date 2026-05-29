@@ -40,18 +40,18 @@ def test_model_load_restores_observation_space_after_success_and_failure(
     wrapped_space = env.observation_space
     unwrapped_space = unwrapped.observation_space
     flag_name = (
-        "_use_transfer_obs"
-        if hasattr(unwrapped, "_use_transfer_obs")
+        "_use_pretrained_obs_format"
+        if hasattr(unwrapped, "_use_pretrained_obs_format")
         else "_use_phase9_obs"
     )
-    transfer_flag = getattr(unwrapped, flag_name)
+    pretrained_obs_flag = getattr(unwrapped, flag_name)
 
     controller = model_controller.ModelEmbeddedController(env)
     controller.load_model("transit", "ok.zip")
 
     assert env.observation_space == wrapped_space
     assert unwrapped.observation_space == unwrapped_space
-    assert getattr(unwrapped, flag_name) == transfer_flag
+    assert getattr(unwrapped, flag_name) == pretrained_obs_flag
 
     try:
         controller.load_model("transit", "bad.zip")
@@ -60,7 +60,7 @@ def test_model_load_restores_observation_space_after_success_and_failure(
 
     assert env.observation_space == wrapped_space
     assert unwrapped.observation_space == unwrapped_space
-    assert getattr(unwrapped, flag_name) == transfer_flag
+    assert getattr(unwrapped, flag_name) == pretrained_obs_flag
     env.close()
 
 

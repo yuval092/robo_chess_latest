@@ -11,9 +11,20 @@ import math
 import mujoco
 import numpy as np
 
-from src.chess_env.base_env import HOME_POSTURE_JOINTS, ChessBaseEnv
-from src.physical.piece_registry import PieceRegistry
+from src.chess_env.base_env import ChessBaseEnv
 
+HOME_POSTURE_JOINTS = (
+    "robot0:torso_lift_joint",
+    "robot0:shoulder_pan_joint",
+    "robot0:shoulder_lift_joint",
+    "robot0:upperarm_roll_joint",
+    "robot0:elbow_flex_joint",
+    "robot0:forearm_roll_joint",
+    "robot0:wrist_flex_joint",
+    "robot0:wrist_roll_joint",
+    "robot0:l_gripper_finger_joint",
+    "robot0:r_gripper_finger_joint",
+)
 
 class ChessProductionEnv(ChessBaseEnv):
     """Adds chess-piece state tracking plus scripted grasp/place pipelines."""
@@ -57,16 +68,12 @@ class ChessProductionEnv(ChessBaseEnv):
         return self.get_active_piece_quat()
 
     def set_active_piece(self, piece_id: str) -> None:
-        if self._piece_registry is None:
-            self._piece_registry = PieceRegistry()
         piece = self._piece_registry.by_id(piece_id)
         self.active_piece_id = piece.piece_id
-        self.active_piece_body_name = piece.body_name
         self.active_piece_joint_name = piece.joint_name
 
     def clear_active_piece(self) -> None:
         self.active_piece_id = None
-        self.active_piece_body_name = None
         self.active_piece_joint_name = None
 
     def get_active_piece_position(self) -> np.ndarray:
@@ -134,7 +141,6 @@ class ChessProductionEnv(ChessBaseEnv):
             result["reason"] = "HOME_POSTURE_NOT_CAPTURED"
             return result
 
-        self._debug_current_phase = "home_posture_reset"
         self.current_scenario = "transit"
         self.tube_center_xy = None
         self.goal_pos = self.HOME_POS.copy()
@@ -210,61 +216,123 @@ class ChessProductionEnv(ChessBaseEnv):
     # ── Scripted plunge / retract helpers used by grasp & place ─────────────
 
     def _plunge_to_z(
-        self, xy: np.ndarray, target_z: float, step_m: float, should_render: bool
+        self, xy: np.ndarray, target_z: float, step_m: float
     ) -> tuple[np.ndarray, int]:
-        grip_pos = self._grip_pos()
+        grip_pos = self.get_grip_pos()
         commanded_z = grip_pos[2]
         steps = 0
         for _ in range(int(round(max(0.0, commanded_z - target_z) / step_m)) + 6):
-            grip_pos = self._grip_pos()
+            grip_pos = self.get_grip_pos()
             if grip_pos[2] <= target_z + 0.001:
                 break
             commanded_z = max(target_z, commanded_z - step_m)
-            self._step_locked_grip(np.array([xy[0], xy[1], commanded_z]), should_render)
+            self._step_grip_toward(np.array([xy[0], xy[1], commanded_z]))
             steps += 1
-        return self._grip_pos(), steps
+        return self.get_grip_pos(), steps
 
     def _retract_to_hover(
         self,
         xy_provider,
         start_z: float,
         step_m: float,
-        should_render: bool,
         *,
         verify_held: bool = False,
     ) -> tuple[str | None, int]:
         commanded_z = start_z
         steps = 0
         for _ in range(int(round((self.HOVER_Z - start_z) / step_m)) + 3):
-            grip_pos = self._grip_pos()
+            grip_pos = self.get_grip_pos()
             if grip_pos[2] >= self.HOVER_Z - 0.001:
                 break
             commanded_z = min(self.HOVER_Z, commanded_z + step_m)
             xy = xy_provider()
-            self._step_locked_grip(np.array([xy[0], xy[1], commanded_z]), should_render)
+            self._step_grip_toward(np.array([xy[0], xy[1], commanded_z]))
             steps += 1
 
             if verify_held:
                 cube_now = self.get_cube_position()
-                grip_now = self._grip_pos()
+                grip_now = self.get_grip_pos()
                 if abs(cube_now[2] - (grip_now[2] - 0.015)) > self.CUBE_HELD_Z_LIMIT:
                     return "CUBE_DROPPED_DURING_RETRACT", steps
         return None, steps
 
-    def _hold_locked_target(
-        self, target_provider, steps: int, should_render: bool
-    ) -> None:
+    def _hold_locked_target(self, target_provider, steps: int) -> None:
         for _ in range(steps):
-            self._step_locked_grip(target_provider(), should_render)
+            self._step_grip_toward(target_provider())
+
+    # ── Shared pipeline phase helpers ───────────────────────────────────────
+
+    def _halt_and_check_hover_preconditions(
+        self, check_fingers_open: bool
+    ) -> str | None:
+        """Zero sim state, reassert finger ctrl, then verify speed/Z (and optionally fingers open).
+
+        Each pipeline starts here. Returns a reason string on failure, or None to continue.
+        """
+        self.data.qvel[:] = 0.0
+        self.data.qacc[:] = 0.0
+        self.data.ctrl[:] = 0.0
+        self._commit_finger_target()
+        mujoco.mj_forward(self.model, self.data)
+
+        grip_vel = self._utils.get_site_xvelp(self.model, self.data, "robot0:grip")
+        if float(np.linalg.norm(grip_vel)) > 0.005:
+            return "PRECONDITION_SPEED"
+
+        grip_pos = self.get_grip_pos()
+        if abs(grip_pos[2] - self.HOVER_Z) > 0.025:
+            return (
+                f"PRECONDITION_Z (grip={grip_pos[2] * 1000:.1f}mm, "
+                f"HOVER_Z={self.HOVER_Z * 1000:.1f}mm)"
+            )
+
+        if check_fingers_open:
+            l_finger = self._utils.get_joint_qpos(
+                self.model, self.data, "robot0:l_gripper_finger_joint"
+            ).item()
+            if l_finger < self.FINGER_OPEN_JOINT - 0.003:
+                return f"PRECONDITION_FINGERS_NOT_OPEN (j={l_finger:.4f})"
+
+        return None
+
+    def _align_over_xy(self, xy: np.ndarray) -> str | None:
+        """Reassert vertical wrist and align the grip site over (xy) at current Z."""
+        grip_pos = self.get_grip_pos()
+        align_target = np.array([xy[0], xy[1], grip_pos[2]])
+        if self._move_grip_to(
+            align_target,
+            max_steps=150,
+            tolerance=self.GRASP_ALIGN_TOLERANCE,
+        ):
+            return None
+        final_pos = self.get_grip_pos()
+        align_error_mm = float(np.linalg.norm(final_pos - align_target) * 1000.0)
+        return (
+            "ROTATION_FAILED "
+            f"(align error {align_error_mm:.1f}mm > {self.GRASP_ALIGN_TOLERANCE * 1000:.0f}mm)"
+        )
+
+    def _plunge_to_grasp_z(
+        self, xy: np.ndarray
+    ) -> tuple[np.ndarray, int, str | None]:
+        """Plunge from current Z to GRASP_Z over xy. Returns (final grip pos, steps, reason)."""
+        grip_pos, steps = self._plunge_to_z(
+            xy, self.GRASP_Z, self.GRASP_PLUNGE_STEP_M
+        )
+        if abs(grip_pos[2] - self.GRASP_Z) > 0.008:
+            return grip_pos, steps, (
+                f"PLUNGE_FAILED (z={grip_pos[2] * 1000:.1f}mm, "
+                f"target={self.GRASP_Z * 1000:.1f}mm)"
+            )
+        return grip_pos, steps, None
 
     # ── Scripted grasp pipeline ─────────────────────────────────────────────
 
     def execute_grasp(self) -> dict:
         """Scripted GRASP pipeline. Runs after DESCEND succeeds at HOVER_Z.
 
-        KEY INVARIANT: after every _set_action call, re-assert BOTH mocap_pos AND
-        mocap_quat before _mujoco_step. _set_action resets mocap to physical body
-        state, so the assertions must be repeated every step.
+        Each phase asserts both mocap_pos AND mocap_quat before _mujoco_step,
+        because _set_action resets mocap to the physical body state every call.
         """
         result = {
             "success": False,
@@ -276,190 +344,155 @@ class ChessProductionEnv(ChessBaseEnv):
             "final_finger_pos": 0.0,
             "close_steps_used": 0,
         }
-
-        # ── Phase 0: Halt & Settle ────────────────────────────────────────────
-        self._debug_current_phase = "grasp_p0_halt"
-        self.data.qvel[:] = 0.0
-        self.data.qacc[:] = 0.0
-        self.data.ctrl[:] = 0.0
-        self._set_gripper_state()
-        mujoco.mj_forward(self.model, self.data)
-
-        should_render = self.render_mode == "human"
-
-        grip_vel = self._utils.get_site_xvelp(self.model, self.data, "robot0:grip")
-        if float(np.linalg.norm(grip_vel)) > 0.005:
-            result["reason"] = "PRECONDITION_SPEED"
+        if reason := self._halt_and_check_hover_preconditions(check_fingers_open=True):
+            result["reason"] = reason
             return result
 
-        grip_pos = self._grip_pos()
-        if abs(grip_pos[2] - self.HOVER_Z) > 0.025:
-            result["reason"] = (
-                f"PRECONDITION_Z (grip={grip_pos[2] * 1000:.1f}mm, "
-                f"HOVER_Z={self.HOVER_Z * 1000:.1f}mm)"
-            )
-            return result
-
-        l_finger = self._utils.get_joint_qpos(
-            self.model, self.data, "robot0:l_gripper_finger_joint"
-        ).item()
-        if l_finger < self.FINGER_OPEN_JOINT - 0.003:
-            result["reason"] = f"PRECONDITION_FINGERS_NOT_OPEN (j={l_finger:.4f})"
-            return result
-
-        # ── Phase 1+2: Rotation Abort Check + Perfect Align ──────────────────
-        self._debug_current_phase = "grasp_p12_align"
-        cube_pos = self.get_cube_position().copy()
+        cube_pos, reason = self._grasp_check_cube_orientation()
         result["pre_grasp_cube_xy"] = cube_pos[:2].copy()
-
-        self.logger.debug(
-            f"[GRASP] Start. Cube at {cube_pos}, Grip at {self._grip_pos()}"
-        )
-        # Diagonal cube (yaw >25°) has effective width 42.4mm, exceeding max finger
-        # opening (38mm). Abort before plunge to prevent stub.
-        cube_quat = self.get_cube_quat()
-        w, x, y, z = cube_quat
-        siny_cosp = 2.0 * (w * z + x * y)
-        cosy_cosp = 1.0 - 2.0 * (y * y + z * z)
-        yaw = abs(math.atan2(siny_cosp, cosy_cosp))
-        # 4-fold symmetry: fold [0,π] into [0,π/2], then find distance to nearest axis.
-        # The naïve `min(yaw, abs(yaw - π/2))` fails above 90° (e.g. 175° → 85° false abort).
-        yaw_modulo = yaw % (math.pi / 2)
-        effective_yaw = min(yaw_modulo, (math.pi / 2) - yaw_modulo)
-        if effective_yaw > 0.436:
-            result["reason"] = f"CUBE_ROTATED (yaw={math.degrees(effective_yaw):.1f}°)"
+        if reason:
+            result["reason"] = reason
+            return result
+        if reason := self._align_over_xy(cube_pos[:2]):
+            result["reason"] = reason
             return result
 
-        grip_pos = self._grip_pos()
-        align_target = np.array([cube_pos[0], cube_pos[1], grip_pos[2]])
-        if not self._move_mocap_to(
-            align_target,
-            self.VERTICAL_QUAT,
-            max_steps=150,
-            tolerance=self.GRASP_ALIGN_TOLERANCE,
-        ):
-            final_pos = self._grip_pos()
-            align_error_mm = float(np.linalg.norm(final_pos - align_target) * 1000.0)
-            result["reason"] = (
-                "ROTATION_FAILED "
-                f"(align error {align_error_mm:.1f}mm > {self.GRASP_ALIGN_TOLERANCE * 1000:.0f}mm)"
-            )
-            return result
-
-        # ── Phase 3: Plunge (current Z → PLACE_Z) ────────────────────────────
-        self._debug_current_phase = "grasp_p3_plunge"
-        place_z = self.GRASP_Z
-        grip_pos, _plunge_steps = self._plunge_to_z(
-            cube_pos[:2], place_z, self.GRASP_PLUNGE_STEP_M, should_render
-        )
+        grip_pos, plunge_steps, reason = self._plunge_to_grasp_z(cube_pos[:2])
         if self.debug:
             self.logger.debug(
                 f"[GRASP] Post-Plunge. Grip at {grip_pos}, Cube at {self.get_cube_position()}"
             )
-        if abs(grip_pos[2] - self.GRASP_Z) > 0.008:
-            result["reason"] = (
-                f"PLUNGE_FAILED (z={grip_pos[2] * 1000:.1f}mm, "
-                f"target={self.GRASP_Z * 1000:.1f}mm)"
-            )
+        if reason:
+            result["reason"] = reason
             return result
 
-        # ── Phase 4: Grasp (Finger Close, Linear Ramp) ───────────────────────
-        # Ramp finger target from OPEN to a secure-grip value over the step budget.
-        # Direct jump creates a large impulse; ramping limits contact shock.
-        self._debug_current_phase = "grasp_p4_close"
+        close_steps, reason = self._grasp_close_fingers_with_ramp()
+        result["close_steps_used"] = close_steps
+        if reason:
+            result["reason"] = reason
+            return result
+
+        cube_pos, grip_pos, l_finger, reason = self._grasp_hold_and_verify()
+        result["post_grasp_cube_pos"] = cube_pos.copy()
+        result["final_xy_error_mm"] = (
+            float(np.linalg.norm(cube_pos[:2] - grip_pos[:2])) * 1000
+        )
+        result["final_z_error_mm"] = float(abs(cube_pos[2] - grip_pos[2])) * 1000
+        result["final_finger_pos"] = l_finger
+        if reason:
+            result["reason"] = reason
+            return result
+
+        retract_steps, reason = self._grasp_retract()
+        if reason:
+            result["reason"] = reason
+            return result
+
+        result["success"] = True
+        result["total_steps_used"] = (
+            plunge_steps + close_steps + self.GRASP_HOLD_STEPS + retract_steps
+        )
+        result["post_grasp_cube_pos"] = self.get_cube_position().copy()
+        return result
+
+    def _grasp_check_cube_orientation(self) -> tuple[np.ndarray, str | None]:
+        """Read the cube pose and abort if its yaw exceeds finger clearance.
+
+        A cube rotated >25° has effective width 42.4mm, exceeding max finger
+        opening (38mm). Aborting before plunge prevents a stub.
+        """
+        cube_pos = self.get_cube_position().copy()
+        self.logger.debug(
+            f"[GRASP] Start. Cube at {cube_pos}, Grip at {self.get_grip_pos()}"
+        )
+
+        w, x, y, z = self.get_cube_quat()
+        siny_cosp = 2.0 * (w * z + x * y)
+        cosy_cosp = 1.0 - 2.0 * (y * y + z * z)
+        yaw = abs(math.atan2(siny_cosp, cosy_cosp))
+        # 4-fold symmetry: fold [0,π] into [0,π/2], then distance to nearest axis.
+        # The naïve `min(yaw, abs(yaw - π/2))` fails above 90° (175° → false 85°).
+        yaw_modulo = yaw % (math.pi / 2)
+        effective_yaw = min(yaw_modulo, (math.pi / 2) - yaw_modulo)
+        if effective_yaw > 0.436:
+            return cube_pos, f"CUBE_ROTATED (yaw={math.degrees(effective_yaw):.1f}°)"
+        return cube_pos, None
+
+    def _grasp_close_fingers_with_ramp(self) -> tuple[int, str | None]:
+        """Ramp finger target from OPEN to GRASP_RAMP_END while tracking live cube XY.
+
+        Direct jump creates a large impulse; ramping limits contact shock. Aborts
+        early if fingers reach the secure-grip target with no cube contact.
+        """
         self.grasp_mode = True
         ramp_start = self.FINGER_OPEN_JOINT
         ramp_end = self.GRASP_RAMP_END
         ramp_delta = (ramp_start - ramp_end) / self.GRASP_CLOSE_STEPS
-        empty_detect_threshold = self.EMPTY_GRASP_THRESHOLD
         empty_detect_start = max(8, int(self.GRASP_CLOSE_STEPS * 0.65))
 
         steps_used = 0
         for step in range(self.GRASP_CLOSE_STEPS):
             self.finger_target_joint = max(ramp_end, ramp_start - ramp_delta * step)
             live_cube = self.get_cube_position()
-            self._step_locked_grip(
-                np.array([live_cube[0], live_cube[1], self.GRASP_Z]), should_render
+            self._step_grip_toward(
+                np.array([live_cube[0], live_cube[1], self.GRASP_Z])
             )
             steps_used += 1
 
-            # Early abort: fingers reached the secure-grip target with no cube contact.
             if step >= empty_detect_start:
                 l_now = self._utils.get_joint_qpos(
                     self.model, self.data, "robot0:l_gripper_finger_joint"
                 ).item()
-                if l_now < empty_detect_threshold:
-                    result["reason"] = (
+                if l_now < self.EMPTY_GRASP_THRESHOLD:
+                    return steps_used, (
                         f"FINGER_CLOSED_EMPTY (j={l_now:.4f} at step {step})"
                     )
-                    result["close_steps_used"] = steps_used
-                    return result
 
-        result["close_steps_used"] = steps_used
+        return steps_used, None
 
-        # ── Phase 5: Hold & Verify ───────────────────────────────────────────
-        self._debug_current_phase = "grasp_p5_hold"
+    def _grasp_hold_and_verify(self) -> tuple[np.ndarray, np.ndarray, float, str | None]:
+        """Hold the grip steady on the cube, then verify XY/Z error and finger position."""
 
         def live_cube_target():
             live_cube = self.get_cube_position()
             return np.array([live_cube[0], live_cube[1], self.GRASP_Z])
 
-        self._hold_locked_target(live_cube_target, self.GRASP_HOLD_STEPS, should_render)
+        self._hold_locked_target(live_cube_target, self.GRASP_HOLD_STEPS)
 
         cube_pos = self.get_cube_position()
-        grip_pos = self._grip_pos()
+        grip_pos = self.get_grip_pos()
         l_finger = self._utils.get_joint_qpos(
             self.model, self.data, "robot0:l_gripper_finger_joint"
         ).item()
 
-        xy_error = float(np.linalg.norm(cube_pos[:2] - grip_pos[:2])) * 1000
-        z_error = float(abs(cube_pos[2] - grip_pos[2])) * 1000
+        xy_error_mm = float(np.linalg.norm(cube_pos[:2] - grip_pos[:2])) * 1000
+        z_error_mm = float(abs(cube_pos[2] - grip_pos[2])) * 1000
 
-        result["post_grasp_cube_pos"] = cube_pos.copy()
-        result["final_xy_error_mm"] = xy_error
-        result["final_z_error_mm"] = z_error
-        result["final_finger_pos"] = l_finger
-
-        if xy_error > self.GRASP_VERIFY_XY_THRESHOLD * 1000:
-            result["reason"] = (
-                f"VERIFY_XY_FAILED ({xy_error:.1f}mm > "
+        if xy_error_mm > self.GRASP_VERIFY_XY_THRESHOLD * 1000:
+            return cube_pos, grip_pos, l_finger, (
+                f"VERIFY_XY_FAILED ({xy_error_mm:.1f}mm > "
                 f"{self.GRASP_VERIFY_XY_THRESHOLD * 1000:.0f}mm)"
             )
-            return result
-
-        if z_error > self.GRASP_VERIFY_Z_THRESHOLD * 1000:
-            result["reason"] = (
-                f"VERIFY_Z_FAILED ({z_error:.1f}mm > "
+        if z_error_mm > self.GRASP_VERIFY_Z_THRESHOLD * 1000:
+            return cube_pos, grip_pos, l_finger, (
+                f"VERIFY_Z_FAILED ({z_error_mm:.1f}mm > "
                 f"{self.GRASP_VERIFY_Z_THRESHOLD * 1000:.0f}mm)"
             )
-            return result
+        if l_finger < self.EMPTY_GRASP_THRESHOLD:
+            return cube_pos, grip_pos, l_finger, (
+                f"VERIFY_FINGERS_CLOSED_EMPTY (j={l_finger:.4f})"
+            )
+        return cube_pos, grip_pos, l_finger, None
 
-        if l_finger < empty_detect_threshold:
-            result["reason"] = f"VERIFY_FINGERS_CLOSED_EMPTY (j={l_finger:.4f})"
-            return result
-
-        # ── Phase 6: Retract (PLACE_Z → HOVER_Z) ─────────────────────────────
-        self._debug_current_phase = "grasp_p6_retract"
-        retract_error, _retract_steps = self._retract_to_hover(
+    def _grasp_retract(self) -> tuple[int, str | None]:
+        """Retract from PLACE_Z to HOVER_Z while tracking the cube and verifying it stays held."""
+        reason, steps = self._retract_to_hover(
             lambda: self.get_cube_position()[:2],
-            place_z,
+            self.GRASP_Z,
             self.GRASP_RETRACT_STEP_M,
-            should_render,
             verify_held=True,
         )
-        if retract_error:
-            result["reason"] = retract_error
-            return result
-
-        result["success"] = True
-        result["total_steps_used"] = (
-            _plunge_steps
-            + result["close_steps_used"]
-            + self.GRASP_HOLD_STEPS
-            + _retract_steps
-        )
-        result["post_grasp_cube_pos"] = self.get_cube_position().copy()
-        return result
+        return steps, reason
 
     # ── Scripted place pipeline ─────────────────────────────────────────────
 
@@ -475,118 +508,80 @@ class ChessProductionEnv(ChessBaseEnv):
             "final_cube_pos": None,
             "final_xy_error_mm": 0.0,
         }
-
-        # ── Phase 0: Halt & Settle ───────────────────────────────────────────
-        # CRITICAL: zero the full simulation state ([:]), not just robot DOFs.
-        self._debug_current_phase = "place_p0_halt"
-        self.data.qvel[:] = 0.0
-        self.data.qacc[:] = 0.0
-        self.data.ctrl[:] = 0.0
-        self._set_gripper_state()
-        mujoco.mj_forward(self.model, self.data)
-
-        should_render = self.render_mode == "human"
-
-        grip_vel = self._utils.get_site_xvelp(self.model, self.data, "robot0:grip")
-        if float(np.linalg.norm(grip_vel)) > 0.005:
-            result["reason"] = "PRECONDITION_SPEED"
+        if reason := self._halt_and_check_hover_preconditions(check_fingers_open=False):
+            result["reason"] = reason
             return result
 
-        grip_pos = self._grip_pos()
-        if abs(grip_pos[2] - self.HOVER_Z) > 0.025:
-            result["reason"] = f"PRECONDITION_Z (grip={grip_pos[2] * 1000:.1f}mm)"
+        if reason := self._align_over_xy(dst_xy):
+            result["reason"] = reason
             return result
 
-        # ── Phase 1+2: Vertical Correction + XY Align Over Destination ──────
-        self._debug_current_phase = "place_p12_align"
-        grip_pos = self._grip_pos()
-        align_target = np.array([dst_xy[0], dst_xy[1], grip_pos[2]])
-        if not self._move_mocap_to(
-            align_target,
-            self.VERTICAL_QUAT,
-            max_steps=150,
-            tolerance=self.GRASP_ALIGN_TOLERANCE,
-        ):
-            final_pos = self._grip_pos()
-            align_error_mm = float(np.linalg.norm(final_pos - align_target) * 1000.0)
-            result["reason"] = (
-                "ROTATION_FAILED "
-                f"(align error {align_error_mm:.1f}mm > {self.GRASP_ALIGN_TOLERANCE * 1000:.0f}mm)"
-            )
+        place_pos, plunge_steps, reason = self._plunge_to_grasp_z(dst_xy)
+        if reason:
+            result["reason"] = reason
             return result
 
-        # ── Phase 3: Plunge (current Z → PLACE_Z) ────────────────────────────
-        self._debug_current_phase = "place_p3_plunge"
-        place_z = self.GRASP_Z
-        _, _plunge_steps = self._plunge_to_z(
-            dst_xy, place_z, self.GRASP_PLUNGE_STEP_M, should_render
-        )
+        self._place_release_fingers(place_pos.copy())
 
-        # Verify plunge reached place_z before releasing. If we stalled mid-descent
-        # and open here, the cube falls from height.
-        grip_pos = self._grip_pos()
-        place_pos = grip_pos.copy()
-        if abs(grip_pos[2] - place_z) > 0.008:
-            result["reason"] = (
-                f"PLUNGE_FAILED (z={grip_pos[2] * 1000:.1f}mm, "
-                f"target={place_z * 1000:.1f}mm)"
-            )
-            return result
-
-        # ── Phase 4: Release (Linear Ramp Open) ──────────────────────────────
-        # Ramp from GRASP_RAMP_END (actual grip position) to OPEN. Starting from
-        # 0.0 would actively squeeze fingers before opening.
-        self._debug_current_phase = "place_p4_release"
-        release_target = place_pos.copy()
-        ramp_start = self.GRASP_RAMP_END
-        ramp_end = self.FINGER_OPEN_JOINT
-        release_ramp_steps = self.RELEASE_RAMP_STEPS
-        release_settle_steps = self.RELEASE_SETTLE_STEPS
-        ramp_delta = (ramp_end - ramp_start) / release_ramp_steps
-
-        for step in range(release_ramp_steps):
-            self.finger_target_joint = min(ramp_end, ramp_start + ramp_delta * step)
-            self._step_locked_grip(release_target, should_render)
-
-        self.finger_target_joint = self.FINGER_OPEN_JOINT
-        self._hold_locked_target(
-            lambda: release_target, release_settle_steps, should_render
-        )
-
-        self.grasp_mode = False
-
-        # ── Phase 5: Verify Placement ────────────────────────────────────────
-        self._debug_current_phase = "place_p5_verify"
-        cube_pos = self.get_cube_position()
-        xy_error = float(np.linalg.norm(cube_pos[:2] - dst_xy[:2])) * 1000
-        z_error = (
-            float(abs(cube_pos[2] - (self.TABLE_Z + self.CUBE_HEIGHT / 2.0))) * 1000
-        )
-
+        cube_pos, reason = self._place_verify_placement(dst_xy)
         result["final_cube_pos"] = cube_pos.copy()
-        result["final_xy_error_mm"] = xy_error
-
-        if xy_error > 20.0:
-            result["reason"] = f"PLACE_XY_FAILED ({xy_error:.1f}mm drift from target)"
-            return result
-
-        if z_error > 10.0:
-            result["reason"] = (
-                f"PLACE_Z_FAILED ({z_error:.1f}mm — cube not flat on table)"
-            )
-            return result
-
-        # ── Phase 6: Retract (PLACE_Z → HOVER_Z) ─────────────────────────────
-        self._debug_current_phase = "place_p6_retract"
-        _, _retract_steps = self._retract_to_hover(
-            lambda: place_pos[:2], place_z, self.GRASP_RETRACT_STEP_M, should_render
+        result["final_xy_error_mm"] = (
+            float(np.linalg.norm(cube_pos[:2] - dst_xy[:2])) * 1000
         )
+        if reason:
+            result["reason"] = reason
+            return result
+
+        retract_steps = self._place_retract(place_pos[:2])
 
         result["success"] = True
         result["total_steps_used"] = (
-            _plunge_steps
+            plunge_steps
             + self.RELEASE_RAMP_STEPS
             + self.RELEASE_SETTLE_STEPS
-            + _retract_steps
+            + retract_steps
         )
         return result
+
+    def _place_release_fingers(self, release_target: np.ndarray) -> None:
+        """Ramp fingers from GRASP_RAMP_END to OPEN, then settle.
+
+        Ramping from 0.0 would actively squeeze fingers before opening; starting
+        from the actual grip position avoids that.
+        """
+        ramp_start = self.GRASP_RAMP_END
+        ramp_end = self.FINGER_OPEN_JOINT
+        ramp_delta = (ramp_end - ramp_start) / self.RELEASE_RAMP_STEPS
+
+        for step in range(self.RELEASE_RAMP_STEPS):
+            self.finger_target_joint = min(ramp_end, ramp_start + ramp_delta * step)
+            self._step_grip_toward(release_target)
+
+        self.finger_target_joint = self.FINGER_OPEN_JOINT
+        self._hold_locked_target(lambda: release_target, self.RELEASE_SETTLE_STEPS)
+        self.grasp_mode = False
+
+    def _place_verify_placement(
+        self, dst_xy: np.ndarray
+    ) -> tuple[np.ndarray, str | None]:
+        """Read cube pose and check XY drift against dst_xy and Z height against table surface."""
+        cube_pos = self.get_cube_position()
+        xy_error_mm = float(np.linalg.norm(cube_pos[:2] - dst_xy[:2])) * 1000
+        z_error_mm = (
+            float(abs(cube_pos[2] - (self.TABLE_SURFACE_Z + self.CUBE_HEIGHT / 2.0))) * 1000
+        )
+
+        if xy_error_mm > 20.0:
+            return cube_pos, f"PLACE_XY_FAILED ({xy_error_mm:.1f}mm drift from target)"
+        if z_error_mm > 10.0:
+            return cube_pos, (
+                f"PLACE_Z_FAILED ({z_error_mm:.1f}mm — cube not flat on table)"
+            )
+        return cube_pos, None
+
+    def _place_retract(self, place_xy: np.ndarray) -> int:
+        """Retract from PLACE_Z to HOVER_Z over the placement XY. Always succeeds."""
+        _, steps = self._retract_to_hover(
+            lambda: place_xy, self.GRASP_Z, self.GRASP_RETRACT_STEP_M
+        )
+        return steps

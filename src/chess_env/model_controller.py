@@ -9,7 +9,7 @@ from dataclasses import dataclass
 import numpy as np
 from stable_baselines3 import SAC
 
-from src.chess_env.base_env import transfer_obs_enabled
+from src.chess_env.base_env import pretrained_obs_format_enabled
 from src.chess_env.simulation import reset_elapsed_steps, unwrap_env
 
 M_TO_MM = 1000.0
@@ -61,7 +61,7 @@ class ModelEmbeddedController:
         if not path:
             raise ValueError(f"No model path provided for {stage}")
 
-        with transfer_obs_enabled(self._wrapped_env):
+        with pretrained_obs_format_enabled(self._wrapped_env):
             with contextlib.redirect_stdout(io.StringIO()):
                 self._models[stage] = SAC.load(path, env=self._wrapped_env)
         print(f"[ModelEmbeddedController] Loaded {stage} model from {path}")
@@ -110,10 +110,10 @@ class ModelEmbeddedController:
         """Execute the scripted grasp pipeline and return StageResult."""
 
         env = self._env
-        grip_before = self._get_gripper_position()
+        grip_before = self._env.get_grip_pos()
         result_dict = env.execute_grasp()
         success = result_dict.get("success", False)
-        grip_after = self._get_gripper_position()
+        grip_after = self._env.get_grip_pos()
         return StageResult(
             success=success,
             steps=result_dict.get(
@@ -130,7 +130,7 @@ class ModelEmbeddedController:
         env = self._env
         result_dict = env.execute_place(dst_xy)
         success = result_dict.get("success", False)
-        grip_after = self._get_gripper_position()
+        grip_after = self._env.get_grip_pos()
         return StageResult(
             success=success,
             steps=result_dict.get("total_steps_used", 0),
@@ -209,7 +209,6 @@ class ModelEmbeddedController:
         env.goal_pos = target_pos.copy()
         env.goal = target_pos.copy()
         env.current_scenario = stage
-        env._debug_current_phase = stage
         env.tube_center_xy = target_pos[:2].copy() if stage in {"descend", "ascend"} else None
         # In grasp_mode the fingers are held against a piece — leave them as-is
         # so the actuator keeps gripping through the transit.
@@ -229,9 +228,7 @@ class ModelEmbeddedController:
             return None
         # Only the left finger is checked because both fingers are always driven to the
         # same target value simultaneously, so left mirrors right exactly.
-        l_finger = env._utils.get_joint_qpos(
-            env.model, env.data, "robot0:l_gripper_finger_joint"
-        ).item()
+        l_finger = env.get_finger_angle()
         expected_finger = env.finger_target_joint
         if abs(l_finger - expected_finger) > 0.003:
             return StageResult(
@@ -241,22 +238,11 @@ class ModelEmbeddedController:
                     f"PRECONDITION_FINGER (actual={l_finger:.4f}, "
                     f"expected={expected_finger:.4f})"
                 ),
-                final_pos=self._get_gripper_position(),
+                final_pos=self._env.get_grip_pos(),
                 error_mm=0.0,
             )
         return None
 
-    def _get_gripper_position(self) -> np.ndarray:
-        """Return current gripper position."""
-        env = self._env
-        return env._utils.get_site_xpos(env.model, env.data, "robot0:grip").copy()
-    
-
-    def _get_gripper_speed(self) -> float:
-        """Return current gripper speed."""
-        env = self._env
-        grip_vel = env._utils.get_site_xvelp(env.model, env.data, "robot0:grip").copy()
-        return float(np.linalg.norm(grip_vel))
 
     def _execute_step(self, stage: str, model: SAC) -> None:
         """Predict an action, apply it to the environment, and render if needed."""
@@ -286,26 +272,26 @@ class ModelEmbeddedController:
         Returns (success, step_idx, crash_reason).
         """
         env = self._env
-        previous_transfer_obs = env._use_transfer_obs
-        env._use_transfer_obs = True
+        previous_pretrained_obs_format = env._use_pretrained_obs_format
+        env._use_pretrained_obs_format = True
         crash_reason = None
         success = False
         step_idx = 0
 
         try:
             for step_idx in range(self._max_steps):
-                grip_pos = self._get_gripper_position()
-                speed = self._get_gripper_speed()
+                grip_pos = self._env.get_grip_pos()
+                speed = float(np.linalg.norm(self._env.get_grip_vel()))
                 if bool(env._is_success(grip_pos, target_pos)) and speed < env.env_cfg["stability_vel_threshold"]:
                     success = True
                     break
                 self._execute_step(stage, model)
-                grip_pos = self._get_gripper_position()
+                grip_pos = self._env.get_grip_pos()
                 crash_reason = self._check_crash(env, stage, grip_pos)
                 if crash_reason:
                     break
         finally:
-            env._use_transfer_obs = previous_transfer_obs
+            env._use_pretrained_obs_format = previous_pretrained_obs_format
 
         return success, step_idx, crash_reason
 
@@ -317,7 +303,7 @@ class ModelEmbeddedController:
         crash_reason: str | None,
     ) -> StageResult:
         """Build a StageResult from the inference loop outcome."""
-        grip_pos = self._get_gripper_position()
+        grip_pos = self._env.get_grip_pos()
         dist = float(np.linalg.norm(target_pos - grip_pos))
         if not success and crash_reason is None and step_idx + 1 >= self._max_steps:
             crash_reason = "TIMEOUT"
