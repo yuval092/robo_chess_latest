@@ -50,7 +50,7 @@ Training thresholds and rewards:
 | `z_reward_weight` | `1.5` | Dense reward weight for Z-axis proximity |
 | `xy_reward_weight` | `2.0` | Dense reward weight for XY proximity |
 | `jitter_penalty_weight` | `0.003` | Penalty coefficient for squared XYZ action magnitude |
-| `floor_penalty` | `-0.5` | Added when gripper is within `floor_proximity_threshold` of `floor_limit` (value is negative) |
+| `floor_penalty` | `0.5` | Added when gripper is within `floor_proximity_threshold` of `floor_limit` |
 | `floor_proximity_threshold` | `0.025` | Safety margin above `floor_limit` that triggers the floor penalty |
 | `stability_vel_threshold` | `0.02` | Grip speed (m/s) below which the arm is stable for success |
 
