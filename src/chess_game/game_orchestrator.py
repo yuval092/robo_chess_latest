@@ -32,8 +32,6 @@ class MoveExecutionResult:
     move_uci: str | None
     error: str | None
     snapshot: GameSnapshot
-    awaiting_promotion: bool = False
-    promotion_square: str | None = None
 
 
 class GameOrchestrator:

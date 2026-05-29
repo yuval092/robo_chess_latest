@@ -130,12 +130,8 @@ physical_success: bool
 move_uci: str | None
 error: str | None
 snapshot: GameSnapshot
-awaiting_promotion: bool = False
-promotion_square: str | None = None
 ```
 
-The current browser handles promotion by including the promotion piece directly
-in `/api/move`, so `awaiting_promotion` is not used by the production flow.
 
 ## Commit Ordering
 

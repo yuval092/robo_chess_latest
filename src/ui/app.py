@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from dataclasses import asdict, is_dataclass
+from http import HTTPStatus
 from typing import Protocol
 
 from flask import Flask, jsonify, render_template, request
@@ -61,30 +62,15 @@ def create_app(backend: UIBackend) -> Flask:
         if not src or not dst:
             return jsonify(
                 {"accepted": False, "error": "src and dst are required"}
-            ), 400
+            ), HTTPStatus.BAD_REQUEST
         result = backend.submit_human_move(src, dst, payload.get("promotion"))
-        status = 200 if result.accepted else 400
+        status = HTTPStatus.OK if result.accepted else HTTPStatus.BAD_REQUEST
         return jsonify(to_jsonable(result)), status
-
-    @app.post("/api/promote")
-    def api_promote():
-        return jsonify(
-            {
-                "accepted": False,
-                "error": "Promotion continuation is not implemented yet.",
-            }
-        ), 501
 
     @app.post("/api/let-computer-play")
     def api_let_computer_play():
         result = backend.let_computer_play_current_turn()
-        status = 200 if result.accepted else 400
+        status = HTTPStatus.OK if result.accepted else HTTPStatus.BAD_REQUEST
         return jsonify(to_jsonable(result)), status
-
-    @app.post("/api/undo")
-    def api_undo():
-        return jsonify(
-            {"accepted": False, "error": "Undo is not implemented yet."}
-        ), 501
 
     return app

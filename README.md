@@ -80,7 +80,7 @@ executable to be available on `PATH`.
 The exhaustive physical move sweep remains opt-in for pytest:
 
 ```bash
-RUN_EXHAUSTIVE_PHYSICAL_MOVES=1 pytest tests/integration/test_all_square_moves.py
+RUN_EXHAUSTIVE_PHYSICAL_MOVES=1 pytest tests/integration/test_all_square_moves.py -s
 ```
 
 ## Project Structure

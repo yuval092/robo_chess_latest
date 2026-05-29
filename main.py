@@ -92,7 +92,7 @@ def build_orchestrator(
     )
 
 
-def run_play(args: argparse.Namespace) -> int:
+def run_game(args: argparse.Namespace) -> int:
     env = gym.make(
         "ChessFetchTask-v0",
         render_mode="human" if args.visualize else None,
@@ -158,7 +158,7 @@ def build_parser() -> argparse.ArgumentParser:
 
 def main() -> None:
     args = build_parser().parse_args()
-    sys.exit(run_play(args))
+    sys.exit(run_game(args))
 
 
 if __name__ == "__main__":

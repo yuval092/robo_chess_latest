@@ -59,7 +59,7 @@ Missing `src` or `dst` returns:
 {"accepted": false, "error": "src and dst are required"}
 ```
 
-with HTTP 400.
+with HTTP BAD_REQUEST.
 
 ## Queued Backend
 
@@ -99,13 +99,3 @@ Then it updates the cached snapshot.
 - Supports board flipping.
 - Detects promotion by pawn destination rank and opens a dialog.
 - Disables controls while a request is in flight or the game is over.
-
-Busy polling uses the documented config values:
-
-| Config | Value |
-|---|---:|
-| `busy_poll_initial_ms` | `200` |
-| `busy_poll_max_ms` | `1500` |
-
-The JavaScript currently hard-codes those same values.
-
