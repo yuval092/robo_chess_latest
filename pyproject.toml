@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "robo-chess"
-version = "0.1.0"
+version = "1.0.0"
 description = "RoboChess: MuJoCo-based robot arm chess controller"
 requires-python = ">=3.10"
 dependencies = [
@@ -17,6 +17,7 @@ dependencies = [
     "pyyaml",
     "stable-baselines3",
     "huggingface_hub",
+    "Tensorboard",
 ]
 
 [tool.setuptools.packages.find]
@@ -27,7 +28,7 @@ include = ["src*", "chess_env*", "training*"]
 "chess_env" = ["assets/*.xml", "stls/chess/*.stl", "stls/fetch/*.stl"]
 
 [project.scripts]
-robo-chess-train = "training.cli.main:main"
+robo-chess-train = "training.main:main"
 
 [tool.ruff]
 line-length = 88

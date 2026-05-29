@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import numpy as np
 
-from src.chess_env.base_env import ChessBaseEnv
+from src.chess_env.base_env import TRANSFER_OBS_SPACE, ChessBaseEnv
 
 
 class ChessTrainingEnv(ChessBaseEnv):
@@ -18,6 +18,8 @@ class ChessTrainingEnv(ChessBaseEnv):
         **kwargs,
     ):
         super().__init__(**kwargs)
+        self._use_transfer_obs = True
+        self.observation_space = TRANSFER_OBS_SPACE
 
         self.drift_curriculum_steps = (
             drift_curriculum_steps or self.env_cfg["drift_curriculum_steps"]
