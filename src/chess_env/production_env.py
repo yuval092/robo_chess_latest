@@ -431,9 +431,7 @@ class ChessProductionEnv(ChessBaseEnv):
             steps_used += 1
 
             if step >= empty_detect_start:
-                l_now = self._utils.get_joint_qpos(
-                    self.model, self.data, "robot0:l_gripper_finger_joint"
-                ).item()
+                l_now = self.get_finger_angle()
                 if l_now < self.EMPTY_GRASP_THRESHOLD:
                     return steps_used, (
                         f"FINGER_CLOSED_EMPTY (j={l_now:.4f} at step {step})"
@@ -452,9 +450,7 @@ class ChessProductionEnv(ChessBaseEnv):
 
         piece_pos = self.get_active_piece_position()
         grip_pos = self.get_grip_pos()
-        l_finger = self._utils.get_joint_qpos(
-            self.model, self.data, "robot0:l_gripper_finger_joint"
-        ).item()
+        l_finger = self.get_finger_angle()
 
         xy_error_mm = float(np.linalg.norm(piece_pos[:2] - grip_pos[:2])) * 1000
         z_error_mm = float(abs(piece_pos[2] - grip_pos[2])) * 1000
@@ -559,7 +555,7 @@ class ChessProductionEnv(ChessBaseEnv):
         piece_pos = self.get_active_piece_position()
         xy_error_mm = float(np.linalg.norm(piece_pos[:2] - dst_xy[:2])) * 1000
         z_error_mm = (
-            float(abs(piece_pos[2] - (self.TABLE_SURFACE_Z + self.CUBE_HEIGHT / 2.0))) * 1000
+            float(abs(piece_pos[2] - (self.TABLE_SURFACE_Z + self.PIECE_HEIGHT / 2.0))) * 1000
         )
 
         if xy_error_mm > 20.0:

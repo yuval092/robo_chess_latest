@@ -101,7 +101,7 @@ class MovementExecutor:
     ) -> PhysicalMoveResult | None:
         """Return a failure result if the piece landed too far from the target, else None."""
         piece_pos = self.env.get_active_piece_position()
-        expected_z = self.env.TABLE_SURFACE_Z + self.env.CUBE_HEIGHT / 2.0
+        expected_z = self.env.TABLE_SURFACE_Z + self.env.PIECE_HEIGHT / 2.0
         xy_error = float(np.linalg.norm(piece_pos[:2] - dst_xy[:2]))
         z_error = float(abs(piece_pos[2] - expected_z))
         if xy_error > self._reconcile_xy_tol:

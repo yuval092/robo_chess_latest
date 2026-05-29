@@ -24,7 +24,7 @@ Geometry and Z levels:
 
 | Key | Value | Meaning |
 |---|---:|---|
-| `cube_height` | `0.030` | Collision cube height |
+| `piece_height` | `0.030` | Collision piece height |
 | `table_surface_z` | `0.400` | Table top; equals `floor_limit` |
 | `floor_limit` | `0.400` | Minimum gripper Z for transit; below this triggers `FLOOR_HIT` |
 | `table_center_xy` | `[0.88, 0.2641]` | Table/board center |
@@ -114,7 +114,7 @@ Pieces:
 
 | Key | Value | Meaning |
 |---|---:|---|
-| `pieces.cube_height_m` | `0.030` | Full collision cube height; piece centre at `table_surface_z + 0.015` |
+| `pieces.piece_height_m` | `0.030` | Full collision piece height; piece centre at `table_surface_z + 0.015` |
 
 Game:
 

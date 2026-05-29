@@ -58,7 +58,7 @@ def _make_flow_env(debug: bool, visualize: bool) -> gym.Env:
 
 def _hide_other_pieces(inner, teleporter: PieceTeleporter, piece_id: str) -> None:
     registry = PieceRegistry()
-    z = inner.TABLE_SURFACE_Z + inner.CUBE_HEIGHT / 2.0
+    z = inner.TABLE_SURFACE_Z + inner.PIECE_HEIGHT / 2.0
     for idx, other_id in enumerate(registry.starting_square_map()):
         if other_id == piece_id:
             continue

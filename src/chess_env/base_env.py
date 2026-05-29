@@ -318,7 +318,7 @@ class ChessBaseEnv(ChessSimulationEnv):
     def _hidden_piece_position(self, index: int) -> np.ndarray:
         row = index // 12
         col = index % 12
-        return np.array([2.2 + row * 0.05, -0.5 + col * 0.05, self.CUBE_HEIGHT / 2.0])
+        return np.array([2.2 + row * 0.05, -0.5 + col * 0.05, self.PIECE_HEIGHT / 2.0])
 
     def _reset_chess_piece_bodies(self) -> None:
         hidden_index = self._place_board_pieces(hidden_index=0)
@@ -422,7 +422,7 @@ class ChessBaseEnv(ChessSimulationEnv):
         else:
             cube_xyz = np.array([
                 start_xy[0], start_xy[1],
-                self.TABLE_SURFACE_Z + self.CUBE_HEIGHT / 2.0,
+                self.TABLE_SURFACE_Z + self.PIECE_HEIGHT / 2.0,
             ])
             self._set_freejoint_pose("object0:joint", cube_xyz)
 

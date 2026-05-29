@@ -16,7 +16,7 @@ class BoardGeometry:
     cell_size_m: float
     board_size: int
     table_surface_z: float
-    cube_height_m: float
+    piece_height_m: float
     table_half_x: float
     table_half_y: float
 
@@ -39,7 +39,7 @@ class BoardMapper:
             cell_size_m=float(board_cfg["cell_size_m"]),
             board_size=int(board_cfg["board_size"]),
             table_surface_z=float(env_cfg["table_surface_z"]),
-            cube_height_m=float(pieces_cfg["cube_height_m"]),
+            piece_height_m=float(pieces_cfg["piece_height_m"]),
             table_half_x=float(env_cfg["table_half_x"]),
             table_half_y=float(env_cfg["table_half_y"]),
         )
@@ -78,7 +78,7 @@ class BoardMapper:
     def square_to_piece_xyz(self, square: chess.Square) -> np.ndarray:
         """Return the world XYZ piece centre for a chess square."""
         xy = self.square_to_xy(square)
-        z = self.geometry.table_surface_z + self.geometry.cube_height_m / 2.0
+        z = self.geometry.table_surface_z + self.geometry.piece_height_m / 2.0
         return np.array([xy[0], xy[1], z], dtype=float)
 
     def all_square_centers(self) -> dict[str, np.ndarray]:

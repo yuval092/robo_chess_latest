@@ -41,7 +41,7 @@ its full scene XML.
 |---|---|---:|
 | `TABLE_CENTER_XY` | `env.table_center_xy` | `[0.88, 0.2641]` |
 | `TABLE_SURFACE_Z` | `env.table_surface_z` | `0.400` |
-| `CUBE_HEIGHT` | `env.cube_height` | `0.030` |
+| `PIECE_HEIGHT` | `env.piece_height` | `0.030` |
 | `GRASP_Z` | `env.grasp_z` | `0.430` |
 | `HOVER_Z` | `env.hover_z` | `0.460` |
 | `SAFE_Z` | `env.safe_z` | `0.530` |

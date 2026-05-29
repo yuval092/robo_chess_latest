@@ -4,7 +4,7 @@ board:
   center_xy: [0.88, 0.2641]         # World XY coordinate of the board centre
 
 pieces:
-  cube_height_m: 0.030              # Full height of the collision cube; piece centre rests at table_surface_z + 0.015
+  piece_height_m: 0.030             # Full height of the collision box; piece centre rests at table_surface_z + 0.015
 
 reserves:
   graveyard_slot_spacing_m: 0.045   # Centre-to-centre spacing between slots in the graveyard grid

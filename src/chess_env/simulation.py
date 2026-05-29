@@ -59,7 +59,7 @@ class ChessSimulationEnv(MujocoFetchPickAndPlaceEnv):
         self.TABLE_SURFACE_Z = self.env_cfg["table_surface_z"]
         self.EDGE_MARGIN = self.env_cfg["edge_margin"]
         self.MIN_GOAL_DIST = self.env_cfg["min_goal_dist"]
-        self.CUBE_HEIGHT = self.env_cfg["cube_height"]
+        self.PIECE_HEIGHT = self.env_cfg["piece_height"]
 
         margin = self.EDGE_MARGIN
         center_x, center_y = self.TABLE_CENTER_XY
