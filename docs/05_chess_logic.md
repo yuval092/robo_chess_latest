@@ -119,7 +119,6 @@ legal_moves: list[str]
 status: GameStatus
 last_move: str | None
 move_history_san: list[str]
-is_busy: bool
 error: str | None
 ```
 
@@ -140,7 +139,7 @@ in `/api/move`, so `awaiting_promotion` is not used by the production flow.
 
 ## Commit Ordering
 
-`_submit_move()` plans the move before setting `is_busy`. Once physical execution
+`_submit_move()` plans the move then execute it. Once physical execution
 starts:
 
 1. `physical_executor.execute(plan)` must succeed.

@@ -113,17 +113,4 @@ def test_let_computer_play_returns_legal_move(client):
     assert data["move_uci"] is not None
 
 
-def test_busy_state_is_represented():
-    orchestrator = GameOrchestrator(
-        ChessService(),
-        FakePhysicalExecutor(),
-        LogicalPieceTracker(),
-        auto_computer_reply=False,
-    )
-    orchestrator.is_busy = True
-    app = create_app(orchestrator)
-    app.config.update(TESTING=True)
 
-    response = app.test_client().get("/api/snapshot")
-
-    assert response.get_json()["is_busy"] is True

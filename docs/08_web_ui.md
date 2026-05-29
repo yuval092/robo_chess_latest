@@ -99,7 +99,6 @@ Then it updates the cached snapshot.
 - Supports board flipping.
 - Detects promotion by pawn destination rank and opens a dialog.
 - Disables controls while a request is in flight or the game is over.
-- Polls snapshots with exponential backoff while `snapshot.is_busy` is true.
 
 Busy polling uses the documented config values:
 

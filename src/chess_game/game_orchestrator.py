@@ -22,7 +22,6 @@ class GameSnapshot:
     status: GameStatus
     last_move: str | None
     move_history_san: list[str]
-    is_busy: bool
     error: str | None
 
 
@@ -59,15 +58,11 @@ class GameOrchestrator:
             else auto_computer_reply
         )
         self._engine_cfg = engine_cfg
-        self.is_busy = False
         self.error: str | None = None
         self.last_move: str | None = None
 
     def new_game(self) -> GameSnapshot:
         """Reset the game and physical state, restarting the chess engine."""
-        if self.is_busy:
-            self.error = "Cannot start a new game while the arm is moving."
-            return self.snapshot()
         self.chess_service.close()
         self.chess_service = ChessService(engine_cfg=self._engine_cfg)
         self.piece_tracker = LogicalPieceTracker()
@@ -91,7 +86,6 @@ class GameOrchestrator:
             status=status,
             last_move=self.last_move,
             move_history_san=self.chess_service.san_history(),
-            is_busy=self.is_busy,
             error=self.error,
         )
 
@@ -101,69 +95,65 @@ class GameOrchestrator:
         """Validate and execute a human move request."""
         if self.human_color != "both" and self._turn_color_name() != self.human_color:
             return self._rejected("It is not the human side's turn.")
-        result = self._submit_move(
-            lambda: self.chess_service.construct_move_from_squares(src, dst, promotion)
-        )
-        if (
-            result.accepted
-            and result.physical_success
-            and self.auto_computer_reply
-            and not self.chess_service.board.is_game_over()
-        ):
-            return self.let_computer_play_current_turn()
-        return result
+        try:
+            move = self.chess_service.construct_move_from_squares(src, dst, promotion)
+        except IllegalMoveError as exc:
+            return self._rejected(str(exc))
+        result = self._execute_move(move)
+        return self._auto_play_if_computer_turn(result)
 
     def let_computer_play_current_turn(self) -> MoveExecutionResult:
         """Execute one computer-selected move."""
         if self.chess_service.board.is_game_over(claim_draw=True):
             return self._rejected(self._game_over_message())
-        result = self._submit_move(self.chess_service.choose_engine_move)
-        # If the opponent's turn is also computer-controlled, chain immediately.
-        # This handles pressing "Let computer play" on the human's own turn — the
-        # computer plays that turn, then the opponent's reply follows automatically.
+        try:
+            move = self.chess_service.choose_engine_move()
+        except IllegalMoveError as exc:
+            return self._rejected(str(exc))
+        result = self._execute_move(move)
+        return self._auto_play_if_computer_turn(result)
+
+    def _execute_move(self, move: chess.Move) -> MoveExecutionResult:
+        """Plan, execute physically, and commit the move."""
+        try:
+            plan = MovePlanner(self.chess_service.board, self.piece_tracker).plan(move)
+        except ValueError as exc:
+            return self._rejected(str(exc))
+        try:
+            physical_success, error = self._run_plan(move, plan)
+        except Exception as exc:
+            self.error = f"INTERNAL_ERROR: {exc}"
+            raise
+        self.error = error
+        return MoveExecutionResult(True, physical_success, move.uci(), error, self.snapshot())
+
+    def _run_plan(self, move: chess.Move, plan: list) -> tuple[bool, str | None]:
+        """Execute the physical plan; commit the move on success.
+
+        Returns (physical_success, error_message). The error message is None on full success,
+        or the home-return error string when the move committed but the arm failed to return home.
+        """
+        physical_result = self.physical_executor.execute(plan)
+        if not physical_result.success:
+            return False, physical_result.error
+        home_result = self.physical_executor.return_to_home()
+        self.chess_service.push(move)
+        self.piece_tracker.apply_plan(plan)
+        self.last_move = move.uci()
+        return True, None if home_result.success else home_result.error
+
+    def _auto_play_if_computer_turn(self, result: MoveExecutionResult) -> MoveExecutionResult:
+        """If the last move succeeded and it's the computer's turn, play it automatically."""
         if (
             result.accepted
             and result.physical_success
             and self.auto_computer_reply
-            and not self.chess_service.board.is_game_over()
             and self.human_color != "both"
             and self._turn_color_name() != self.human_color
+            and not self.chess_service.board.is_game_over()
         ):
             return self.let_computer_play_current_turn()
         return result
-
-    def _submit_move(self, move_factory) -> MoveExecutionResult:
-        """Execute a move through validation, planning, and physical execution."""
-        if self.is_busy:
-            return self._rejected("Game is busy.")
-        try:
-            move = move_factory()
-            plan = MovePlanner(self.chess_service.board, self.piece_tracker).plan(move)
-        except (IllegalMoveError, ValueError) as exc:
-            return self._rejected(str(exc))
-
-        self.is_busy = True
-        try:
-            physical_result = self.physical_executor.execute(plan)
-            if not physical_result.success:
-                self.error = physical_result.error
-                self.is_busy = False
-                return MoveExecutionResult(
-                    True, False, move.uci(), physical_result.error, self.snapshot()
-                )
-            home_result = self.physical_executor.return_to_home()
-            self.error = None if home_result.success else home_result.error
-            self.chess_service.push(move)
-            self.piece_tracker.apply_plan(plan)
-            self.last_move = move.uci()
-        except Exception as exc:
-            self.error = f"INTERNAL_ERROR: {exc}"
-            raise
-        finally:
-            self.is_busy = False
-        return MoveExecutionResult(
-                True, True, move.uci(), self.error, self.snapshot()
-            )
 
     def _rejected(self, error: str) -> MoveExecutionResult:
         """Return a rejected move result with a snapshot."""
