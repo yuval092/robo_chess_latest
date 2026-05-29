@@ -86,8 +86,8 @@ Grasp/place:
 | `release_settle_steps` | `2` | Steps to hold fingers open before placement is verified |
 | `grasp_verify_xy_threshold` | `0.015` | Maximum cube-to-grip XY distance (m) for a successful grasp |
 | `grasp_verify_z_threshold` | `0.020` | Maximum cube-to-grip Z distance (m) for a successful grasp |
-| `cube_held_xy_limit` | `0.030` | XY deviation (m) that triggers `CUBE_DROPPED_XY` |
-| `cube_held_z_limit` | `0.020` | Z deviation (m) that triggers `CUBE_DROPPED_Z` |
+| `piece_held_xy_limit` | `0.030` | XY deviation (m) that triggers `PIECE_DROPPED_XY` |
+| `piece_held_z_limit` | `0.020` | Z deviation (m) that triggers `PIECE_DROPPED_Z` |
 
 Execution tolerances:
 

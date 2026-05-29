@@ -14,14 +14,14 @@ def piece_xyz(uw, piece_id):
     return uw.data.qpos[qpos_start : qpos_start + 3].copy()
 
 
-def test_set_active_piece_routes_cube_position_to_selected_piece():
+def test_set_active_piece_routes_position_to_selected_piece():
     env = gym.make("ChessFetchTask-Play-v0", render_mode=None, show_chess_pieces=True)
     env.reset()
     uw = env.unwrapped
 
     uw.set_active_piece("white_pawn_e")
 
-    assert np.allclose(uw.get_cube_position(), piece_xyz(uw, "white_pawn_e"))
+    assert np.allclose(uw.get_active_piece_position(), piece_xyz(uw, "white_pawn_e"))
     env.close()
 
 

@@ -315,11 +315,11 @@ class ModelEmbeddedController:
             error_mm=dist * M_TO_MM,
         )
 
-    def _check_cube_dropped(self, env, grip_pos: np.ndarray) -> str | None:
+    def _check_piece_dropped(self, env, grip_pos: np.ndarray) -> str | None:
         """Return a crash reason if grasp_mode is active but the piece is no longer held."""
         if not env.grasp_mode:
             return None
-        held, reason = env._check_cube_held(grip_pos)
+        held, reason = env._check_piece_held(grip_pos)
         return None if held else reason
 
     def _check_tube_breach(self, env, grip_pos: np.ndarray) -> str | None:
@@ -344,7 +344,7 @@ class ModelEmbeddedController:
                 return f"TABLE_HIT (z={grip_pos[2]:.4f})"
         
         if stage in {"transit", "ascend"}:
-            if reason := self._check_cube_dropped(env, grip_pos):
+            if reason := self._check_piece_dropped(env, grip_pos):
                 return reason
 
         return None

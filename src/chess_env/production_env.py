@@ -43,8 +43,8 @@ class ChessProductionEnv(ChessBaseEnv):
         self.RELEASE_SETTLE_STEPS = self.env_cfg["release_settle_steps"]
         self.GRASP_VERIFY_XY_THRESHOLD = self.env_cfg["grasp_verify_xy_threshold"]
         self.GRASP_VERIFY_Z_THRESHOLD = self.env_cfg["grasp_verify_z_threshold"]
-        self.CUBE_HELD_XY_LIMIT = self.env_cfg["cube_held_xy_limit"]
-        self.CUBE_HELD_Z_LIMIT = self.env_cfg["cube_held_z_limit"]
+        self.PIECE_HELD_XY_LIMIT = self.env_cfg["piece_held_xy_limit"]
+        self.PIECE_HELD_Z_LIMIT = self.env_cfg["piece_held_z_limit"]
 
         self._home_posture_qpos = None
         self._home_posture_mocap_pos = None
@@ -57,15 +57,7 @@ class ChessProductionEnv(ChessBaseEnv):
         if np.linalg.norm(arm_start_pos - self.HOME_POS) < 1e-9:
             self._capture_home_posture()
 
-    # ── Active piece / cube state ───────────────────────────────────────────
-
-    def get_cube_position(self) -> np.ndarray:
-        """Return the selected active piece position."""
-        return self.get_active_piece_position()
-
-    def get_cube_quat(self) -> np.ndarray:
-        """Return the selected active piece quaternion."""
-        return self.get_active_piece_quat()
+    # ── Active piece state ───────────────────────────────────────────────────
 
     def set_active_piece(self, piece_id: str) -> None:
         piece = self._piece_registry.by_id(piece_id)
@@ -90,22 +82,22 @@ class ChessProductionEnv(ChessBaseEnv):
         qpos_start = self.model.jnt_qposadr[joint_id]
         return self.data.qpos[qpos_start + 3 : qpos_start + 7].copy()
 
-    def _check_cube_held(self, grip_pos: np.ndarray) -> tuple[bool, str | None]:
-        """Verify the cube is still in the gripper. Called when grasp_mode is on."""
-        cube_pos = self.get_cube_position()
-        xy_error = np.linalg.norm(cube_pos[:2] - grip_pos[:2])
-        # Cube CoM sits ~15mm below the grip site when held at center
-        z_error = abs(cube_pos[2] - (grip_pos[2] - 0.015))
+    def _check_piece_held(self, grip_pos: np.ndarray) -> tuple[bool, str | None]:
+        """Verify the active piece is still in the gripper. Called when grasp_mode is on."""
+        piece_pos = self.get_active_piece_position()
+        xy_error = np.linalg.norm(piece_pos[:2] - grip_pos[:2])
+        # Piece CoM sits ~15mm below the grip site when held at center
+        z_error = abs(piece_pos[2] - (grip_pos[2] - 0.015))
 
-        if xy_error > self.CUBE_HELD_XY_LIMIT:
+        if xy_error > self.PIECE_HELD_XY_LIMIT:
             return (
                 False,
-                f"CUBE_DROPPED_XY (err={xy_error * 1000:.1f}mm > limit={self.CUBE_HELD_XY_LIMIT * 1000:.0f}mm)",
+                f"PIECE_DROPPED_XY (err={xy_error * 1000:.1f}mm > limit={self.PIECE_HELD_XY_LIMIT * 1000:.0f}mm)",
             )
-        if z_error > self.CUBE_HELD_Z_LIMIT:
+        if z_error > self.PIECE_HELD_Z_LIMIT:
             return (
                 False,
-                f"CUBE_DROPPED_Z (err={z_error * 1000:.1f}mm > limit={self.CUBE_HELD_Z_LIMIT * 1000:.0f}mm)",
+                f"PIECE_DROPPED_Z (err={z_error * 1000:.1f}mm > limit={self.PIECE_HELD_Z_LIMIT * 1000:.0f}mm)",
             )
         return True, None
 
@@ -148,7 +140,6 @@ class ChessProductionEnv(ChessBaseEnv):
         self.finger_target_joint = self.FINGER_CLOSED_JOINT
         self.grasp_mode = False
 
-        should_render = self.render_mode == "human"
         l_id = mujoco.mj_name2id(
             self.model, mujoco.mjtObj.mjOBJ_ACTUATOR, "robot0:l_gripper_finger_joint"
         )
@@ -185,7 +176,7 @@ class ChessProductionEnv(ChessBaseEnv):
             self.data.ctrl[l_id] = self.FINGER_CLOSED_JOINT
             self.data.ctrl[r_id] = self.FINGER_CLOSED_JOINT
             mujoco.mj_forward(self.model, self.data)
-            if should_render:
+            if self.render_mode == "human":
                 self.render()
 
         for joint_name, qpos in self._home_posture_qpos.items():
@@ -199,6 +190,8 @@ class ChessProductionEnv(ChessBaseEnv):
         self.data.ctrl[l_id] = self.FINGER_CLOSED_JOINT
         self.data.ctrl[r_id] = self.FINGER_CLOSED_JOINT
         mujoco.mj_forward(self.model, self.data)
+        if self.render_mode == "human":
+            self.render()
 
         final_grip = self._utils.get_site_xpos(
             self.model, self.data, "robot0:grip"
@@ -250,10 +243,10 @@ class ChessProductionEnv(ChessBaseEnv):
             steps += 1
 
             if verify_held:
-                cube_now = self.get_cube_position()
+                piece_now = self.get_active_piece_position()
                 grip_now = self.get_grip_pos()
-                if abs(cube_now[2] - (grip_now[2] - 0.015)) > self.CUBE_HELD_Z_LIMIT:
-                    return "CUBE_DROPPED_DURING_RETRACT", steps
+                if abs(piece_now[2] - (grip_now[2] - 0.015)) > self.PIECE_HELD_Z_LIMIT:
+                    return "PIECE_DROPPED_DURING_RETRACT", steps
         return None, steps
 
     def _hold_locked_target(self, target_provider, steps: int) -> None:
@@ -287,9 +280,7 @@ class ChessProductionEnv(ChessBaseEnv):
             )
 
         if check_fingers_open:
-            l_finger = self._utils.get_joint_qpos(
-                self.model, self.data, "robot0:l_gripper_finger_joint"
-            ).item()
+            l_finger = self.get_finger_angle()
             if l_finger < self.FINGER_OPEN_JOINT - 0.003:
                 return f"PRECONDITION_FINGERS_NOT_OPEN (j={l_finger:.4f})"
 
@@ -337,8 +328,8 @@ class ChessProductionEnv(ChessBaseEnv):
         result = {
             "success": False,
             "reason": None,
-            "pre_grasp_cube_xy": None,
-            "post_grasp_cube_pos": None,
+            "pre_grasp_piece_xy": None,
+            "post_grasp_piece_pos": None,
             "final_xy_error_mm": 0.0,
             "final_z_error_mm": 0.0,
             "final_finger_pos": 0.0,
@@ -348,19 +339,19 @@ class ChessProductionEnv(ChessBaseEnv):
             result["reason"] = reason
             return result
 
-        cube_pos, reason = self._grasp_check_cube_orientation()
-        result["pre_grasp_cube_xy"] = cube_pos[:2].copy()
+        piece_pos, reason = self._grasp_check_piece_orientation()
+        result["pre_grasp_piece_xy"] = piece_pos[:2].copy()
         if reason:
             result["reason"] = reason
             return result
-        if reason := self._align_over_xy(cube_pos[:2]):
+        if reason := self._align_over_xy(piece_pos[:2]):
             result["reason"] = reason
             return result
 
-        grip_pos, plunge_steps, reason = self._plunge_to_grasp_z(cube_pos[:2])
+        grip_pos, plunge_steps, reason = self._plunge_to_grasp_z(piece_pos[:2])
         if self.debug:
             self.logger.debug(
-                f"[GRASP] Post-Plunge. Grip at {grip_pos}, Cube at {self.get_cube_position()}"
+                f"[GRASP] Post-Plunge. Grip at {grip_pos}, Piece at {self.get_active_piece_position()}"
             )
         if reason:
             result["reason"] = reason
@@ -372,12 +363,12 @@ class ChessProductionEnv(ChessBaseEnv):
             result["reason"] = reason
             return result
 
-        cube_pos, grip_pos, l_finger, reason = self._grasp_hold_and_verify()
-        result["post_grasp_cube_pos"] = cube_pos.copy()
+        piece_pos, grip_pos, l_finger, reason = self._grasp_hold_and_verify()
+        result["post_grasp_piece_pos"] = piece_pos.copy()
         result["final_xy_error_mm"] = (
-            float(np.linalg.norm(cube_pos[:2] - grip_pos[:2])) * 1000
+            float(np.linalg.norm(piece_pos[:2] - grip_pos[:2])) * 1000
         )
-        result["final_z_error_mm"] = float(abs(cube_pos[2] - grip_pos[2])) * 1000
+        result["final_z_error_mm"] = float(abs(piece_pos[2] - grip_pos[2])) * 1000
         result["final_finger_pos"] = l_finger
         if reason:
             result["reason"] = reason
@@ -392,21 +383,21 @@ class ChessProductionEnv(ChessBaseEnv):
         result["total_steps_used"] = (
             plunge_steps + close_steps + self.GRASP_HOLD_STEPS + retract_steps
         )
-        result["post_grasp_cube_pos"] = self.get_cube_position().copy()
+        result["post_grasp_piece_pos"] = self.get_active_piece_position().copy()
         return result
 
-    def _grasp_check_cube_orientation(self) -> tuple[np.ndarray, str | None]:
-        """Read the cube pose and abort if its yaw exceeds finger clearance.
+    def _grasp_check_piece_orientation(self) -> tuple[np.ndarray, str | None]:
+        """Read the piece pose and abort if its yaw exceeds finger clearance.
 
-        A cube rotated >25° has effective width 42.4mm, exceeding max finger
+        A piece rotated >25° has effective width 42.4mm, exceeding max finger
         opening (38mm). Aborting before plunge prevents a stub.
         """
-        cube_pos = self.get_cube_position().copy()
+        piece_pos = self.get_active_piece_position().copy()
         self.logger.debug(
-            f"[GRASP] Start. Cube at {cube_pos}, Grip at {self.get_grip_pos()}"
+            f"[GRASP] Start. Piece at {piece_pos}, Grip at {self.get_grip_pos()}"
         )
 
-        w, x, y, z = self.get_cube_quat()
+        w, x, y, z = self.get_active_piece_quat()
         siny_cosp = 2.0 * (w * z + x * y)
         cosy_cosp = 1.0 - 2.0 * (y * y + z * z)
         yaw = abs(math.atan2(siny_cosp, cosy_cosp))
@@ -415,14 +406,14 @@ class ChessProductionEnv(ChessBaseEnv):
         yaw_modulo = yaw % (math.pi / 2)
         effective_yaw = min(yaw_modulo, (math.pi / 2) - yaw_modulo)
         if effective_yaw > 0.436:
-            return cube_pos, f"CUBE_ROTATED (yaw={math.degrees(effective_yaw):.1f}°)"
-        return cube_pos, None
+            return piece_pos, f"PIECE_ROTATED (yaw={math.degrees(effective_yaw):.1f}°)"
+        return piece_pos, None
 
     def _grasp_close_fingers_with_ramp(self) -> tuple[int, str | None]:
-        """Ramp finger target from OPEN to GRASP_RAMP_END while tracking live cube XY.
+        """Ramp finger target from OPEN to GRASP_RAMP_END while tracking live piece XY.
 
         Direct jump creates a large impulse; ramping limits contact shock. Aborts
-        early if fingers reach the secure-grip target with no cube contact.
+        early if fingers reach the secure-grip target with no piece contact.
         """
         self.grasp_mode = True
         ramp_start = self.FINGER_OPEN_JOINT
@@ -433,9 +424,9 @@ class ChessProductionEnv(ChessBaseEnv):
         steps_used = 0
         for step in range(self.GRASP_CLOSE_STEPS):
             self.finger_target_joint = max(ramp_end, ramp_start - ramp_delta * step)
-            live_cube = self.get_cube_position()
+            live_piece = self.get_active_piece_position()
             self._step_grip_toward(
-                np.array([live_cube[0], live_cube[1], self.GRASP_Z])
+                np.array([live_piece[0], live_piece[1], self.GRASP_Z])
             )
             steps_used += 1
 
@@ -451,43 +442,43 @@ class ChessProductionEnv(ChessBaseEnv):
         return steps_used, None
 
     def _grasp_hold_and_verify(self) -> tuple[np.ndarray, np.ndarray, float, str | None]:
-        """Hold the grip steady on the cube, then verify XY/Z error and finger position."""
+        """Hold the grip steady on the piece, then verify XY/Z error and finger position."""
 
-        def live_cube_target():
-            live_cube = self.get_cube_position()
-            return np.array([live_cube[0], live_cube[1], self.GRASP_Z])
+        def live_piece_target():
+            live_piece = self.get_active_piece_position()
+            return np.array([live_piece[0], live_piece[1], self.GRASP_Z])
 
-        self._hold_locked_target(live_cube_target, self.GRASP_HOLD_STEPS)
+        self._hold_locked_target(live_piece_target, self.GRASP_HOLD_STEPS)
 
-        cube_pos = self.get_cube_position()
+        piece_pos = self.get_active_piece_position()
         grip_pos = self.get_grip_pos()
         l_finger = self._utils.get_joint_qpos(
             self.model, self.data, "robot0:l_gripper_finger_joint"
         ).item()
 
-        xy_error_mm = float(np.linalg.norm(cube_pos[:2] - grip_pos[:2])) * 1000
-        z_error_mm = float(abs(cube_pos[2] - grip_pos[2])) * 1000
+        xy_error_mm = float(np.linalg.norm(piece_pos[:2] - grip_pos[:2])) * 1000
+        z_error_mm = float(abs(piece_pos[2] - grip_pos[2])) * 1000
 
         if xy_error_mm > self.GRASP_VERIFY_XY_THRESHOLD * 1000:
-            return cube_pos, grip_pos, l_finger, (
+            return piece_pos, grip_pos, l_finger, (
                 f"VERIFY_XY_FAILED ({xy_error_mm:.1f}mm > "
                 f"{self.GRASP_VERIFY_XY_THRESHOLD * 1000:.0f}mm)"
             )
         if z_error_mm > self.GRASP_VERIFY_Z_THRESHOLD * 1000:
-            return cube_pos, grip_pos, l_finger, (
+            return piece_pos, grip_pos, l_finger, (
                 f"VERIFY_Z_FAILED ({z_error_mm:.1f}mm > "
                 f"{self.GRASP_VERIFY_Z_THRESHOLD * 1000:.0f}mm)"
             )
         if l_finger < self.EMPTY_GRASP_THRESHOLD:
-            return cube_pos, grip_pos, l_finger, (
+            return piece_pos, grip_pos, l_finger, (
                 f"VERIFY_FINGERS_CLOSED_EMPTY (j={l_finger:.4f})"
             )
-        return cube_pos, grip_pos, l_finger, None
+        return piece_pos, grip_pos, l_finger, None
 
     def _grasp_retract(self) -> tuple[int, str | None]:
-        """Retract from PLACE_Z to HOVER_Z while tracking the cube and verifying it stays held."""
+        """Retract from GRASP_Z to HOVER_Z while tracking the piece and verifying it stays held."""
         reason, steps = self._retract_to_hover(
-            lambda: self.get_cube_position()[:2],
+            lambda: self.get_active_piece_position()[:2],
             self.GRASP_Z,
             self.GRASP_RETRACT_STEP_M,
             verify_held=True,
@@ -500,12 +491,12 @@ class ChessProductionEnv(ChessBaseEnv):
         """Scripted PLACE pipeline. Runs after DESCEND to HOVER_Z over destination.
 
         dst_xy: 2D destination XY (board square center).
-        Arm exits at HOVER_Z, cube placed, grasp_mode=False.
+        Arm exits at HOVER_Z, piece placed, grasp_mode=False.
         """
         result = {
             "success": False,
             "reason": None,
-            "final_cube_pos": None,
+            "final_piece_pos": None,
             "final_xy_error_mm": 0.0,
         }
         if reason := self._halt_and_check_hover_preconditions(check_fingers_open=False):
@@ -523,10 +514,10 @@ class ChessProductionEnv(ChessBaseEnv):
 
         self._place_release_fingers(place_pos.copy())
 
-        cube_pos, reason = self._place_verify_placement(dst_xy)
-        result["final_cube_pos"] = cube_pos.copy()
+        piece_pos, reason = self._place_verify_placement(dst_xy)
+        result["final_piece_pos"] = piece_pos.copy()
         result["final_xy_error_mm"] = (
-            float(np.linalg.norm(cube_pos[:2] - dst_xy[:2])) * 1000
+            float(np.linalg.norm(piece_pos[:2] - dst_xy[:2])) * 1000
         )
         if reason:
             result["reason"] = reason
@@ -564,23 +555,23 @@ class ChessProductionEnv(ChessBaseEnv):
     def _place_verify_placement(
         self, dst_xy: np.ndarray
     ) -> tuple[np.ndarray, str | None]:
-        """Read cube pose and check XY drift against dst_xy and Z height against table surface."""
-        cube_pos = self.get_cube_position()
-        xy_error_mm = float(np.linalg.norm(cube_pos[:2] - dst_xy[:2])) * 1000
+        """Read piece pose and check XY drift against dst_xy and Z height against table surface."""
+        piece_pos = self.get_active_piece_position()
+        xy_error_mm = float(np.linalg.norm(piece_pos[:2] - dst_xy[:2])) * 1000
         z_error_mm = (
-            float(abs(cube_pos[2] - (self.TABLE_SURFACE_Z + self.CUBE_HEIGHT / 2.0))) * 1000
+            float(abs(piece_pos[2] - (self.TABLE_SURFACE_Z + self.CUBE_HEIGHT / 2.0))) * 1000
         )
 
         if xy_error_mm > 20.0:
-            return cube_pos, f"PLACE_XY_FAILED ({xy_error_mm:.1f}mm drift from target)"
+            return piece_pos, f"PLACE_XY_FAILED ({xy_error_mm:.1f}mm drift from target)"
         if z_error_mm > 10.0:
-            return cube_pos, (
-                f"PLACE_Z_FAILED ({z_error_mm:.1f}mm — cube not flat on table)"
+            return piece_pos, (
+                f"PLACE_Z_FAILED ({z_error_mm:.1f}mm — piece not flat on table)"
             )
-        return cube_pos, None
+        return piece_pos, None
 
     def _place_retract(self, place_xy: np.ndarray) -> int:
-        """Retract from PLACE_Z to HOVER_Z over the placement XY. Always succeeds."""
+        """Retract from GRASP_Z to HOVER_Z over the placement XY. Always succeeds."""
         _, steps = self._retract_to_hover(
             lambda: place_xy, self.GRASP_Z, self.GRASP_RETRACT_STEP_M
         )

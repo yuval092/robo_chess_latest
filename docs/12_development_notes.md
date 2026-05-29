@@ -61,7 +61,7 @@ Useful failure strings:
 | `PRECONDITION_FINGER` | Finger state does not match stage expectation |
 | `FLOOR_HIT` / `TABLE_HIT` | Gripper dropped below safe surface |
 | `TUBE_BREACH` | Descend/ascend drifted outside `eval_drift_limit` |
-| `CUBE_DROPPED_XY` / `CUBE_DROPPED_Z` | Held piece no longer tracks gripper |
+| `PIECE_DROPPED_XY` / `PIECE_DROPPED_Z` | Held piece no longer tracks gripper |
 | `FINGER_CLOSED_EMPTY` | Grasp closed without contacting a piece |
 | `VERIFY_XY_FAILED` / `VERIFY_Z_FAILED` | Grasp verification failed |
 | `PLACE_XY_FAILED` / `PLACE_Z_FAILED` | Placement verification failed |
