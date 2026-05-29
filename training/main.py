@@ -1,7 +1,7 @@
 """robo-chess-train — train a specialist SAC model."""
 
 from __future__ import annotations
-
+from training.trainer import SACTrainer
 import argparse
 
 
@@ -44,7 +44,8 @@ def _build_parser() -> argparse.ArgumentParser:
     train_parser.add_argument(
         "--fixed-drift",
         action="store_true",
-        help="Skip drift curriculum; use the final drift limit from step 1.",
+        help="Skip drift curriculum; use the final drift limit from step 1. " \
+        "use it when fine-tuning a model that was already trained with the curriculum.",
     )
     train_parser.add_argument(
         "--debug",
@@ -56,8 +57,6 @@ def _build_parser() -> argparse.ArgumentParser:
 
 
 def _run_train(args: argparse.Namespace) -> None:
-    from training.trainer import SACTrainer
-
     print(f"[robo-chess-train] stage={args.stage}  envs={args.envs}  timesteps={args.timesteps}")
     trainer = SACTrainer(
         stage=args.stage,

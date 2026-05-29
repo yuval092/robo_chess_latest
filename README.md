@@ -54,9 +54,9 @@ The sweep uses `black_rook_a` by default and is not part of normal runtime.
 Only training is installed as a console script:
 
 ```bash
-robo-chess-train train --stage transit
-robo-chess-train train --stage descend
-robo-chess-train train --stage ascend
+robo-chess-train --stage transit
+robo-chess-train --stage descend
+robo-chess-train --stage ascend
 ```
 
 After training, update `configs/deployed_models.yaml` or pass model overrides to
