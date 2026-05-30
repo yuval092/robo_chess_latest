@@ -65,9 +65,8 @@ class ChessProductionEnv(ChessBaseEnv):
     # ── Active piece state ───────────────────────────────────────────────────
 
     def set_active_piece(self, piece_id: str) -> None:
-        piece = self._piece_registry.by_id(piece_id)
-        self.active_piece_id = piece.piece_id
-        self.active_piece_joint_name = piece.joint_name
+        self.active_piece_id = piece_id
+        self.active_piece_joint_name = f"piece_{piece_id}:joint"
 
     def clear_active_piece(self) -> None:
         self.active_piece_id = None
