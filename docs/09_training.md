@@ -1,165 +1,86 @@
 # Training
 
-## Goal
+## Specialist Model Architecture
 
-Training fine-tunes three SAC specialists:
+Three SAC (Soft Actor-Critic) models are trained independently, each specialising in one arm movement stage:
 
-- `transit`: horizontal movement at `SAFE_Z`.
-- `descend`: vertical movement from `SAFE_Z` to `HOVER_Z` inside an XY tube.
-- `ascend`: vertical movement from `HOVER_Z` to `SAFE_Z` inside an XY tube.
+| Model | Task | Start Z | Goal Z |
+|---|---|---|---|
+| **transit** | Move horizontally between squares at safe height | `SAFE_Z` | `SAFE_Z` (different XY) |
+| **descend** | Lower arm from `SAFE_Z` to `HOVER_Z` over a target square | `SAFE_Z` | `HOVER_Z` |
+| **ascend** | Raise arm from `HOVER_Z` back to `SAFE_Z` | `HOVER_Z` | `SAFE_Z` |
 
-Grasp and place are not learned; they are scripted.
+All models use the 25-D pretrained observation format from `FetchPickAndPlace-v4` and are fine-tuned from a shared `FetchPickAndPlace-v4` SAC checkpoint (`models/pretrained/sac-FetchPickAndPlace-v4.zip`).
 
-## CLI
+---
 
-```bash
-robo-chess-train train --stage transit
-robo-chess-train train --stage descend
-robo-chess-train train --stage ascend
+## Training Environment (`ChessTrainingEnv`)
+
+### Observation
+
+25-D pretrained observation:
+- `grip_pos` (3) — gripper world XYZ
+- `fake_object_pos` (3) — set equal to `grip_pos` (no real object tracking)
+- `rel_to_goal` (3) — `goal - grip_pos`
+- Zeros (16) — object velocity/rotation fields not used
+
+### Reward
+
+```
+reward = - dist_weight * dist
+         - z_weight * z_error
+         - xy_weight * xy_error
+         - braking_weight * speed  (if within braking_dist of goal)
+         - jitter_weight * ||action_xyz||²
+         - floor_penalty  (if near floor_limit)
+         + success_bonus  (sparse, on success)
 ```
 
-Options:
+Stage-specific braking distances and weights allow each specialist to be tuned independently.
 
-| Option | Meaning |
-|---|---|
-| `--stage {transit,descend,ascend}` | Required specialist |
-| `--envs N` | Parallel training env count |
-| `--model PATH` | Base/resume checkpoint |
-| `--timesteps N` | Override total timesteps |
-| `--save-dir PATH` | Output directory |
-| `--fixed-drift` | Disable curriculum and use final drift limit from step 1 |
-| `--debug` | Verbose env logging |
+### Episode Termination
 
-## Trainer
+- **Success** — grip within `success_threshold` of goal AND speed below `stability_vel_threshold`.
+- **Crash** — `FINGER_FAULT`, `FLOOR_HIT`, `TUBE_BREACH`, or `TABLE_HIT`. Returns `terminated=True` with `crash_penalty`.
+- **Timeout** — `rl_max_steps_per_stage` steps reached without success or crash.
 
-`SACTrainer` in `training/trainer.py`:
+### Drift Curriculum
 
-1. Loads training and env config.
-2. Builds N train env factories with `make_train_env()`.
-3. Uses `DummyVecEnv` for one env or `SubprocVecEnv(..., start_method="fork")`
-   for multiple envs.
-4. Builds a separate evaluation env with strict drift limit.
-5. Loads a SAC checkpoint with overridden hyperparameters.
-6. Resets entropy coefficient to `initial_ent_coef`.
-7. Runs `model.learn()`.
-8. Saves `final_{stage}.zip`.
-9. Closes train and eval envs in `finally`.
+Descend and ascend use a cylindrical "tube" centred on the target XY. The tube radius starts at `drift_limit_start` (100 mm) and tightens linearly to `drift_limit_end` (8 mm) over `drift_curriculum_steps` environment steps. This progressively forces the arm to land precisely over the square.
 
-Default base model:
+---
 
-```text
-models/pretrained/sac-FetchPickAndPlace-v4.zip
-```
+## Training Configuration (`configs/training.yaml`)
 
-## Training Environments
+| Key | Default | Description |
+|---|---|---|
+| `base_model` | `models/pretrained/sac-FetchPickAndPlace-v4.zip` | Starting checkpoint |
+| `num_envs` | 4 | Parallel training environments (SubprocVecEnv if >1) |
+| `total_timesteps` | 600 000 | Steps per specialist training run |
+| `learning_rate` | 5e-5 | SAC actor/critic learning rate |
+| `batch_size` | 512 | Replay buffer sample size |
+| `target_entropy` | -4.0 | SAC entropy target |
+| `learning_starts` | 10 000 | Steps before first gradient update |
+| `buffer_size` | 300 000 | Replay buffer capacity |
+| `eval_freq` | 50 000 | Steps between checkpoint evaluations |
+| `n_eval_episodes` | 20 | Episodes per evaluation |
 
-`training/envs/__init__.py` provides:
+---
 
-- `make_train_env(stage, drift_curriculum_steps, debug, fixed_drift)`
-- `make_eval_env(stage, eval_drift_limit, debug)`
+## Deployed Models
 
-Each factory:
-
-1. Creates `gym.make("ChessFetchTask-v0", force_scenario=stage, ...)`.
-2. Wraps it in the stage-specific wrapper.
-3. Wraps it with SB3 `Monitor`.
-
-The stage wrappers enable `TRANSFER_OBS_SPACE` so the loaded policy sees the
-25-D Fetch-compatible observation.
-
-## Transfer Observation
-
-The pretrained Fetch PickAndPlace model expects:
-
-```text
-observation shape: (25,)
-achieved_goal:     (3,)
-desired_goal:      (3,)
-```
-
-RoboChess preserves the shape and sets `object_pos = grip_pos`. The model
-therefore treats the gripper as if it is already holding the object and should
-move it to the goal.
-
-## Drift Curriculum
-
-Descend and ascend use a tube constraint around the target XY. The drift limit
-tightens linearly:
-
-```text
-limit = drift_limit_start
-      - (drift_limit_start - drift_limit_end)
-        * min(total_env_steps / drift_curriculum_steps, 1.0)
-```
-
-Defaults:
-
-| Config | Value |
-|---|---:|
-| `drift_limit_start` | `0.100` |
-| `drift_limit_end` | `0.008` |
-| `drift_curriculum_steps` | `30000` per worker |
-| `eval_drift_limit` | `0.010` |
-
-`--fixed-drift` skips the curriculum.
-
-## Hyperparameters
-
-Defaults from `configs/training.yaml`:
-
-| Key | Value |
-|---|---:|
-| `num_envs` | `4` |
-| `total_timesteps` | `600000` |
-| `learning_rate` | `0.00005` |
-| `batch_size` | `512` |
-| `target_entropy` | `-4.0` |
-| `learning_starts` | `10000` |
-| `buffer_size` | `300000` |
-| `initial_ent_coef` | `0.1` |
-| `ent_coef_lr` | `0.001` |
-| `eval_freq` | `50000` |
-| `n_eval_episodes` | `20` |
-
-## Callbacks and Artifacts
-
-`DetailedLoggingCallback` logs rolling reward, episode length, and success rate
-to:
-
-```text
-logs/training_progress.log
-```
-
-`SuccessRateEvalCallback` saves:
-
-| File | Meaning |
-|---|---|
-| `latest_model_{stage}.zip` | Most recent evaluated model |
-| `best_model_{stage}.zip` | Highest mean eval success rate |
-| `final_{stage}.zip` | Saved by trainer after learning completes |
-
-TensorBoard logs are written under:
-
-```text
-logs/{stage}_{timestamp}/tensorboard/
-```
-
-## Deploying a Checkpoint
-
-Update `configs/deployed_models.yaml`:
+`configs/deployed_models.yaml` lists the paths to the three production-ready model files:
 
 ```yaml
-transit: "models/transit.zip"
-descend: "models/descend.zip"
-ascend: "models/ascend.zip"
+transit: models/transit/model.zip
+descend: models/descend/model.zip
+ascend:  models/ascend/model.zip
 ```
 
-or pass CLI overrides to `python main.py`.
+These paths are resolved by `src/utils/io.resolve_model_paths()`, which accepts optional override paths (e.g. from CLI arguments or test fixtures).
 
-Recommended validation before deployment:
+---
 
-```bash
-pytest tests/chess_env tests/physical
-RUN_EXHAUSTIVE_PHYSICAL_MOVES=1 pytest tests/integration/test_all_square_moves.py
-```
+## Evaluation
 
+The integration test `test_all_square_to_all_square_physical_moves` (opt-in via `RUN_EXHAUSTIVE_PHYSICAL_MOVES=1`) runs all 64×63 source→destination combinations and reports per-stage success rates. This is the primary benchmark for evaluating new model checkpoints.

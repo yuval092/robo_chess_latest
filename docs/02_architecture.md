@@ -1,112 +1,97 @@
 # Architecture
 
-## Layer Boundaries
+## Layer Diagram
 
-RoboChess deliberately separates logical chess state, expected physical state,
-and actual MuJoCo state.
-
-| State | Owner | Meaning |
-|---|---|---|
-| Legal chess board | `ChessService` | The authoritative `python-chess.Board` |
-| Logical piece IDs | `LogicalPieceTracker` | Which physical piece ID represents each logical square |
-| Expected physical occupancy | `PhysicalOccupancy` | Where the physical layer expects active pieces to be |
-| Actual simulated state | MuJoCo `model`/`data` | Freejoint poses, robot joints, contacts, velocities |
-
-The chess board only advances after physical execution succeeds. This prevents
-the engine and UI from seeing a move as committed when the simulated arm failed.
-
-## Runtime Construction
-
-`main.py` wires the full system:
-
-```text
-gym.make("ChessFetchTask-v0", show_chess_pieces=True, hide_object=True,
-         force_scenario="transit")
-  -> ModelEmbeddedController
-  -> BoardMapper
-  -> PieceRegistry
-  -> PhysicalOccupancy
-  -> MovementExecutor
-  -> PieceTeleporter
-  -> PhysicalPlanExecutor
-  -> ChessService
-  -> LogicalPieceTracker
-  -> GameOrchestrator
-  -> QueuedUIBackend
-  -> Flask app
+```
+┌─────────────────────────────────────────────────────────┐
+│  Browser / HTTP                                          │
+├─────────────────────────────────────────────────────────┤
+│  Flask REST API          src/ui/app.py                   │
+│  QueuedUIBackend         src/ui/queued_backend.py        │
+├─────────────────────────────────────────────────────────┤
+│  Game Logic                                              │
+│    GameOrchestrator      src/chess_game/game_orchestrator│
+│    ChessService          src/chess_game/chess_service    │
+│    MovePlanner           src/chess_game/move_planner     │
+│    LogicalPieceTracker   src/chess_game/move_planner     │
+├─────────────────────────────────────────────────────────┤
+│  Physical Execution                                      │
+│    PhysicalPlanExecutor  src/physical/plan_executor      │
+│    MovementExecutor      src/physical/movement_executor  │
+│    PhysicalOccupancy     src/physical/occupancy          │
+│    PieceTeleporter       src/physical/piece_teleport     │
+│    PieceRegistry         src/physical/piece_registry     │
+│    BoardMapper           src/chess_game/board_mapper     │
+├─────────────────────────────────────────────────────────┤
+│  Arm Control                                             │
+│    ModelEmbeddedController  src/chess_env/model_controller│
+├─────────────────────────────────────────────────────────┤
+│  MuJoCo Environment                                      │
+│    ChessProductionEnv    src/chess_env/production_env    │
+│    ChessBaseEnv          src/chess_env/base_env          │
+│    ChessSimulationEnv    src/chess_env/simulation        │
+│    MujocoFetchPickAndPlaceEnv  (gymnasium-robotics)      │
+└─────────────────────────────────────────────────────────┘
 ```
 
-The deployed model paths are resolved by `src.utils.io.resolve_model_paths()`.
-Explicit CLI overrides win over `configs/deployed_models.yaml`.
+## Source Tree
 
-## Move Lifecycle
-
-For a normal move such as `e2e4`:
-
-1. Browser sends `POST /api/move` with `{"src": "e2", "dst": "e4"}`.
-2. Flask route calls `QueuedUIBackend.submit_human_move()`.
-3. The request is queued and blocks until the main thread processes it.
-4. `GameOrchestrator.submit_human_move()` verifies turn ownership.
-5. `ChessService.construct_move_from_squares()` verifies legality against
-   `python-chess`.
-6. `MovePlanner.plan()` creates a `PhysicalPlan`.
-7. `PhysicalPlanExecutor.execute()` dispatches commands.
-8. `MovementExecutor.move_piece_between_squares()` validates expected occupancy.
-9. `ModelEmbeddedController.run_full_move()` performs pick and place.
-10. `MovementExecutor` reconciles the final piece pose and snaps it exactly to
-    the destination square if within tolerance.
-11. `PhysicalPlanExecutor.return_to_home()` moves the arm home and restores the
-    reset-time home posture.
-12. `ChessService.push()` commits the move.
-13. `LogicalPieceTracker.apply_committed_move()` updates piece ID mappings.
-14. The result snapshot is returned to Flask and then to the browser.
-
-## Physical Plan Commands
-
-`MovePlanner` emits three command types:
-
-| Command | Use |
-|---|---|
-| `ArmMoveCommand(piece_id, src_square, dst_square)` | Move a piece with the arm |
-| `RemoveFromBoardCommand(piece_id, graveyard_slot)` | Capture removal before moving the capturing piece |
-| `TeleportCommand(piece_id, destination_kind, destination_id)` | Promotion reserve and other instant repositioning |
-
-Special chess cases:
-
-- Captures remove the captured piece to a graveyard slot before the arm move.
-- Castling emits two arm moves: king then rook.
-- En passant removes the pawn from the passed-over square.
-- Promotion moves the pawn to the destination, teleports that pawn to a reserve
-  slot, then teleports an off-board reserve piece of the promoted type onto the
-  promotion square.
+```
+src/
+├── chess_env/
+│   ├── __init__.py          # Gymnasium env registration
+│   ├── simulation.py        # ChessSimulationEnv — MuJoCo XML loading, action scaling
+│   ├── base_env.py          # ChessBaseEnv — config, obs space, reset, soft_reset, helpers
+│   ├── production_env.py    # ChessProductionEnv — piece registry, grasp/place pipelines
+│   ├── training_env.py      # ChessTrainingEnv — RL reward, crash checks, curriculum
+│   └── model_controller.py  # ModelEmbeddedController — SAC inference + scripted pipelines
+│
+├── chess_game/
+│   ├── board_mapper.py      # Square name ↔ world XY
+│   ├── chess_service.py     # python-chess board + UCI engine wrapper
+│   ├── move_planner.py      # LogicalPieceTracker + MovePlanner (chess move → command list)
+│   └── game_orchestrator.py # Top-level coordinator: logic + physical + engine
+│
+├── physical/
+│   ├── piece_registry.py    # Deterministic list of all 32+reserve pieces
+│   ├── piece_teleport.py    # Free-joint instant repositioning
+│   ├── occupancy.py         # Physical square occupancy tracker
+│   ├── movement_executor.py # Board-to-board arm move with reconciliation
+│   └── plan_executor.py     # Plan execution, return_to_home
+│
+├── ui/
+│   ├── app.py               # Flask factory + REST routes
+│   └── queued_backend.py    # Thread-safe UIBackend wrapping GameOrchestrator
+│
+└── utils/
+    ├── io.py                # load_config, resolve_model_paths, setup_logger
+    └── config_validation.py # Startup config/model checks
+```
 
 ## Threading Model
 
-MuJoCo is treated as main-thread-only. The Flask app runs in a daemon thread, but
-the backend calls that touch game execution are queued:
+The game loop in `main.py` runs on the **main thread**:
 
-```text
-Flask thread
-  -> queue.Queue[UIRequest]
-Main thread
-  -> backend.process_one(env=env)
-  -> orchestrator / physical executor / MuJoCo
+```python
+while True:
+    backend.process_one(env=env, timeout=0.05)  # drains one queued request
+    env.render()                                 # if visualize
+    time.sleep(0.01)
 ```
 
-`snapshot()` is the only backend call that does not enqueue. It returns a cached
-snapshot under a lock. Mutating calls block until the main loop processes them.
+Flask runs on a **daemon thread**. All API handlers call into `QueuedUIBackend`, which puts a `UIRequest` on a queue and blocks waiting for the result. `process_one` on the main thread pops the request, calls the orchestrator, and puts the result back.
 
-## Model Control Strategy
+MuJoCo is **never touched from the Flask thread**. All simulation state changes happen inside `process_one` on the main thread.
 
-The arm is controlled by a hybrid system:
+## Environment Class Hierarchy
 
-- SAC specialist model for `transit`.
-- SAC specialist model for `descend`.
-- SAC specialist model for `ascend`.
-- Scripted logic for grasp and place.
-- Scripted transition logic between stages.
+```
+MujocoFetchPickAndPlaceEnv  (gymnasium-robotics)
+  └── ChessSimulationEnv    — XML swap, action scaling, board sampling
+        └── ChessBaseEnv    — config, obs, reset, soft_reset, low-level helpers
+              ├── ChessProductionEnv  — piece registry, scripted grasp/place
+              └── ChessTrainingEnv   — RL reward, crash checks, drift curriculum
+```
 
-The three specialists use a 25-dimensional transfer observation compatible with
-the pretrained Fetch PickAndPlace policy. Scripted/status paths use a smaller
-native observation.
-
+`ChessProductionEnv` is used at runtime (registered as `ChessFetchTask-Play-v0`).  
+`ChessTrainingEnv` is used during specialist model training.

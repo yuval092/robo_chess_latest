@@ -1,175 +1,82 @@
 # MuJoCo Environment
 
-## Class Structure
+## Class Hierarchy
 
-`ChessFetchTask-v0` is registered by `src/chess_env/__init__.py` and implemented
-by:
+### `ChessSimulationEnv` (`simulation.py`)
 
-```text
-MujocoFetchPickAndPlaceEnv
-  -> ChessSimulationEnv
-    -> ChessTaskEnv(
-         GraspPlaceMixin,
-         TaskStateMixin,
-         TaskRuntimeMixin,
-         ChessSimulationEnv
-       )
-```
+Lowest-level chess wrapper. Handles:
 
-`ChessSimulationEnv` owns low-level MuJoCo setup. `ChessTaskEnv` and its mixins
-own scenario state, observations, rewards, resets, active pieces, grasp/place,
-and runtime transitions.
+- **XML hot-swap** — replaces `gymnasium-robotics`' default XML path with the chess board XML under a threading lock, then restores it after `super().__init__()`.
+- **Action scaling** — scales `[dx, dy, dz]` by `pos_ctrl_scale` (0.015 m/step), sets mocap delta.
+- **Finger enforcement** — `_apply_finger_target()` sets actuator ctrl targets every step. When `grasp_mode=False`, it also directly teleports the joint positions so fingers never drift during movement.
+- **Board sampling** — `_random_board_position()` samples a uniform XY within `BOARD_MIN_XY`/`BOARD_MAX_XY` margins.
+- **`IDENTITY_QUAT`** — shared constant `[1, 0, 0, 0]` used for identity piece orientation.
 
-## XML Loading
+### `ChessBaseEnv` (`base_env.py`)
 
-`ChessSimulationEnv` loads the checked-in scene:
+Mid-level base used by both production and training. Handles:
 
-```text
-chess_env/assets/pick_and_place.xml
-```
+- **Config loading** — reads `env.yaml` and `chess.yaml` at init.
+- **Observation space** — native 7-D dict obs (`grip_pos`, `grip_vel`, `finger_angle`, `goal`). Switches to 25-D pretrained format when `_use_pretrained_obs_format=True`.
+- **Task constants** — `GRASP_Z`, `HOVER_Z`, `SAFE_Z`, `FINGER_OPEN_JOINT`, `FINGER_CLOSED_JOINT`, `HOME_POS`, etc.
+- **Episode reset** (`_reset_sim`) — picks scenario, places objects, settles arm, validates finger state, calls `_on_reset_settled`.
+- **Soft reset** (`soft_reset`) — switches scenario mid-episode without teleporting the arm. Used by `ModelEmbeddedController._prepare_stage` between SAC stages.
+- **Low-level helpers** — `_move_grip_to`, `_step_grip_toward`, `_commit_finger_target`, `_settle_arm_to_start`.
+- **Chess piece placement** — places all 32 active pieces and reserve pieces via `_reset_chess_piece_bodies`.
 
-Gymnasium Robotics' Fetch env expects a module-level XML path. The constructor
-temporarily replaces `gymnasium_robotics.envs.fetch.pick_and_place.MODEL_XML_PATH`
-under a lock, calls the parent constructor, then restores the original path.
+### `ChessProductionEnv` (`production_env.py`)
 
-This keeps the installed dependency unmodified while allowing the project to own
-its full scene XML.
+Adds piece tracking and scripted pipelines on top of `ChessBaseEnv`. Handles:
 
-## Important Config-Backed Constants
+- **Active piece state** — `set_active_piece(piece_id)`, `clear_active_piece()`, `get_active_piece_position()`, `get_active_piece_quat()`.
+- **Grasp pipeline** — `execute_grasp()` runs the full scripted GRASP sequence.
+- **Place pipeline** — `execute_place(dst_xy)` runs the full scripted PLACE sequence.
+- **Home posture** — captures and restores the exact arm configuration after each move via `reset_arm_to_home_posture()`.
+- **Piece drop monitoring** — `_check_piece_held()` verifies the piece stays in the gripper during transit.
 
-| Constant | Config | Value |
-|---|---|---:|
-| `TABLE_CENTER_XY` | `env.table_center_xy` | `[0.88, 0.2641]` |
-| `TABLE_SURFACE_Z` | `env.table_surface_z` | `0.400` |
-| `PIECE_HEIGHT` | `env.piece_height` | `0.030` |
-| `GRASP_Z` | `env.grasp_z` | `0.430` |
-| `HOVER_Z` | `env.hover_z` | `0.460` |
-| `SAFE_Z` | `env.safe_z` | `0.530` |
-| `SUCCESS_THRESHOLD` | `env.success_threshold` | `0.010` |
-| `POS_CTRL_SCALE` | `physics.pos_ctrl_scale` | `0.015` |
-| `VERTICAL_QUAT` | `physics.vertical_quat` | normalized `[0.7071068, 0, 0.7071068, 0]` |
+### `ChessTrainingEnv` (`training_env.py`)
 
-## Action Interface
+Adds RL training on top of `ChessBaseEnv`. Handles:
 
-The RL action is a four-vector:
+- **`step()`** — applies action, computes reward, checks crash, returns gymnasium tuple.
+- **Reward shaping** — dense distance reward + braking penalty + jitter penalty + floor penalty + sparse success bonus.
+- **Crash detection** — `_check_crash()` returns a reason string for `FINGER_FAULT`, `FLOOR_HIT`, `TUBE_BREACH`, `TABLE_HIT`.
+- **Drift curriculum** — tube radius tightens from `drift_limit_start` to `drift_limit_end` over `drift_curriculum_steps`.
 
-```text
-[dx, dy, dz, gripper]
-```
+## Episode Reset Sequence
 
-`ChessSimulationEnv._set_action()`:
+1. `_setup_episode()` — picks scenario (transit / descend / ascend), samples `start_xy` and `goal_pos`, sets `tube_center_xy`.
+2. `super()._reset_sim()` — calls `_sample_goal()`.
+3. `_place_objects()` — places dummy cube and all chess pieces, forward-propagates.
+4. `_prepare_arm_for_episode()` — moves arm to `arm_start_pos`, opens/closes fingers per scenario.
+5. `_validate_finger_state()` — asserts finger is at target (returns `False` to trigger retry if not).
+6. `_on_reset_settled()` — hook for subclasses. `ChessProductionEnv` captures home posture here.
 
-1. Scales position deltas by `POS_CTRL_SCALE`.
-2. Uses zero rotational delta.
-3. Applies MuJoCo mocap movement.
-4. Enforces gripper state from `finger_target_joint`.
+## Soft Reset
 
-There are two gripper modes:
+Used between SAC stages to switch scenario context without teleporting the arm:
 
-| Mode | Condition | Behavior |
+1. `_halt_arm()` — zeros robot DOFs, waits up to 30 steps for velocity to drop below `halt_vel_threshold`.
+2. `_align_to_exit_pos()` — nudges arm to the nominal exit position of the previous stage.
+3. `_update_scenario_state()` — switches `current_scenario`, `goal_pos`, `tube_center_xy`, `episode_steps`.
+4. `_transition_fingers_for_scenario()` — opens fingers for descend, closes for ascend/transit.
+
+## Grasp Mode
+
+`self.grasp_mode` controls finger physics:
+
+| `grasp_mode` | Finger behaviour |
+|---|---|
+| `False` | Teleport mode — joint positions forced directly, no physics drift |
+| `True` | Actuator mode — contact forces active, piece can push back against fingers |
+
+Set to `True` just before `_close_fingers()` in `execute_grasp`, set back to `False` after `_open_fingers()` in `execute_place`.
+
+## Height Levels
+
+| Constant | Typical value | Role |
 |---|---|---|
-| Teleport mode | `grasp_mode=False` | Finger joint positions and velocities are set directly |
-| Actuator mode | `grasp_mode=True` | Only actuator controls are set; contact physics can block the fingers |
-
-Actuator mode is required while a piece is being held.
-
-## Observations
-
-The native observation is used for scripted control and status:
-
-```text
-observation:   7-D [grip_pos(3), grip_vel(3), l_finger(1)]
-achieved_goal: 3-D grip position
-desired_goal:  3-D goal position
-grip_pos, grip_vel, l_finger, goal_pos
-scenario_id:   0=None, 1=transit, 2=descend, 3=ascend
-```
-
-The transfer observation is used by SAC models:
-
-```text
-observation:   25-D FetchPickAndPlace-compatible vector
-achieved_goal: 3-D grip position
-desired_goal:  3-D goal position
-```
-
-The transfer trick sets `object_pos = grip_pos`, so the pretrained policy behaves
-as if the gripper is already holding the object and needs to carry it to the goal.
-
-`src/chess_env/transfer_obs.py` provides:
-
-- `TRANSFER_OBS_SPACE`
-- `transfer_obs_enabled(env)` for temporary load/inference contexts
-
-## Scenarios
-
-| Scenario | Start | Goal | Constraint | Finger target |
-|---|---|---|---|---|
-| `transit` | `SAFE_Z` | `SAFE_Z` | Must stay above floor/table | closed |
-| `descend` | `SAFE_Z` | `HOVER_Z` | XY tube and table surface | open |
-| `ascend` | `HOVER_Z` | `SAFE_Z` | XY tube and table surface | closed |
-
-`force_scenario` locks training/evaluation to one scenario. Without it, reset
-samples one of the three.
-
-## Reset Behavior
-
-`TaskRuntimeMixin._reset_sim()`:
-
-1. Chooses scenario and start/goal positions.
-2. Resets parent Fetch simulation.
-3. Hides or places legacy `object0`.
-4. Resets all chess piece freejoint bodies.
-5. Sets torso height.
-6. Settles the arm at the scenario start.
-7. Performs scripted finger transition for the scenario.
-8. Validates final finger state.
-9. Captures the home posture when reset starts at `HOME_POS`.
-
-In play mode, `show_chess_pieces=True` places active and reserve chess bodies in
-their board/reserve positions. When false, pieces are hidden off-board for
-training-style runs.
-
-## Soft Reset / Stage Transition
-
-`soft_reset(new_scenario, new_goal_pos, nominal_exit_pos, nominal_xy)` transitions
-between movement stages without teleporting the arm:
-
-1. Halt robot velocity.
-2. Align to the nominal exit waypoint.
-3. Update scenario, goal, and tube center.
-4. Re-enforce vertical orientation.
-5. Open or close fingers if needed and not in `grasp_mode`.
-6. Return a new observation and transition diagnostics.
-
-The controller resets wrapper elapsed steps after each transition.
-
-## Reward and Termination
-
-`step()` is used for RL training, not for runtime model inference. Runtime
-inference calls `_set_action()` and `_mujoco_step()` directly.
-
-Training termination checks:
-
-- Finger joint deviates from target by more than 3 mm.
-- Transit gripper hits the floor/table limit.
-- Descend/ascend drift outside the current tube limit.
-- Descend/ascend gripper drops below table surface.
-- Success means near goal and stable below `stability_vel_threshold`.
-
-Reward components:
-
-```text
-- dist_reward_weight * ||grip - goal||
-- z_reward_weight    * |grip_z - goal_z|
-- xy_reward_weight   * ||grip_xy - goal_xy||
-- braking_weight     * speed near goal
-- jitter_penalty     * ||action_xyz||^2
-- floor_penalty      near table  (floor_penalty = 0.5, so this subtracts)
-+ success_bonus      on success
-crash_penalty        on crash
-```
-
-Descend uses a tighter Z success threshold from
-`env.descend_success_threshold`.
-
+| `TABLE_SURFACE_Z` | 0.400 m | Table surface / floor limit for transit |
+| `GRASP_Z` | 0.430 m | Gripper Z for both grasp and place plunge |
+| `HOVER_Z` | 0.460 m | Where descend/ascend stages stop; arm idles here |
+| `SAFE_Z` | 0.530 m | Transit height |

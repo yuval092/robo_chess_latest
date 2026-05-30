@@ -1,137 +1,98 @@
 # Physical Layer
 
-## Purpose
+## PieceRegistry (`piece_registry.py`)
 
-The physical layer converts `PhysicalPlan` commands into MuJoCo actions and
-freejoint teleports. It is responsible for expected occupancy validation,
-arm-executed board moves, captured-piece removal, promotion reserve movement, and
-board resets.
+Deterministic registry of all 32 active chess pieces plus 64 reserve pieces.
 
-## Piece Registry
+Each piece is a frozen `PhysicalPiece` dataclass with:
+- `piece_id` — e.g. `"white_rook_a"`, `"black_pawn_e"`, `"white_queen"`
+- `body_name` — MuJoCo body name (`f"piece_{piece_id}"`)
+- `joint_name` — free-joint name (`f"piece_{piece_id}:joint"`)
+- `cube_geom_name` / `visual_geom_name` — collision and visual geom names
+- `initial_square` — starting board square (e.g. `"a1"`)
 
-`PieceRegistry` deterministically defines the 32 active physical pieces.
+Naming rules:
+- King and queen: `"{color}_{type}"` (singular, no file letter)
+- Other back-rank pieces: `"{color}_{type}_{file}"` (e.g. `"white_rook_a"`, `"white_rook_h"`)
+- Pawns: `"{color}_pawn_{file}"`
+- Reserve pieces: `"{color}_reserve_{type}_{1..8}"`
 
-Piece ID examples:
+`reserve_piece_ids()` returns all 64 reserve pieces as `(piece_id, color, piece_type)` tuples.
 
-| Piece | ID |
+---
+
+## PhysicalOccupancy (`occupancy.py`)
+
+Tracks the *expected* physical square occupancy. Updated after every move completes; used to guard against invalid move requests.
+
+| Method | Description |
 |---|---|
-| White king | `white_king` |
-| Black queen | `black_queen` |
-| White a-rook | `white_rook_a` |
-| Black b-knight | `black_knight_b` |
-| White e-pawn | `white_pawn_e` |
+| `piece_at_square(square)` | Physical piece ID at a square, or `None` |
+| `square_of_piece(piece_id)` | Square a piece is on, or `None` |
+| `set_piece_square(piece_id, square)` | Move a piece; raises if target square is occupied by another piece |
+| `assert_square_empty(square)` | Raise `ValueError` if occupied |
+| `assert_piece_at(piece_id, square)` | Raise `ValueError` if piece is not there |
+| `reset(starting_square_map)` | Reset to a given layout |
 
-Each `PhysicalPiece` contains:
+Maintains bidirectional maps for O(1) lookups in both directions.
+
+---
+
+## PieceTeleporter (`piece_teleport.py`)
+
+Instant repositioning by directly writing to MuJoCo free-joint `qpos` and zeroing velocities, followed by `mj_forward`.
+
+| Method | Description |
+|---|---|
+| `teleport_piece_to_xyz(piece_id, xyz)` | Move piece to absolute world XYZ |
+| `teleport_piece_to_square(piece_id, square)` | Move piece to board square centre |
+| `teleport_piece_to_graveyard(piece_id, slot_id)` | Move piece to a graveyard slot |
+| `teleport_piece_to_promotion_reserve(piece_id, slot_id)` | Move to promotion reserve slot |
+
+Slot IDs are formatted as `"slot_NN"` (e.g. `"slot_00"`, `"slot_03"`). Graveyard and reserve positions come from `configs/chess.yaml`.
+
+---
+
+## MovementExecutor (`movement_executor.py`)
+
+Executes physical board-to-board arm moves. The primary entry point is:
 
 ```python
-piece_id: str
-color: str
-piece_type: str
-body_name: str
-joint_name: str
-cube_geom_name: str
-visual_geom_name: str
-initial_square: str | None
+move_piece_between_squares(piece_id, src_square, dst_square) -> PhysicalMoveResult
 ```
 
-`reserve_piece_ids()` returns 64 promotion reserve IDs:
+Flow:
+1. Assert occupancy (piece is at src, dst is empty).
+2. Convert squares to world XY via `BoardMapper`.
+3. `set_active_piece(piece_id)` on the env.
+4. `controller.run_full_move(src_xy, dst_xy)` — eight-stage SAC + scripted pipeline.
+5. `_check_landing_tolerance` — verify piece landed within `reconcile_xy_tolerance_m` and `reconcile_z_tolerance_m` of destination.
+6. `_reconcile_placement` — teleport piece to exact destination centre and update occupancy.
 
-```text
-{color}_reserve_{queen|rook|bishop|knight}_{1..8}
-```
+Landing tolerance check is a second line of defence after `_verify_placement` inside the place pipeline. It catches cases where the physical simulation ended up slightly off.
 
-## Physical Occupancy
+`PhysicalMoveResult` contains `success`, `piece_id`, `src_square`, `dst_square`, `stage_results` (list of `(stage_name, StageResult)` tuples), and `error`.
 
-`PhysicalOccupancy` tracks expected board occupancy for active physical pieces:
+---
 
-- `piece_at_square(square)`
-- `square_of_piece(piece_id)`
-- `set_piece_square(piece_id, square | None)`
-- `assert_square_empty(square)`
-- `assert_piece_at(piece_id, square)`
-- `reset(starting_square_map)`
+## PhysicalPlanExecutor (`plan_executor.py`)
 
-This is separate from:
+Executes a list of physical commands produced by `MovePlanner`.
 
-- `ChessService`, which owns legal chess state.
-- `LogicalPieceTracker`, which maps logical chess pieces to physical IDs.
-- MuJoCo, which owns actual simulated positions.
+### `execute(plan)`
 
-Occupancy assertions catch stale or inconsistent expected state before the arm
-starts a move.
+Iterates the command list. For each command:
+- `RemoveFromBoardCommand` → teleport to graveyard, clear occupancy.
+- `ArmMoveCommand` → `movement_executor.move_piece_between_squares`.
+- `TeleportCommand` → teleport to square / graveyard / reserve, update occupancy.
 
-## Piece Teleporting
+Stops on the first `ArmMoveCommand` failure. Teleport commands never fail.
 
-`PieceTeleporter` directly edits MuJoCo freejoint `qpos`, `qvel`, and `qacc`.
+### `return_to_home()`
 
-Methods:
+1. `controller.run_transit(home_xy)` — SAC transit to `home_position_xy`.
+2. `env.reset_arm_to_home_posture()` — snap wrist/roll joints back to canonical posture.
 
-| Method | Destination |
-|---|---|
-| `teleport_piece_to_xyz(piece_id, xyz, quat=None)` | Arbitrary pose |
-| `teleport_piece_to_square(piece_id, square)` | Board square center |
-| `teleport_piece_to_graveyard(piece_id, slot_id)` | Captured-piece grid |
-| `teleport_piece_to_promotion_reserve(piece_id, slot_id)` | Promotion reserve grid |
+`home_xy` is cached at construction from `configs/env.yaml` to avoid repeated disk reads.
 
-All teleports use identity quaternion unless another quaternion is passed.
-
-Slot IDs must match `slot_NN`, for example `slot_00`.
-
-## Movement Executor
-
-`MovementExecutor.move_piece_between_squares(piece_id, src_square, dst_square)`:
-
-1. Verifies `piece_id` is expected at `src_square`.
-2. Verifies `dst_square` is expected empty.
-3. Converts both squares to XY with `BoardMapper`.
-4. Selects the active piece in the environment.
-5. Runs `controller.run_full_move(src_xy, dst_xy)`.
-6. Checks final active piece position.
-7. Fails if XY error exceeds `reconcile_xy_tolerance_m`.
-8. Fails if Z error exceeds `reconcile_z_tolerance_m`.
-9. Snaps the piece exactly to destination XYZ.
-10. Updates `PhysicalOccupancy`.
-
-Result type:
-
-```python
-@dataclass
-class PhysicalMoveResult:
-    success: bool
-    piece_id: str
-    src_square: str | None
-    dst_square: str | None
-    stage_results: list
-    error: str | None = None
-```
-
-## Plan Executor
-
-`PhysicalPlanExecutor.execute(plan)` dispatches commands:
-
-| Command | Handler |
-|---|---|
-| `RemoveFromBoardCommand` | Teleport to graveyard and clear occupancy |
-| `ArmMoveCommand` | Run `MovementExecutor` |
-| `TeleportCommand(destination_kind="promotion_reserve")` | Teleport to promotion reserve and clear occupancy |
-| `TeleportCommand(destination_kind="graveyard")` | Teleport to graveyard and clear occupancy |
-| `TeleportCommand(destination_kind="square")` | Teleport to square and set occupancy |
-
-It stops on the first command result with `success=False`. Exceptions are caught
-and returned as `PhysicalExecutionResult(success=False, error=str(exc))`.
-
-## Return Home and Reset
-
-`return_to_home()`:
-
-- No-ops successfully if no controller/env was supplied.
-- Otherwise runs transit to `env.home_position_xy`.
-- Then calls `env.reset_arm_to_home_posture()` when available.
-
-`reset_board_state()`:
-
-- Rebuilds the starting square map from `PieceRegistry`.
-- Uses `env._reset_chess_piece_bodies()` when available.
-- Clears active piece selection.
-- Resets physical occupancy.
-
+Returns `PhysicalExecutionResult(success, command_results, error)`.

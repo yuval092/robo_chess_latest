@@ -1,151 +1,127 @@
 # Arm Control
 
-## Controller Overview
+## ModelEmbeddedController
 
-`ModelEmbeddedController` is a hybrid controller:
+`src/chess_env/model_controller.py`
 
-- Learned SAC stages: `transit`, `descend`, `ascend`.
-- Scripted physical stages: `grasp`, `place`.
-- Scripted transitions between stages via `env.soft_reset()`.
+Orchestrates a full chess move by combining three SAC specialist models with scripted grasp and place transitions.
 
-The full board-to-board move is:
+### Stage Pipeline
 
-```text
+A full pick-and-place (`run_full_move`) runs eight stages:
+
+```
 pick sequence:
-  transit(src_xy) -> descend(src_xy) -> grasp() -> ascend(src_xy)
+  transit  → descend  → grasp  → ascend
 
 place sequence:
-  transit(dst_xy) -> descend(dst_xy) -> place(dst_xy) -> ascend(dst_xy)
+  transit  → descend  → place  → ascend
 ```
 
-`run_full_move(src_xy, dst_xy)` runs both sequences and returns a
-`SequenceResult`.
+Each SAC stage uses `_run_model_stage`:
 
-## Result Types
+1. `_get_stage_model()` — retrieves the loaded SAC model, raises if missing.
+2. `_setup_model_stage_env()` — sets `goal_pos`, `current_scenario`, `tube_center_xy`, `finger_target_joint` on the env.
+3. `_check_finger_precondition()` — verifies the finger is at the expected position before inference (skipped in `grasp_mode`).
+4. `_run_inference_loop()` — steps the model until success, crash, or `TIMEOUT`.
+5. `_build_model_stage_result()` — wraps outcome in a `StageResult`.
+
+### SAC Inference Loop
 
 ```python
-@dataclass
-class StageResult:
-    success: bool
-    steps: int
-    crash_reason: str | None
-    final_pos: np.ndarray
-    error_mm: float
+for _ in range(max_steps):
+    if _is_success(grip_pos, target_pos) and speed < stability_vel_threshold:
+        return None   # success
+    _execute_step(stage, model)
+    crash = _check_crash(env, stage, grip_pos)
+    if crash:
+        return crash
+return "TIMEOUT"
 ```
 
-```python
-@dataclass
-class SequenceResult:
-    success: bool
-    stage_results: list
-    failed_at: str | None
-    grasp_quality: dict | None
-```
+`_execute_step` overrides the gripper dimension: closed (`-1.0`) for transit/ascend, open (`+1.0`) for descend. Transit also clamps wrist orientation to `VERTICAL_QUAT` to match training conditions.
 
-`stage_results` contains `(stage_name, StageResult)` pairs such as
-`("transit", result)` and `("grasp", result)`.
+### Crash Checks (inference)
 
-## Model Loading
-
-Known model stages:
-
-```python
-{"transit", "descend", "ascend"}
-```
-
-`load_model(stage, path)` temporarily enables the transfer observation space and
-loads a Stable-Baselines3 `SAC` checkpoint:
-
-```python
-with transfer_obs_enabled(env):
-    SAC.load(path, env=env)
-```
-
-This matters because SB3 validates the checkpoint against the environment's
-observation space at load time.
-
-## Learned Stage Execution
-
-`_run_stage(stage, target_pos)`:
-
-1. Sets `env.goal_pos`, `env.goal`, and `env.current_scenario`.
-2. Sets `tube_center_xy` for `descend` and `ascend`.
-3. Sets the expected finger target when not holding a piece.
-4. Checks finger preconditions when not in `grasp_mode`.
-5. Enables transfer observations.
-6. Repeatedly predicts deterministic SAC actions.
-7. Overrides the gripper action dimension.
-8. Steps MuJoCo directly.
-9. Checks production crash conditions.
-10. Restores the previous observation mode.
-
-The gripper action override is deterministic:
-
-| Stage | Action dimension 3 |
-|---|---:|
-| `transit` | `-1.0` |
-| `descend` | `1.0` |
-| `ascend` | `-1.0` |
-
-Only transit clamps `env.data.mocap_quat[0]` to `VERTICAL_QUAT` during inference,
-matching that model's training conditions.
-
-## Inference Crash Checks
-
-| Stage | Checks |
+| Stage | Check |
 |---|---|
-| `transit` | floor hit; held-piece drop if in `grasp_mode` |
-| `descend` | tube breach using `eval_drift_limit`; table hit |
-| `ascend` | tube breach; table hit; held-piece drop if in `grasp_mode` |
+| transit | `FLOOR_HIT` if `grip_z < FLOOR_LIMIT` |
+| descend/ascend | `TUBE_BREACH` if XY drift > `eval_drift_limit`; `TABLE_HIT` if `grip_z < TABLE_SURFACE_Z` |
+| transit/ascend | `PIECE_DROPPED_XY/Z` if `grasp_mode` and piece is out of range |
 
-Timeout after `env.rl_max_steps_per_stage` becomes `TIMEOUT`.
+### Soft Reset Between Stages
 
-## Scripted Grasp
+`run_descend` and `run_ascend` call `_prepare_stage` before inference. This calls `env.soft_reset(...)` to switch scenario context and `reset_elapsed_steps` to clear the episode step counter.
 
-`execute_grasp()` runs after descend reaches `HOVER_Z` over the source piece.
+---
 
-Main phases:
+## Scripted Grasp Pipeline
 
-1. Halt and settle the full simulation state.
-2. Verify speed, Z position, and open fingers.
-3. Read active piece pose and reject dangerously rotated cubes.
-4. Align above the piece and enforce vertical wrist.
-5. Plunge to `GRASP_Z`.
-6. Enable `grasp_mode` and ramp fingers closed.
-7. Detect empty grasp if fingers close too far.
-8. Hold and verify XY/Z/finger thresholds.
-9. Retract to `HOVER_Z` while checking the piece remains held.
+`ChessProductionEnv.execute_grasp()` — runs after DESCEND succeeds at `HOVER_Z`.
 
-The active piece is chosen by `env.set_active_piece(piece_id)` before the move.
-`get_cube_position()` and `get_cube_quat()` route to that selected piece.
+```
+_halt()
+_check_hover_preconditions()       ← speed, Z height, fingers open
+_check_piece_yaw()                 ← abort if piece rotated >25°
+_align_over_xy(piece_pos[:2])      ← XY alignment at hover height
+_move_z(piece_xy, GRASP_Z, ...)    ← plunge down to grasp height
+grasp_mode = True
+_close_fingers()                   ← ramp fingers closed, detect empty grasp
+_hold_and_verify()                 ← hold steady, verify XY/Z/finger
+_move_z(grip_xy, HOVER_Z, ..., verify_held=True)  ← retract, watch for drop
+```
 
-## Scripted Place
+### `_check_piece_yaw`
 
-`execute_place(dst_xy)` runs after descend reaches `HOVER_Z` over the
-destination square.
+Extracts yaw (rotation around Z axis) from the piece quaternion. Uses 4-fold symmetry to compute the effective yaw: fold `[0,π]` into `[0,π/2]`, then take the distance to the nearest axis. Aborts with `PIECE_ROTATED` if `effective_yaw > 25°` (a piece rotated that far would have an effective width exceeding the maximum finger opening).
 
-Main phases:
+### `_close_fingers`
 
-1. Halt and settle.
-2. Verify speed and Z position.
-3. Align above destination and enforce vertical wrist.
-4. Plunge to `GRASP_Z`.
-5. Ramp fingers open.
-6. Disable `grasp_mode`.
-7. Verify final piece XY and Z placement.
-8. Retract to `HOVER_Z`.
+Ramps `finger_target_joint` from `FINGER_OPEN_JOINT` to `GRASP_RAMP_END` over `grasp_close_steps` sim steps, tracking live piece XY each step. Empty-grasp detection (checking if `finger_angle < EMPTY_GRASP_THRESHOLD`) starts at 65% of steps to avoid false positives before the fingers have had time to close.
 
-After a successful full move, `MovementExecutor` performs final reconciliation
-and snaps the freejoint pose exactly to the destination square.
+### `_move_z`
 
-## Return Home
+Unified vertical movement used for both plunge and retract. Direction is inferred from sign of `(target_z - current_z)`. Returns `MOVE_Z_TIMEOUT` if the grip ends more than 8 mm from the target after all steps.
 
-`PhysicalPlanExecutor.return_to_home()` runs after each committed physical plan:
+---
 
-1. `controller.run_transit(home_xy)`.
-2. `env.reset_arm_to_home_posture()` if available.
+## Scripted Place Pipeline
 
-The home-posture reset restores the exact reset-time joint posture and mocap pose.
-This avoids accumulating different redundant wrist/roll joint configurations
-after repeated end-effector-only moves.
+`ChessProductionEnv.execute_place(dst_xy)` — runs after DESCEND succeeds at `HOVER_Z` over destination.
 
+```
+_halt()
+_check_hover_preconditions()       ← speed, Z height (fingers expected closed — grasp_mode=True)
+_align_over_xy(dst_xy)             ← XY alignment
+_move_z(dst_xy, GRASP_Z, ...)      ← plunge
+_open_fingers(place_pos)           ← ramp fingers open, settle
+grasp_mode = False
+_verify_placement(dst_xy)          ← check piece XY drift and Z height
+_move_z(place_xy, HOVER_Z, ...)    ← retract (non-fatal timeout)
+```
+
+### Failure Reasons
+
+| Reason | Source |
+|---|---|
+| `PRECONDITION_SPEED` | Grip moving too fast when pipeline starts |
+| `PRECONDITION_Z` | Grip not within 25 mm of `HOVER_Z` |
+| `PRECONDITION_FINGERS_NOT_OPEN` | Fingers not open before grasp |
+| `PIECE_ROTATED` | Piece yaw exceeds 25° |
+| `ALIGN_FAILED` | XY alignment didn't converge |
+| `MOVE_Z_TIMEOUT` | Plunge/retract didn't reach target within 8 mm |
+| `FINGER_CLOSED_EMPTY` | Fingers closed fully with no piece contact |
+| `VERIFY_XY_FAILED` | Piece–grip XY error too large after hold |
+| `VERIFY_Z_FAILED` | Piece–grip Z error too large after hold |
+| `VERIFY_FINGERS_CLOSED_EMPTY` | Fingers fully closed in verify phase |
+| `PIECE_DROPPED_DURING_RETRACT` | Piece Z deviated from expected offset during ascent |
+| `PLACE_XY_FAILED` | Placed piece drifted too far from target |
+| `PLACE_Z_FAILED` | Placed piece not flat on table |
+
+---
+
+## Home Posture
+
+After each move the arm returns to `HOME_POS` via SAC transit, then `reset_arm_to_home_posture()` snaps redundant wrist/roll joints back to the exact reset-time configuration. This prevents configuration drift across moves.
+
+The posture is captured once after the first episode reset (when the arm lands at `HOME_POS`) and reapplied via linear interpolation over 10 sim steps.

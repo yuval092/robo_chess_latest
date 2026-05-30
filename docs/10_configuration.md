@@ -1,180 +1,120 @@
-# Configuration Reference
+# Configuration
 
-All YAML config files live under `configs/` and are loaded with:
+All configuration lives in `configs/`. Files are loaded with `src/utils/io.load_config(name)` which reads `configs/{name}.yaml`.
 
-```python
-src.utils.io.load_config(name)
-```
+---
 
-`name` maps to `configs/{name}.yaml`.
+## `configs/env.yaml`
 
-## Files
+Runtime environment parameters. Grouped by concern.
 
-| File | Purpose |
-|---|---|
-| `env.yaml` | Task constants, Z levels, rewards, grasp thresholds, controller tolerances |
-| `chess.yaml` | Board geometry, piece/reserve layouts, game and engine config |
-| `physics.yaml` | MuJoCo setup constants and action scaling |
-| `training.yaml` | SAC training schedule and hyperparameters |
-| `deployed_models.yaml` | Production model checkpoint paths |
+### Geometry & Heights
 
-## `env.yaml`
-
-Geometry and Z levels:
-
-| Key | Value | Meaning |
-|---|---:|---|
-| `piece_height` | `0.030` | Collision piece height |
-| `table_surface_z` | `0.400` | Table top; equals `floor_limit` |
-| `floor_limit` | `0.400` | Minimum gripper Z for transit; below this triggers `FLOOR_HIT` |
-| `table_center_xy` | `[0.88, 0.2641]` | Table/board center |
-| `table_half_x` | `0.35` | Table half width X |
-| `table_half_y` | `0.35` | Table half width Y |
-| `edge_margin` | `0.04` | Inset margin from table edges when sampling random training positions |
-| `min_goal_dist` | `0.10` | Minimum XY distance required between object and sampled training goal |
-| `torso_height` | `0.3700` | Fetch torso lift height, tuned for full-board arm reachability |
-| `grasp_z` | `0.430` | Gripper Z target for grasp and place plunge phases |
-| `hover_z` | `0.460` | Gripper Z where descend/ascend stages stop; arm idles here before grasp/place |
-| `safe_z` | `0.530` | Transit height; arm travels between squares at this Z |
-| `home_position_xy` | `[0.88, 0.2641]` | Return-home XY after each move |
-
-Training thresholds and rewards:
-
-| Key | Value | Meaning |
-|---|---:|---|
-| `success_threshold` | `0.010` | Distance from goal (m) for RL stage success |
-| `descend_success_threshold` | `0.008` | Tighter Z threshold for descend success |
-| `success_bonus` | `500.0` | Sparse reward on episode success |
-| `crash_penalty` | `-500.0` | Sparse penalty on crash termination |
-| `dist_reward_weight` | `1.0` | Dense reward weight for total distance to goal |
-| `z_reward_weight` | `1.5` | Dense reward weight for Z-axis proximity |
-| `xy_reward_weight` | `2.0` | Dense reward weight for XY proximity |
-| `jitter_penalty_weight` | `0.003` | Penalty coefficient for squared XYZ action magnitude |
-| `floor_penalty` | `0.5` | Added when gripper is within `floor_proximity_threshold` of `floor_limit` |
-| `floor_proximity_threshold` | `0.025` | Safety margin above `floor_limit` that triggers the floor penalty |
-| `stability_vel_threshold` | `0.02` | Grip speed (m/s) below which the arm is stable for success |
-
-Drift and braking:
-
-| Key | Value | Meaning |
-|---|---:|---|
-| `drift_limit_start` | `0.100` | Initial XY tube radius for descend/ascend curriculum |
-| `drift_limit_end` | `0.008` | Final XY tube radius after curriculum |
-| `drift_curriculum_steps` | `30000` | Per-worker steps to tighten the tube to `drift_limit_end` |
-| `eval_drift_limit` | `0.010` | Fixed tube radius used during evaluation |
-| `transit_braking_dist` | `0.030` | Transit distance from goal at which velocity penalty begins |
-| `descend_braking_dist` | `0.025` | Descend distance from goal at which velocity penalty begins |
-| `ascend_braking_dist` | `0.010` | Ascend distance from goal at which velocity penalty begins |
-| `braking_dist` | `0.010` | Fallback braking distance when no stage-specific key is present |
-| `transit_braking_reward_weight` | `0.50` | Transit velocity penalty weight |
-| `descend_braking_reward_weight` | `0.30` | Descend velocity penalty weight |
-| `ascend_braking_reward_weight` | `0.15` | Ascend velocity penalty weight |
-| `braking_reward_weight` | `0.15` | Fallback braking weight when no stage-specific key is present |
-
-Grasp/place:
-
-| Key | Value | Meaning |
-|---|---:|---|
-| `grasp_align_tolerance` | `0.001` | Maximum XY error (m) allowed before the plunge begins |
-| `grasp_close_steps` | `24` | Steps to ramp fingers from open to grip target |
-| `grasp_ramp_end` | `0.010` | Finger joint target at end of close ramp |
-| `empty_grasp_threshold` | `0.011` | Finger joint below this during close means cube is absent |
-| `grasp_hold_steps` | `2` | Steps to hold grip after close so contact impulses settle |
-| `grasp_plunge_step_m` | `0.006` | Vertical step size (m) per physics step during plunge |
-| `grasp_retract_step_m` | `0.006` | Vertical step size (m) per physics step during retract |
-| `release_ramp_steps` | `4` | Steps to ramp fingers open during place |
-| `release_settle_steps` | `2` | Steps to hold fingers open before placement is verified |
-| `grasp_verify_xy_threshold` | `0.015` | Maximum cube-to-grip XY distance (m) for a successful grasp |
-| `grasp_verify_z_threshold` | `0.020` | Maximum cube-to-grip Z distance (m) for a successful grasp |
-| `piece_held_xy_limit` | `0.030` | XY deviation (m) that triggers `PIECE_DROPPED_XY` |
-| `piece_held_z_limit` | `0.020` | Z deviation (m) that triggers `PIECE_DROPPED_Z` |
-
-Execution tolerances:
-
-| Key | Value | Meaning |
-|---|---:|---|
-| `rl_max_steps_per_stage` | `300` | Maximum SAC inference steps per stage before `TIMEOUT` |
-| `reconcile_xy_tolerance_m` | `0.020` | Maximum XY error between final piece position and destination |
-| `reconcile_z_tolerance_m` | `0.010` | Maximum Z error between final piece position and table surface |
-| `halt_vel_threshold` | `0.0005` | Maximum gripper speed (m/s) to consider the arm stopped |
-| `finger_open_joint` | `0.0181` | Finger joint position for fully open fingers |
-| `finger_closed_joint` | `0.0000` | Finger joint position for fully closed fingers |
-
-## `chess.yaml`
-
-Board:
-
-| Key | Value | Meaning |
-|---|---:|---|
-| `board.cell_size_m` | `0.08` | Physical width of one chess square (m) |
-| `board.board_size` | `8` | Squares along one edge |
-| `board.center_xy` | `[0.88, 0.2641]` | World XY of the board centre |
-
-Pieces:
-
-| Key | Value | Meaning |
-|---|---:|---|
-| `pieces.piece_height_m` | `0.030` | Full collision piece height; piece centre at `table_surface_z + 0.015` |
-
-Game:
-
-| Key | Default |
-|---|---|
-| `game.human_color` | `white` |
-| `game.auto_computer_reply` | `true` |
-
-Engine:
-
-| Key | Default | Meaning |
+| Key | Value | Description |
 |---|---|---|
-| `engine.stockfish_path` | `stockfish` | Executable name on PATH or full path; `null` disables engine |
-| `engine.skill_level` | `5` | UCI Skill Level (0–20) |
-| `engine.think_time_s` | `0.5` | Seconds Stockfish may search per move |
+| `table_surface_z` | 0.400 | Z of table surface; equals `floor_limit` |
+| `table_center_xy` | [0.88, 0.2641] | World XY of table centre |
+| `table_half_x/y` | 0.35 | Half-extents of table (70 cm total) |
+| `piece_height` | 0.030 | Piece collision box height (m) |
+| `grasp_z` | 0.430 | Gripper Z for grasp/place plunge phases |
+| `hover_z` | 0.460 | Z where descend/ascend stop; arm idles here |
+| `safe_z` | 0.530 | Transit height |
+| `floor_limit` | 0.400 | Minimum Z for transit; below triggers `FLOOR_HIT` |
+| `torso_height` | 0.370 | Fetch torso joint position |
+| `home_position_xy` | [0.88, 0.2641] | XY arm returns to after each move |
 
-## `physics.yaml`
+### Grasp Pipeline
 
-| Key | Value | Meaning |
-|---|---:|---|
-| `vertical_quat` | `[0.7071068, 0, 0.7071068, 0]` | Unit quaternion for downward gripper orientation |
-| `initial_qpos` | `[-0.05, 0.00]` | Initial Fetch base slide positions |
-| `env_setup_steps` | `10` | Physics settle steps during initial env setup |
-| `pos_ctrl_scale` | `0.015` | Max arm displacement (m) per action step |
-| `settle_tolerance` | `0.003` | Gripper position tolerance (m) for `_move_mocap_to` |
+| Key | Description |
+|---|---|
+| `grasp_align_tolerance` | Max XY error (m) before plunge begins |
+| `hover_speed_threshold` | Max grip speed (m/s) to be "settled" |
+| `hover_z_tolerance` | Max Z deviation from `hover_z` to be "at hover height" |
+| `grasp_close_steps` | Actuator steps for finger close ramp |
+| `grasp_ramp_end` | Finger joint target at end of close ramp (0.010) |
+| `empty_grasp_threshold` | Finger joint below this = no piece (0.011) |
+| `grasp_hold_steps` | Sim steps to hold grip after close |
+| `grasp_plunge_step_m` | Vertical step size (m) per sim step during plunge |
+| `grasp_retract_step_m` | Vertical step size (m) per sim step during retract |
+| `grasp_verify_xy_threshold` | Max piece–grip XY error for successful grasp |
+| `grasp_verify_z_threshold` | Max piece–grip Z error for successful grasp |
 
-## `deployed_models.yaml`
+### Place Pipeline
+
+| Key | Description |
+|---|---|
+| `release_ramp_steps` | Steps over which fingers open |
+| `release_settle_steps` | Steps to hold fingers open before verifying |
+| `place_verify_xy_threshold` | Max piece–target XY drift for successful place |
+| `place_verify_z_threshold` | Max piece Z deviation from table for successful place |
+
+### Piece Hold Monitoring (transit/ascend)
+
+| Key | Description |
+|---|---|
+| `piece_held_xy_limit` | XY distance (m) that triggers `PIECE_DROPPED_XY` |
+| `piece_held_z_limit` | Z distance (m) that triggers `PIECE_DROPPED_Z` |
+
+### Post-move Reconciliation
+
+| Key | Description |
+|---|---|
+| `reconcile_xy_tolerance_m` | Max XY error after place before `XY_LANDING_FAILED` |
+| `reconcile_z_tolerance_m` | Max Z error after place before `Z_LANDING_FAILED` |
+
+### RL / Training
+
+| Key | Description |
+|---|---|
+| `rl_max_steps_per_stage` | Max SAC steps before `TIMEOUT` |
+| `success_threshold` | Distance from goal for RL success (m) |
+| `eval_drift_limit` | Fixed tube radius during evaluation |
+| `stability_vel_threshold` | Speed below which arm is "stable" |
+| `drift_limit_start/end` | Curriculum tube radius range |
+| `drift_curriculum_steps` | Steps to tighten from start to end |
+
+---
+
+## `configs/chess.yaml`
+
+Board and piece geometry, reserve layouts, and game settings.
+
+| Section | Key | Description |
+|---|---|---|
+| `board` | `cell_size_m`, `board_size`, `center_xy` | 8×8 board geometry |
+| `pieces` | `piece_height_m` | Piece height (matches `env.yaml:piece_height`) |
+| `reserves` | `graveyard_slot_spacing_m`, `promotion_slot_spacing_m` | Slot spacing |
+| `graveyards` | `white/black.origin_xyz`, `rows`, `cols` | Graveyard grid layout |
+| `promotion_reserve` | `white/black.origin_xyz`, `rows`, `cols` | Promotion reserve layout |
+| `game` | `human_color`, `auto_computer_reply` | Game behaviour |
+| `engine` | `stockfish_path`, `skill_level`, `think_time_s` | Stockfish config |
+
+---
+
+## `configs/physics.yaml`
+
+| Key | Description |
+|---|---|
+| `vertical_quat` | Gripper downward orientation quaternion |
+| `initial_qpos` | Fetch base slide initial positions |
+| `env_setup_steps` | Physics settle steps on first env setup |
+| `pos_ctrl_scale` | Max arm displacement per action step (0.015 m) |
+| `settle_tolerance` | Grip tolerance for `_move_grip_to` waypoints |
+
+---
+
+## `configs/training.yaml`
+
+SAC hyperparameters and training loop settings. See [09_training.md](09_training.md) for full reference.
+
+---
+
+## `configs/deployed_models.yaml`
+
+Paths to the three production SAC model ZIPs. Validated at startup by `src/utils/config_validation.py`.
 
 ```yaml
-transit: "models/transit.zip"
-descend: "models/descend.zip"
-ascend: "models/ascend.zip"
+transit: models/transit/model.zip
+descend: models/descend/model.zip
+ascend:  models/ascend/model.zip
 ```
-
-`resolve_model_paths()` requires all three stages to resolve to a string path.
-
-## Validation
-
-`src/utils/config_validation.py` checks:
-
-- Required `env.yaml` keys.
-- Board cell size and board width consistency..
-- Deployed model stage keys and string values.
-- Existence of the base training model.
-
-Run:
-
-```bash
-pytest tests/test_config_schema.py
-```
-
-## Utility Modules
-
-`src/utils/io.py` provides:
-
-| Function | Purpose |
-|---|---|
-| `load_config(name)` | Load `configs/{name}.yaml` |
-| `resolve_model_paths(overrides)` | Merge CLI model overrides with deployed model config |
-| `setup_logger(name, log_file)` | Create an idempotent file-backed logger |
-
-`src/utils/logger.py` is a backward-compatible shim that re-exports
-`setup_logger` from `src.utils.io`.

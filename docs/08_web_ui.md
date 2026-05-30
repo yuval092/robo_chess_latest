@@ -1,101 +1,81 @@
 # Web UI
 
-## Overview
+## Flask Application (`src/ui/app.py`)
 
-The UI is a single-page Flask app:
+Created by `create_app(backend: UIBackend)`. All routes delegate to the `UIBackend` protocol — the concrete implementation is always `QueuedUIBackend`.
 
-```text
-src/ui/app.py
-src/ui/queued_backend.py
-src/ui/templates/index.html
-src/ui/static/app.js
-src/ui/static/styles.css
-```
+### REST Endpoints
 
-The browser renders the board from JSON snapshots and sends REST requests for
-new games, moves, and computer turns.
-
-## Flask App Factory
-
-`create_app(backend)` creates an isolated Flask app bound to a `UIBackend`
-protocol:
-
-```python
-snapshot()
-new_game()
-submit_human_move(src, dst, promotion=None)
-let_computer_play_current_turn()
-```
-
-Production passes `QueuedUIBackend`. Tests can pass `GameOrchestrator` or a fake
-object directly.
-
-`to_jsonable()` recursively converts dataclasses, dicts, lists, and tuples into
-plain JSON-compatible data for `jsonify()`.
-
-## REST Endpoints
-
-| Method | Path | Purpose |
+| Method | Path | Description |
 |---|---|---|
-| `GET` | `/` | Serve the browser app |
-| `GET` | `/api/snapshot` | Return current `GameSnapshot` |
-| `POST` | `/api/new-game` | Reset game and physical board |
-| `POST` | `/api/move` | Submit a human move |
-| `POST` | `/api/promote` | Placeholder, returns 501 |
-| `POST` | `/api/let-computer-play` | Ask engine to play current turn |
-| `POST` | `/api/undo` | Placeholder, returns 501 |
+| `GET` | `/` | Serves `index.html` (the browser chess UI) |
+| `GET` | `/api/snapshot` | Returns the current `GameSnapshot` as JSON |
+| `POST` | `/api/new-game` | Resets the game and physical state |
+| `POST` | `/api/move` | Submit a human move; body: `{"src": "e2", "dst": "e4", "promotion": null}` |
+| `POST` | `/api/let-computer-play` | Trigger one engine move |
 
-`POST /api/move` body:
+### Response Format
 
-```json
-{"src": "e2", "dst": "e4", "promotion": null}
-```
-
-Promotion uses `"q"`, `"r"`, `"b"`, or `"n"`.
-
-Missing `src` or `dst` returns:
+All `/api/*` responses return JSON serialised from dataclasses via `to_jsonable` (recursive `asdict` for dataclasses, passthrough for primitives). The `/api/move` and `/api/let-computer-play` endpoints return `MoveExecutionResult`:
 
 ```json
-{"accepted": false, "error": "src and dst are required"}
+{
+  "accepted": true,
+  "physical_success": true,
+  "move_uci": "e2e4",
+  "error": null,
+  "snapshot": { ... }
+}
 ```
 
-with HTTP BAD_REQUEST.
+`accepted=false` → 400 Bad Request (illegal move, wrong turn). `accepted=true, physical_success=false` → 200 OK (move accepted by rules but physical execution failed).
 
-## Queued Backend
+---
 
-`QueuedUIBackend` exists because MuJoCo is not thread-safe.
+## QueuedUIBackend (`src/ui/queued_backend.py`)
 
-Data members:
+Thread-safe wrapper that serialises all `GameOrchestrator` calls onto the main thread via a queue.
 
-| Field | Purpose |
-|---|---|
-| `_orchestrator` | Real game backend |
-| `_requests` | `queue.Queue[UIRequest]` |
-| `_snapshot` | Cached latest snapshot |
-| `_lock` | Protects `_snapshot` |
+### Why a queue?
 
-Mutating methods call `_call()`, which enqueues a request and waits on a
-single-slot response queue. The main runtime loop calls:
+MuJoCo is not thread-safe. Flask runs on a daemon thread. The queue ensures all simulation state changes happen on the main thread inside the game loop.
+
+### Request Flow
+
+```
+Flask thread                    Main thread
+-----------                     -----------
+_call("submit_human_move", ...) 
+  → put UIRequest on queue
+  → block on response.get()
+                                process_one()
+                                  → pop UIRequest
+                                  → call orchestrator.submit_human_move(...)
+                                  → put (True, result) on response
+response.get() unblocks
+returns result to Flask handler
+```
+
+### `process_one(env, timeout)`
+
+Called in the main game loop:
 
 ```python
-backend.process_one(env=env, timeout=0.05)
+while True:
+    backend.process_one(env=env, timeout=0.05)
+    env.render()
+    time.sleep(0.01)
 ```
 
-For `new_game`, `process_one()` first resets MuJoCo and physical board state:
+Pops one request with a `timeout` second wait. If `new_game` is requested, calls `env.reset()` before the orchestrator call (resets MuJoCo simulation state). Updates `_snapshot` under a lock after each call so `snapshot()` always returns the latest state without blocking.
 
-1. `env.reset()`
-3. `orchestrator.new_game()`
+### UIBackend Protocol
 
-Then it updates the cached snapshot.
+Any object implementing these four methods can replace `QueuedUIBackend` (e.g. for testing):
 
-## Browser Behavior
-
-`app.js`:
-
-- Loads `/api/snapshot` on page load.
-- Renders board squares and unicode chess pieces.
-- Tracks selected square and legal destinations.
-- Shows last move, turn, legal move count, FEN, move history, and errors.
-- Supports board flipping.
-- Detects promotion by pawn destination rank and opens a dialog.
-- Disables controls while a request is in flight or the game is over.
+```python
+def snapshot(self) -> GameSnapshot: ...
+def new_game(self) -> GameSnapshot: ...
+def submit_human_move(self, src, dst, promotion) -> MoveExecutionResult: ...
+def let_computer_play_current_turn(self) -> MoveExecutionResult: ...
+```
