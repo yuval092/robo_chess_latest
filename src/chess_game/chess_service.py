@@ -241,10 +241,6 @@ class ChessService:
         """Return the SAN move history."""
         return list(self._san_history)
 
-    def piece_at(self, square: str) -> chess.Piece | None:
-        """Return the piece at a square, if present."""
-        return self._board.piece_at(chess.parse_square(square))
-
     def side_to_move(self) -> chess.Color:
         """Return the side whose turn it is."""
         return self._board.turn

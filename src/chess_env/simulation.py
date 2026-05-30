@@ -12,6 +12,8 @@ from src.utils.io import load_config
 
 _xml_path_lock = threading.Lock()
 
+IDENTITY_QUAT = np.array([1.0, 0.0, 0.0, 0.0])
+
 
 def unwrap_env(env):
     """Unwrap a gymnasium environment to its innermost environment."""

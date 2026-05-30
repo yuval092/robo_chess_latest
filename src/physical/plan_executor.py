@@ -43,6 +43,7 @@ class PhysicalPlanExecutor:
             ArmMoveCommand: self._handle_arm_move,
             TeleportCommand: self._handle_teleport,
         }
+        self._home_xy = np.array(load_config("env")["home_position_xy"])
 
     def execute(self, plan: list) -> PhysicalExecutionResult:
         """Execute all commands in a plan and stop on first arm-move failure."""
@@ -96,8 +97,7 @@ class PhysicalPlanExecutor:
         self.occupancy.set_piece_square(command.piece_id, new_square)
 
     def return_to_home(self) -> PhysicalExecutionResult:
-        home_xy = np.array(load_config("env")["home_position_xy"])
-        result = self.controller.run_transit(home_xy)
+        result = self.controller.run_transit(self._home_xy)
         command_results = [("return_to_home", result)]
         if not result.success:
             return PhysicalExecutionResult(False, command_results, result.crash_reason)

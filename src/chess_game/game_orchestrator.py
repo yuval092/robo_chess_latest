@@ -138,7 +138,7 @@ class GameOrchestrator:
         self.chess_service.push(move)
         self.piece_tracker.apply_plan(plan)
         self.last_move = move.uci()
-        return True, None if home_result.success else home_result.error
+        return True, home_result.error
 
     def _auto_play_if_computer_turn(self, result: MoveExecutionResult) -> MoveExecutionResult:
         """If the last move succeeded and it's the computer's turn, play it automatically."""

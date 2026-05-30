@@ -89,8 +89,8 @@ class LogicalPieceTracker:
         return f"slot_{len(self._captured[color]):02d}"
 
     def next_promotion_reserve_slot(self, color: str) -> str:
-        # Count only pawns that are off-board AND not captured (i.e., they were promoted out)
         """Return the next promotion reserve slot ID for a colour."""
+        # Count only pawns that are off-board AND not captured (i.e., they were promoted out)
         captured_set = set(self._captured[color])
         promoted_out = sum(
             1

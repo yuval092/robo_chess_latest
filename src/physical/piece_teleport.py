@@ -8,11 +8,9 @@ import chess
 import mujoco
 import numpy as np
 
-from src.chess_env.simulation import unwrap_env
+from src.chess_env.simulation import IDENTITY_QUAT, unwrap_env
 from src.chess_game.board_mapper import BoardMapper
 from src.utils.io import load_config
-
-IDENTITY_QUAT = np.array([1.0, 0.0, 0.0, 0.0])
 
 
 class PieceTeleporter:

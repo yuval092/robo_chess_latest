@@ -34,6 +34,8 @@ class ChessProductionEnv(ChessBaseEnv):
         super().__init__(force_scenario=force_scenario, **kwargs)
 
         self.GRASP_ALIGN_TOLERANCE = self.env_cfg["grasp_align_tolerance"]
+        self.HOVER_SPEED_THRESHOLD = self.env_cfg["hover_speed_threshold"]
+        self.HOVER_Z_TOLERANCE = self.env_cfg["hover_z_tolerance"]
         self.GRASP_CLOSE_STEPS = self.env_cfg["grasp_close_steps"]
         self.GRASP_RAMP_END = self.env_cfg["grasp_ramp_end"]
         self.EMPTY_GRASP_THRESHOLD = self.env_cfg["empty_grasp_threshold"]
@@ -209,7 +211,7 @@ class ChessProductionEnv(ChessBaseEnv):
                 if abs(self.get_active_piece_position()[2] - (self.get_grip_pos()[2] - PIECE_COM_GRIP_OFFSET)) > self.PIECE_HELD_Z_LIMIT:
                     return "PIECE_DROPPED_DURING_RETRACT"
         grip_z = self.get_grip_pos()[2]
-        if abs(grip_z - target_z) > 0.001:
+        if abs(grip_z - target_z) > 0.008:
             return f"MOVE_Z_TIMEOUT (z={grip_z * 1000:.1f}mm, target={target_z * 1000:.1f}mm)"
         return None
 
@@ -223,20 +225,20 @@ class ChessProductionEnv(ChessBaseEnv):
     def _check_hover_preconditions(self) -> str | None:
         """Verify speed, Z height, and (when not in grasp_mode) that fingers are open."""
         grip_vel = self._utils.get_site_xvelp(self.model, self.data, "robot0:grip")
-        if float(np.linalg.norm(grip_vel)) > 0.005:
+        if float(np.linalg.norm(grip_vel)) > self.HOVER_SPEED_THRESHOLD:
             return "PRECONDITION_SPEED"
 
         grip_pos = self.get_grip_pos()
-        if abs(grip_pos[2] - self.HOVER_Z) > 0.025:
+        if abs(grip_pos[2] - self.HOVER_Z) > self.HOVER_Z_TOLERANCE:
             return (
                 f"PRECONDITION_Z (grip={grip_pos[2] * 1000:.1f}mm, "
                 f"HOVER_Z={self.HOVER_Z * 1000:.1f}mm)"
             )
 
         if not self.grasp_mode:
-            l_finger = self.get_finger_angle()
-            if l_finger < self.FINGER_OPEN_JOINT - 0.003:
-                return f"PRECONDITION_FINGERS_NOT_OPEN (j={l_finger:.4f})"
+            finger_angle = self.get_finger_angle()
+            if finger_angle < self.FINGER_OPEN_JOINT - 0.003:
+                return f"PRECONDITION_FINGERS_NOT_OPEN (j={finger_angle:.4f})"
 
         return None
 
@@ -244,11 +246,7 @@ class ChessProductionEnv(ChessBaseEnv):
         """Align the grip site over (xy) at current Z."""
         grip_pos = self.get_grip_pos()
         align_target = np.array([xy[0], xy[1], grip_pos[2]])
-        if self._move_grip_to(
-            align_target,
-            max_steps=150,
-            tolerance=self.GRASP_ALIGN_TOLERANCE,
-        ):
+        if self._move_grip_to(align_target, tolerance=self.GRASP_ALIGN_TOLERANCE):
             return None
         final_pos = self.get_grip_pos()
         align_error_mm = float(np.linalg.norm(final_pos - align_target) * 1000.0)

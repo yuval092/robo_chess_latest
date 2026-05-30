@@ -18,12 +18,10 @@ import mujoco
 import numpy as np
 from gymnasium import spaces
 
-from src.chess_env.simulation import ChessSimulationEnv
+from src.chess_env.simulation import IDENTITY_QUAT, ChessSimulationEnv
 from src.chess_game.board_mapper import BoardMapper
 from src.physical.piece_registry import PieceRegistry, reserve_piece_ids
 from src.utils.io import load_config
-
-IDENTITY_QUAT = np.array([1.0, 0.0, 0.0, 0.0])
 
 
 PRETRAINED_OBS_SPACE = spaces.Dict(
@@ -36,7 +34,7 @@ PRETRAINED_OBS_SPACE = spaces.Dict(
 
 @contextmanager
 def pretrained_obs_format_enabled(env) -> Generator[None, None, None]:
-    """Enable pretrained obs formatervations and restore wrapper/unwrapped state on exit."""
+    """Enable pretrained obs format and restore wrapper/unwrapped state on exit."""
     unwrapped = env.unwrapped
     saved_flag = unwrapped._use_pretrained_obs_format
     saved_unwrapped_space = unwrapped.observation_space
