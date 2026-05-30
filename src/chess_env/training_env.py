@@ -32,12 +32,14 @@ class ChessTrainingEnv(ChessBaseEnv):
         self.current_drift_limit = self._get_current_drift_limit()
 
     def compute_reward(self, achieved_goal, desired_goal, info):
-        # Name fixed by GoalEnv interface; called by SB3 each step.
+        # GoalEnv interface — must handle both a single goal (shape (3,)) and a
+        # batch from HER (shape (N, 3)). Use axis=-1 and [...] indexing throughout.
         achieved_goal = np.asarray(achieved_goal, dtype=np.float64)
         desired_goal = np.asarray(desired_goal, dtype=np.float64)
-        dist = float(np.linalg.norm(achieved_goal - desired_goal))
-        z_err = float(abs(achieved_goal[2] - desired_goal[2]))
-        xy_err = float(np.linalg.norm(achieved_goal[:2] - desired_goal[:2]))
+        diff = achieved_goal - desired_goal
+        dist = np.linalg.norm(diff, axis=-1)
+        z_err = np.abs(diff[..., 2])
+        xy_err = np.linalg.norm(diff[..., :2], axis=-1)
         return (
             -self.env_cfg["dist_reward_weight"] * dist
             - self.env_cfg["z_reward_weight"] * z_err

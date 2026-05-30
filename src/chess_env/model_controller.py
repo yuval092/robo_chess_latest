@@ -214,13 +214,13 @@ class ModelEmbeddedController:
             return None
         # Only the left finger is checked because both fingers are always driven to the
         # same target value simultaneously, so left mirrors right exactly.
-        l_finger = env.get_finger_angle()
+        finger_angle = env.get_finger_angle()
         expected_finger = env.finger_target_joint
-        if abs(l_finger - expected_finger) > 0.003:
+        if abs(finger_angle - expected_finger) > 0.003:
             return StageResult(
                 success=False,
                 crash_reason=(
-                    f"PRECONDITION_FINGER (actual={l_finger:.4f}, "
+                    f"PRECONDITION_FINGER (actual={finger_angle:.4f}, "
                     f"expected={expected_finger:.4f})"
                 ),
                 final_pos=self._env.get_grip_pos(),

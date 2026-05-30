@@ -156,14 +156,14 @@ class ChessBaseEnv(ChessSimulationEnv):
 
         grip_pos = self.get_grip_pos().copy().astype(np.float32)
         grip_vel = self.get_grip_vel().astype(np.float32)
-        l_finger = np.float32(self.get_finger_angle())
+        finger_angle = np.float32(self.get_finger_angle())
         goal_pos = (
             self.goal_pos.copy().astype(np.float32)
             if self.goal_pos is not None
             else np.zeros(3, dtype=np.float32)
         )
 
-        obs_vec = np.concatenate([grip_pos, grip_vel, [l_finger]])
+        obs_vec = np.concatenate([grip_pos, grip_vel, [finger_angle]])
 
         return {
             "observation": obs_vec,
@@ -465,10 +465,10 @@ class ChessBaseEnv(ChessSimulationEnv):
 
     def _validate_finger_state(self) -> bool:
         """Return False and log an error if the finger didn't reach its target."""
-        l_pos = self.get_finger_angle()
-        if abs(l_pos - self.finger_target_joint) > 0.0005:
+        finger_angle = self.get_finger_angle()
+        if abs(finger_angle - self.finger_target_joint) > 0.0005:
             self.logger.error(
-                f"Reset Failed: Finger joint at {l_pos:.6f}, "
+                f"Reset Failed: Finger joint at {finger_angle:.6f}, "
                 f"target {self.finger_target_joint:.6f} (Scenario: {self.current_scenario})"
             )
             return False
@@ -600,9 +600,9 @@ class ChessBaseEnv(ChessSimulationEnv):
         elif needs_close:
             self._set_fingers_and_move_to(nominal_exit_pos, self.FINGER_CLOSED_JOINT, max_steps=40)
 
-        l_pos = self.get_finger_angle()
-        if abs(l_pos - self.finger_target_joint) > 0.0005:
+        finger_angle = self.get_finger_angle()
+        if abs(finger_angle - self.finger_target_joint) > 0.0005:
             raise RuntimeError(
                 f"soft_reset FINGER_VALIDATION_FAILED: "
-                f"actual={l_pos:.6f}, target={self.finger_target_joint:.6f}"
+                f"actual={finger_angle:.6f}, target={self.finger_target_joint:.6f}"
             )
