@@ -79,8 +79,8 @@ class ChessTrainingEnv(ChessBaseEnv):
         grip_pos = obs["achieved_goal"]
         grip_vel = obs["observation"][20:23]  # grip_velp in the 25D pretrained obs
 
-        terminated, crash_reason = self._check_crash(grip_pos)
-        if terminated:
+        crash_reason = self._check_crash(grip_pos)
+        if crash_reason:
             reward, success = float(self.env_cfg["crash_penalty"]), 0.0
         else:
             reward, success = self._compute_step_reward(grip_pos, grip_vel, action_copy)
@@ -91,37 +91,36 @@ class ChessTrainingEnv(ChessBaseEnv):
             "crash_reason": crash_reason,
         }
 
-        if self.debug and terminated:
-            outcome = f"CRASH ({crash_reason})" if crash_reason else ("SUCCESS" if success else "TIMEOUT")
+        if self.debug and crash_reason:
             self.logger.debug(
                 f"[EP {self.episode_number} END] Scenario={self.current_scenario} "
-                f"Outcome={outcome} Reward={reward:.2f}"
+                f"Outcome=CRASH ({crash_reason}) Reward={reward:.2f}"
             )
 
-        return obs, float(reward), terminated, False, info
+        return obs, float(reward), crash_reason is not None, False, info
 
-    def _check_crash(self, grip_pos: np.ndarray) -> tuple[bool, str | None]:
+    def _check_crash(self, grip_pos: np.ndarray) -> str | None:
         """Check finger fault and scenario-specific boundary violations."""
         l_finger = self.get_finger_angle()
         if abs(l_finger - self.finger_target_joint) > 0.003:
-            return True, f"FINGER_FAULT (actual={l_finger:.4f}, target={self.finger_target_joint:.4f})"
+            return f"FINGER_FAULT (actual={l_finger:.4f}, target={self.finger_target_joint:.4f})"
 
         current_drift_limit = self._get_current_drift_limit()
         self.current_drift_limit = current_drift_limit
 
         if self.current_scenario == "transit":
             if grip_pos[2] < self.FLOOR_LIMIT:
-                return True, f"FLOOR_HIT (z={grip_pos[2]:.4f})"
+                return f"FLOOR_HIT (z={grip_pos[2]:.4f})"
 
         elif self.current_scenario in {"descend", "ascend"}:
             if self.tube_center_xy is not None:
                 drift = float(np.linalg.norm(grip_pos[:2] - self.tube_center_xy))
                 if drift > current_drift_limit:
-                    return True, f"TUBE_BREACH (drift={drift * 1000:.1f}mm > limit={current_drift_limit * 1000:.1f}mm)"
+                    return f"TUBE_BREACH (drift={drift * 1000:.1f}mm > limit={current_drift_limit * 1000:.1f}mm)"
             if grip_pos[2] < self.TABLE_SURFACE_Z:
-                return True, f"TABLE_HIT (z={grip_pos[2]:.4f})"
+                return f"TABLE_HIT (z={grip_pos[2]:.4f})"
 
-        return False, None
+        return None
 
     def _compute_step_reward(
         self, grip_pos: np.ndarray, grip_vel: np.ndarray, action: np.ndarray

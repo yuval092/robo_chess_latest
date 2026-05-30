@@ -102,8 +102,8 @@ class PhysicalPlanExecutor:
         if not result.success:
             return PhysicalExecutionResult(False, command_results, result.crash_reason)
 
-        success, reason = self.env.reset_arm_to_home_posture()
-        return PhysicalExecutionResult(success, command_results, reason)
+        error = self.env.reset_arm_to_home_posture()
+        return PhysicalExecutionResult(error is None, command_results, error)
 
     def reset_board_state(self) -> None:
         """Reset physical chess pieces and expected occupancy to the standard start."""

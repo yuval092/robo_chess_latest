@@ -92,7 +92,6 @@ def _setup_all_square_env(
     model_paths = resolve_model_paths(model_overrides)
     controller = ModelEmbeddedController(
         env=env,
-        render_fn=env.render if visualize else None,
         render_delay=delay,
     )
     controller.load_all(

@@ -223,7 +223,11 @@ class ChessBaseEnv(ChessSimulationEnv):
         return self._utils.get_site_xvelp(self.model, self.data, "robot0:grip").copy()
 
     def get_finger_angle(self) -> float:
-        """Return the current left finger joint angle."""
+        """Return the current left finger joint angle.
+
+        Both fingers are always driven to the same target simultaneously, so
+        left mirrors right exactly — checking one is sufficient.
+        """
         return self._utils.get_joint_qpos(
             self.model, self.data, "robot0:l_gripper_finger_joint"
         ).item()

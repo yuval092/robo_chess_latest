@@ -104,29 +104,23 @@ class ModelEmbeddedController:
 
     def run_grasp(self):
         """Execute the scripted grasp pipeline and return StageResult."""
-
-        env = self._env
         grip_before = self._env.get_grip_pos()
-        result_dict = env.execute_grasp()
-        success = result_dict.get("success", False)
+        reason = self._env.execute_grasp()
         grip_after = self._env.get_grip_pos()
         return StageResult(
-            success=success,
-            crash_reason=None if success else result_dict.get("reason", "GRASP_FAILED"),
+            success=reason is None,
+            crash_reason=reason,
             final_pos=grip_after.copy(),
             error_mm=float(np.linalg.norm(grip_after - grip_before)) * 1000.0,
         )
 
     def run_place(self, dst_xy: np.ndarray):
         """Execute the scripted place pipeline and return StageResult."""
-
-        env = self._env
-        result_dict = env.execute_place(dst_xy)
-        success = result_dict.get("success", False)
+        reason = self._env.execute_place(dst_xy)
         grip_after = self._env.get_grip_pos()
         return StageResult(
-            success=success,
-            crash_reason=None if success else result_dict.get("reason", "PLACE_FAILED"),
+            success=reason is None,
+            crash_reason=reason,
             final_pos=grip_after.copy(),
             error_mm=0.0,
         )
@@ -181,8 +175,8 @@ class ModelEmbeddedController:
         if precondition_failure:
             return precondition_failure
         
-        success, crash_reason = self._run_inference_loop(stage, target_pos, model)
-        return self._build_model_stage_result(target_pos, success, crash_reason)
+        crash_reason = self._run_inference_loop(stage, target_pos, model)
+        return self._build_model_stage_result(target_pos, crash_reason)
 
     def _get_stage_model(self, stage: str) -> SAC:
         """Helper to get the model for a stage, with error handling."""
@@ -255,48 +249,42 @@ class ModelEmbeddedController:
 
     def _run_inference_loop(
         self, stage: str, target_pos: np.ndarray, model: SAC
-    ) -> tuple[bool, str | None]:
+    ) -> str | None:
         """Step the model until the target is reached, a crash occurs, or max steps is hit.
 
-        Returns (success, crash_reason).
+        Returns None on success, or a crash/timeout reason string.
         """
         env = self._env
         previous_pretrained_obs_format = env._use_pretrained_obs_format
         env._use_pretrained_obs_format = True
-        crash_reason = None
-        success = False
 
         try:
             for _ in range(self._max_steps):
                 grip_pos = self._env.get_grip_pos()
                 speed = float(np.linalg.norm(self._env.get_grip_vel()))
                 if bool(env._is_success(grip_pos, target_pos)) and speed < env.env_cfg["stability_vel_threshold"]:
-                    success = True
-                    break
+                    return None
                 self._execute_step(stage, model)
                 grip_pos = self._env.get_grip_pos()
                 crash_reason = self._check_crash(env, stage, grip_pos)
                 if crash_reason:
-                    break
+                    return crash_reason
         finally:
             env._use_pretrained_obs_format = previous_pretrained_obs_format
 
-        return success, crash_reason
+        return "TIMEOUT"
 
     def _build_model_stage_result(
         self,
         target_pos: np.ndarray,
-        success: bool,
         crash_reason: str | None,
     ) -> StageResult:
         """Build a StageResult from the inference loop outcome."""
         grip_pos = self._env.get_grip_pos()
         dist = float(np.linalg.norm(target_pos - grip_pos))
-        if not success and crash_reason is None:
-            crash_reason = "TIMEOUT"
         return StageResult(
-            success=success,
-            crash_reason=crash_reason if not success else None,
+            success=crash_reason is None,
+            crash_reason=crash_reason,
             final_pos=grip_pos.copy(),
             error_mm=dist * M_TO_MM,
         )
@@ -305,8 +293,7 @@ class ModelEmbeddedController:
         """Return a crash reason if grasp_mode is active but the piece is no longer held."""
         if not env.grasp_mode:
             return None
-        held, reason = env._check_piece_held(grip_pos)
-        return None if held else reason
+        return env._check_piece_held(grip_pos)
 
     def _check_tube_breach(self, env, grip_pos: np.ndarray) -> str | None:
         """Return a crash reason if the gripper has drifted outside the target tube."""
