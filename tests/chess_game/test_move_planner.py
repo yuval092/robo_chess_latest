@@ -67,21 +67,23 @@ def test_en_passant_removes_passed_over_pawn():
     ]
 
 
-def test_promotion_emits_arm_and_two_teleports():
+def test_promotion_emits_arm_remove_and_teleport():
     board = chess.Board("4k3/P7/8/8/8/8/8/4K3 w - - 0 1")
     tracker = LogicalPieceTracker.empty()
     tracker.place_piece_at("a7", "white_pawn_a")
 
     plan = planner_for(board, tracker).plan(chess.Move.from_uci("a7a8q"))
 
+    # Pawn is removed to the graveyard (not stacked in promotion_reserve);
+    # reserve queen is teleported onto the board.
     assert plan == [
         ArmMoveCommand("white_pawn_a", "a7", "a8"),
-        TeleportCommand("white_pawn_a", "promotion_reserve", "slot_00"),
+        RemoveFromBoardCommand("white_pawn_a", "slot_00"),
         TeleportCommand("white_reserve_queen_1", "square", "a8"),
     ]
 
 
-def test_capture_promotion_removes_capture_first():
+def test_capture_promotion_removes_capture_and_pawn_separately():
     board = chess.Board("1r2k3/P7/8/8/8/8/8/4K3 w - - 0 1")
     tracker = LogicalPieceTracker.empty()
     tracker.place_piece_at("a7", "white_pawn_a")
@@ -89,10 +91,12 @@ def test_capture_promotion_removes_capture_first():
 
     plan = planner_for(board, tracker).plan(chess.Move.from_uci("a7b8q"))
 
+    # Captured black rook goes to black graveyard slot_00.
+    # White pawn goes to white graveyard slot_00 (independent counters, no collision).
     assert plan == [
         RemoveFromBoardCommand("black_rook_b", "slot_00"),
         ArmMoveCommand("white_pawn_a", "a7", "b8"),
-        TeleportCommand("white_pawn_a", "promotion_reserve", "slot_00"),
+        RemoveFromBoardCommand("white_pawn_a", "slot_00"),
         TeleportCommand("white_reserve_queen_1", "square", "b8"),
     ]
 
