@@ -108,7 +108,7 @@ def run_game(args: argparse.Namespace) -> int:
 
     try:
         while True:
-            backend.process_one(env=env, timeout=0.05)
+            backend.process_request(env=env, timeout=0.05)
             if args.visualize:
                 env.render()
             time.sleep(0.01)

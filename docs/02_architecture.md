@@ -74,14 +74,14 @@ The game loop in `main.py` runs on the **main thread**:
 
 ```python
 while True:
-    backend.process_one(env=env, timeout=0.05)  # drains one queued request
+    backend.process_request(env=env, timeout=0.05)  # drains one queued request
     env.render()                                 # if visualize
     time.sleep(0.01)
 ```
 
-Flask runs on a **daemon thread**. All API handlers call into `QueuedUIBackend`, which puts a `UIRequest` on a queue and blocks waiting for the result. `process_one` on the main thread pops the request, calls the orchestrator, and puts the result back.
+Flask runs on a **daemon thread**. All API handlers call into `QueuedUIBackend`, which puts a `UIRequest` on a queue and blocks waiting for the result. `process_request` on the main thread pops the request, calls the orchestrator, and puts the result back.
 
-MuJoCo is **never touched from the Flask thread**. All simulation state changes happen inside `process_one` on the main thread.
+MuJoCo is **never touched from the Flask thread**. All simulation state changes happen inside `process_request` on the main thread.
 
 ## Environment Class Hierarchy
 

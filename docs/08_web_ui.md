@@ -48,7 +48,7 @@ Flask thread                    Main thread
 _call("submit_human_move", ...) 
   → put UIRequest on queue
   → block on response.get()
-                                process_one()
+                                process_request()
                                   → pop UIRequest
                                   → call orchestrator.submit_human_move(...)
                                   → put (True, result) on response
@@ -56,13 +56,13 @@ response.get() unblocks
 returns result to Flask handler
 ```
 
-### `process_one(env, timeout)`
+### `process_request(env, timeout)`
 
 Called in the main game loop:
 
 ```python
 while True:
-    backend.process_one(env=env, timeout=0.05)
+    backend.process_request(env=env, timeout=0.05)
     env.render()
     time.sleep(0.01)
 ```

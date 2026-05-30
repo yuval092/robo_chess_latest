@@ -19,7 +19,7 @@ Browser UI
                           └─> PieceTeleporter               (src/physical/piece_teleport.py)
 ```
 
-**Threading rule**: MuJoCo is only touched from the main Python thread. Flask handles HTTP on a daemon thread. `QueuedUIBackend.process_one()` drains the request queue on the main thread inside the game loop in `main.py`.
+**Threading rule**: MuJoCo is only touched from the main Python thread. Flask handles HTTP on a daemon thread. `QueuedUIBackend.process_request()` drains the request queue on the main thread inside the game loop in `main.py`.
 
 ## Component Map
 

@@ -12,12 +12,12 @@ reserves:
 
 graveyards:
   white:
-    origin_xyz: [0.640, -0.300, 0.015]  # World XYZ of the first white graveyard slot (slot_00)
-    rows: 4                             # Number of rows in the white graveyard grid
-    cols: 4                             # Number of columns in the white graveyard grid
+    origin_xyz: [0.550, -0.300, 0.015]  # World XYZ of the first white graveyard slot (slot_00)
+    rows: 6                             # 6×4=24 slots; last row at X=0.775, safe gap before promotion reserve at X=0.820
+    cols: 4
   black:
-    origin_xyz: [0.640, 0.680, 0.015]   # World XYZ of the first black graveyard slot (slot_00)
-    rows: 4
+    origin_xyz: [0.550, 0.680, 0.015]   # World XYZ of the first black graveyard slot (slot_00)
+    rows: 6
     cols: 4
 
 promotion_reserve:

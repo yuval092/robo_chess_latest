@@ -28,7 +28,7 @@ def test_new_game_request_resets_env():
 
     thread = threading.Thread(target=lambda: result_queue.put(backend.new_game()))
     thread.start()
-    backend.process_one(env=env, timeout=1.0)
+    backend.process_request(env=env, timeout=1.0)
     thread.join(timeout=1.0)
 
     assert result_queue.get_nowait() == "new"

@@ -88,19 +88,6 @@ class LogicalPieceTracker:
         """Return the next graveyard slot ID for a colour."""
         return f"slot_{len(self._captured[color]):02d}"
 
-    def next_promotion_reserve_slot(self, color: str) -> str:
-        """Return the next promotion reserve slot ID for a colour."""
-        # Count only pawns that are off-board AND not captured (i.e., they were promoted out)
-        captured_set = set(self._captured[color])
-        promoted_out = sum(
-            1
-            for piece_id, square in self._piece_to_square.items()
-            if piece_id.startswith(f"{color}_pawn_")
-            and square is None
-            and piece_id not in captured_set
-        )
-        return f"slot_{promoted_out:02d}"
-
     def apply_plan(self, plan: list) -> None:
         """Apply a committed physical plan to logical occupancy."""
         for command in plan:
@@ -172,14 +159,13 @@ class MovePlanner:
 
         return commands
     
-    def _build_promotion_commands(self, move: chess.Move, pawn_id: str, dst: str) -> list[TeleportCommand]:
-        """Build teleport commands to swap the pawn out for a reserve promotion piece."""
+    def _build_promotion_commands(self, move: chess.Move, pawn_id: str, dst: str) -> list:
+        """Build commands to swap the pawn out for a reserve promotion piece."""
         color = "white" if self.board.turn == chess.WHITE else "black"
         promoted_type = self.PROMOTION_NAMES[move.promotion]
         promoted_piece_id = self.tracker.find_reserve_piece(color, promoted_type)
-        reserve_slot = self.tracker.next_promotion_reserve_slot(color)
         return [
-            TeleportCommand(pawn_id, "promotion_reserve", reserve_slot),
+            RemoveFromBoardCommand(pawn_id, self.tracker.next_graveyard_slot(color)),
             TeleportCommand(promoted_piece_id, "square", dst),
         ]
 

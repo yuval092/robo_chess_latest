@@ -45,7 +45,7 @@ class QueuedUIBackend:
         """Queue a computer-turn request."""
         return self._call("let_computer_play_current_turn")
 
-    def process_one(self, env=None, timeout=0.05):
+    def process_request(self, env=None, timeout=0.05):
         """Process one queued request on the caller's thread."""
         try:
             request = self._requests.get(timeout=timeout)
