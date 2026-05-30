@@ -8,7 +8,6 @@ from __future__ import annotations
 
 import math
 
-import mujoco
 import numpy as np
 
 from src.chess_env.base_env import ChessBaseEnv
@@ -113,39 +112,56 @@ class ChessProductionEnv(ChessBaseEnv):
             )
         self._home_posture_mocap_pos = self.data.mocap_pos[0][:3].copy()
         self._home_posture_mocap_quat = self.data.mocap_quat[0].copy()
-        self._home_posture_grip_pos = self._utils.get_site_xpos(
-            self.model, self.data, "robot0:grip"
-        ).copy()
+        self._home_posture_grip_pos = self.get_grip_pos()
 
-    def reset_arm_to_home_posture(self) -> dict:
+    def _apply_home_posture_step(
+        self,
+        alpha: float,
+        start_qpos: dict,
+        start_mocap_pos: np.ndarray,
+        start_mocap_quat: np.ndarray,
+    ) -> None:
+        """Move joints and mocap body alpha-fraction toward the saved home posture.
+
+        alpha=0 leaves state unchanged; alpha=1 snaps to exact home values.
+        After interpolating, fingers are committed and physics is forward-propagated.
+        """
+        for joint_name, target in self._home_posture_qpos.items():
+            joint = self.model.joint(joint_name)
+            self.data.qpos[joint.qposadr[0]] = start_qpos[joint_name] + alpha * (
+                target - start_qpos[joint_name]
+            )
+            self.data.qvel[joint.dofadr[0]] = 0.0
+            self.data.qacc[joint.dofadr[0]] = 0.0
+
+        mocap_pos = start_mocap_pos + alpha * (self._home_posture_mocap_pos - start_mocap_pos)
+        mocap_quat = start_mocap_quat + alpha * (self._home_posture_mocap_quat - start_mocap_quat)
+        mocap_quat /= np.linalg.norm(mocap_quat)
+        self.data.mocap_pos[0][:3] = mocap_pos
+        self.data.mocap_quat[0][:] = mocap_quat
+        self._commit_finger_target()
+        if self.render_mode == "human":
+            self.render()
+
+    def reset_arm_to_home_posture(self) -> tuple[bool, str | None]:
         """Restore the exact reset-time joint posture after the gripper returns to home.
 
         Moving home by XYZ alone can leave redundant wrist/roll joints in different
         configurations; this snaps them back to the canonical posture.
         """
-        result = {"success": False, "reason": None, "final_error_mm": 0.0}
-
         if self.grasp_mode:
-            result["reason"] = "HOME_POSTURE_RESET_BLOCKED_HELD_PIECE"
-            return result
+            return False, "HOME_POSTURE_RESET_BLOCKED_HELD_PIECE"
 
         if self._home_posture_qpos is None:
-            result["reason"] = "HOME_POSTURE_NOT_CAPTURED"
-            return result
+            return False, "HOME_POSTURE_NOT_CAPTURED"
 
-        self.current_scenario = "transit"
+        if self.current_scenario != "transit":
+            return False, f"HOME_POSTURE_RESET_WRONG_SCENARIO ({self.current_scenario})"
+
         self.tube_center_xy = None
         self.goal_pos = self.HOME_POS.copy()
         self.goal = self.goal_pos.copy()
         self.finger_target_joint = self.FINGER_CLOSED_JOINT
-        self.grasp_mode = False
-
-        l_id = mujoco.mj_name2id(
-            self.model, mujoco.mjtObj.mjOBJ_ACTUATOR, "robot0:l_gripper_finger_joint"
-        )
-        r_id = mujoco.mj_name2id(
-            self.model, mujoco.mjtObj.mjOBJ_ACTUATOR, "robot0:r_gripper_finger_joint"
-        )
 
         start_qpos = {
             joint_name: float(self.data.qpos[self.model.joint(joint_name).qposadr[0]])
@@ -156,72 +172,34 @@ class ChessProductionEnv(ChessBaseEnv):
 
         N_STEPS = 10
         for i in range(N_STEPS):
-            t = (i + 1) / N_STEPS
-            for joint_name, target in self._home_posture_qpos.items():
-                joint = self.model.joint(joint_name)
-                self.data.qpos[joint.qposadr[0]] = start_qpos[joint_name] + t * (
-                    target - start_qpos[joint_name]
-                )
-                self.data.qvel[joint.dofadr[0]] = 0.0
-
-            mocap_pos = start_mocap_pos + t * (
-                self._home_posture_mocap_pos - start_mocap_pos
+            self._apply_home_posture_step(
+                (i + 1) / N_STEPS, start_qpos, start_mocap_pos, start_mocap_quat
             )
-            mocap_quat = start_mocap_quat + t * (
-                self._home_posture_mocap_quat - start_mocap_quat
-            )
-            mocap_quat /= np.linalg.norm(mocap_quat)
-            self.data.mocap_pos[0][:3] = mocap_pos
-            self.data.mocap_quat[0][:] = mocap_quat
-            self.data.ctrl[l_id] = self.FINGER_CLOSED_JOINT
-            self.data.ctrl[r_id] = self.FINGER_CLOSED_JOINT
-            mujoco.mj_forward(self.model, self.data)
-            if self.render_mode == "human":
-                self.render()
 
-        for joint_name, qpos in self._home_posture_qpos.items():
-            joint = self.model.joint(joint_name)
-            self.data.qpos[joint.qposadr[0]] = qpos
-            self.data.qvel[joint.dofadr[0]] = 0.0
-            self.data.qacc[joint.dofadr[0]] = 0.0
-
-        self.data.mocap_pos[0][:3] = self._home_posture_mocap_pos
-        self.data.mocap_quat[0][:] = self._home_posture_mocap_quat
-        self.data.ctrl[l_id] = self.FINGER_CLOSED_JOINT
-        self.data.ctrl[r_id] = self.FINGER_CLOSED_JOINT
-        mujoco.mj_forward(self.model, self.data)
-        if self.render_mode == "human":
-            self.render()
-
-        final_grip = self._utils.get_site_xpos(
-            self.model, self.data, "robot0:grip"
-        ).copy()
-        result["final_error_mm"] = float(
-            np.linalg.norm(final_grip - self._home_posture_grip_pos) * 1000.0
-        )
-        result["success"] = result["final_error_mm"] < 1.0
-        if not result["success"]:
-            result["reason"] = (
-                f"HOME_POSTURE_RESET_FAILED ({result['final_error_mm']:.3f}mm)"
-            )
-        return result
+        error_mm = float(np.linalg.norm(self.get_grip_pos() - self._home_posture_grip_pos) * 1000.0)
+        if error_mm >= 1.0:
+            return False, f"HOME_POSTURE_RESET_FAILED ({error_mm:.3f}mm)"
+        return True, None
 
     # ── Scripted plunge / retract helpers used by grasp & place ─────────────
 
     def _plunge_to_z(
         self, xy: np.ndarray, target_z: float, step_m: float
-    ) -> tuple[np.ndarray, int]:
+    ) -> np.ndarray:
+        """Lower the gripper straight down over xy until it reaches target_z.
+
+        Plunge = scripted downward motion, one step_m increment per sim step,
+        XY held fixed. Returns the final grip pos.
+        """
         grip_pos = self.get_grip_pos()
         commanded_z = grip_pos[2]
-        steps = 0
         for _ in range(int(round(max(0.0, commanded_z - target_z) / step_m)) + 6):
             grip_pos = self.get_grip_pos()
             if grip_pos[2] <= target_z + 0.001:
                 break
             commanded_z = max(target_z, commanded_z - step_m)
             self._step_grip_toward(np.array([xy[0], xy[1], commanded_z]))
-            steps += 1
-        return self.get_grip_pos(), steps
+        return self.get_grip_pos()
 
     def _retract_to_hover(
         self,
@@ -230,9 +208,14 @@ class ChessProductionEnv(ChessBaseEnv):
         step_m: float,
         *,
         verify_held: bool = False,
-    ) -> tuple[str | None, int]:
+    ) -> str | None:
+        """Raise the gripper from start_z back up to HOVER_Z.
+
+        Retract = inverse of plunge: one step_m increment per sim step upward,
+        XY taken from xy_provider() each step (allows tracking a moving piece).
+        Returns a failure reason string, or None on success.
+        """
         commanded_z = start_z
-        steps = 0
         for _ in range(int(round((self.HOVER_Z - start_z) / step_m)) + 3):
             grip_pos = self.get_grip_pos()
             if grip_pos[2] >= self.HOVER_Z - 0.001:
@@ -240,14 +223,13 @@ class ChessProductionEnv(ChessBaseEnv):
             commanded_z = min(self.HOVER_Z, commanded_z + step_m)
             xy = xy_provider()
             self._step_grip_toward(np.array([xy[0], xy[1], commanded_z]))
-            steps += 1
 
             if verify_held:
                 piece_now = self.get_active_piece_position()
                 grip_now = self.get_grip_pos()
                 if abs(piece_now[2] - (grip_now[2] - 0.015)) > self.PIECE_HELD_Z_LIMIT:
-                    return "PIECE_DROPPED_DURING_RETRACT", steps
-        return None, steps
+                    return "PIECE_DROPPED_DURING_RETRACT"
+        return None
 
     def _hold_locked_target(self, target_provider, steps: int) -> None:
         for _ in range(steps):
@@ -266,7 +248,6 @@ class ChessProductionEnv(ChessBaseEnv):
         self.data.qacc[:] = 0.0
         self.data.ctrl[:] = 0.0
         self._commit_finger_target()
-        mujoco.mj_forward(self.model, self.data)
 
         grip_vel = self._utils.get_site_xvelp(self.model, self.data, "robot0:grip")
         if float(np.linalg.norm(grip_vel)) > 0.005:
@@ -305,17 +286,15 @@ class ChessProductionEnv(ChessBaseEnv):
 
     def _plunge_to_grasp_z(
         self, xy: np.ndarray
-    ) -> tuple[np.ndarray, int, str | None]:
-        """Plunge from current Z to GRASP_Z over xy. Returns (final grip pos, steps, reason)."""
-        grip_pos, steps = self._plunge_to_z(
-            xy, self.GRASP_Z, self.GRASP_PLUNGE_STEP_M
-        )
+    ) -> tuple[np.ndarray, str | None]:
+        """Plunge from current Z to GRASP_Z over xy. Returns (final grip pos, reason)."""
+        grip_pos = self._plunge_to_z(xy, self.GRASP_Z, self.GRASP_PLUNGE_STEP_M)
         if abs(grip_pos[2] - self.GRASP_Z) > 0.008:
-            return grip_pos, steps, (
+            return grip_pos, (
                 f"PLUNGE_FAILED (z={grip_pos[2] * 1000:.1f}mm, "
                 f"target={self.GRASP_Z * 1000:.1f}mm)"
             )
-        return grip_pos, steps, None
+        return grip_pos, None
 
     # ── Scripted grasp pipeline ─────────────────────────────────────────────
 
@@ -333,7 +312,6 @@ class ChessProductionEnv(ChessBaseEnv):
             "final_xy_error_mm": 0.0,
             "final_z_error_mm": 0.0,
             "final_finger_pos": 0.0,
-            "close_steps_used": 0,
         }
         if reason := self._halt_and_check_hover_preconditions(check_fingers_open=True):
             result["reason"] = reason
@@ -348,7 +326,7 @@ class ChessProductionEnv(ChessBaseEnv):
             result["reason"] = reason
             return result
 
-        grip_pos, plunge_steps, reason = self._plunge_to_grasp_z(piece_pos[:2])
+        grip_pos, reason = self._plunge_to_grasp_z(piece_pos[:2])
         if self.debug:
             self.logger.debug(
                 f"[GRASP] Post-Plunge. Grip at {grip_pos}, Piece at {self.get_active_piece_position()}"
@@ -357,9 +335,7 @@ class ChessProductionEnv(ChessBaseEnv):
             result["reason"] = reason
             return result
 
-        close_steps, reason = self._grasp_close_fingers_with_ramp()
-        result["close_steps_used"] = close_steps
-        if reason:
+        if reason := self._grasp_close_fingers_with_ramp():
             result["reason"] = reason
             return result
 
@@ -374,15 +350,11 @@ class ChessProductionEnv(ChessBaseEnv):
             result["reason"] = reason
             return result
 
-        retract_steps, reason = self._grasp_retract()
-        if reason:
+        if reason := self._grasp_retract():
             result["reason"] = reason
             return result
 
         result["success"] = True
-        result["total_steps_used"] = (
-            plunge_steps + close_steps + self.GRASP_HOLD_STEPS + retract_steps
-        )
         result["post_grasp_piece_pos"] = self.get_active_piece_position().copy()
         return result
 
@@ -409,7 +381,7 @@ class ChessProductionEnv(ChessBaseEnv):
             return piece_pos, f"PIECE_ROTATED (yaw={math.degrees(effective_yaw):.1f}°)"
         return piece_pos, None
 
-    def _grasp_close_fingers_with_ramp(self) -> tuple[int, str | None]:
+    def _grasp_close_fingers_with_ramp(self) -> str | None:
         """Ramp finger target from OPEN to GRASP_RAMP_END while tracking live piece XY.
 
         Direct jump creates a large impulse; ramping limits contact shock. Aborts
@@ -421,23 +393,19 @@ class ChessProductionEnv(ChessBaseEnv):
         ramp_delta = (ramp_start - ramp_end) / self.GRASP_CLOSE_STEPS
         empty_detect_start = max(8, int(self.GRASP_CLOSE_STEPS * 0.65))
 
-        steps_used = 0
         for step in range(self.GRASP_CLOSE_STEPS):
             self.finger_target_joint = max(ramp_end, ramp_start - ramp_delta * step)
             live_piece = self.get_active_piece_position()
             self._step_grip_toward(
                 np.array([live_piece[0], live_piece[1], self.GRASP_Z])
             )
-            steps_used += 1
 
             if step >= empty_detect_start:
                 l_now = self.get_finger_angle()
                 if l_now < self.EMPTY_GRASP_THRESHOLD:
-                    return steps_used, (
-                        f"FINGER_CLOSED_EMPTY (j={l_now:.4f} at step {step})"
-                    )
+                    return f"FINGER_CLOSED_EMPTY (j={l_now:.4f} at step {step})"
 
-        return steps_used, None
+        return None
 
     def _grasp_hold_and_verify(self) -> tuple[np.ndarray, np.ndarray, float, str | None]:
         """Hold the grip steady on the piece, then verify XY/Z error and finger position."""
@@ -471,15 +439,14 @@ class ChessProductionEnv(ChessBaseEnv):
             )
         return piece_pos, grip_pos, l_finger, None
 
-    def _grasp_retract(self) -> tuple[int, str | None]:
+    def _grasp_retract(self) -> str | None:
         """Retract from GRASP_Z to HOVER_Z while tracking the piece and verifying it stays held."""
-        reason, steps = self._retract_to_hover(
+        return self._retract_to_hover(
             lambda: self.get_active_piece_position()[:2],
             self.GRASP_Z,
             self.GRASP_RETRACT_STEP_M,
             verify_held=True,
         )
-        return steps, reason
 
     # ── Scripted place pipeline ─────────────────────────────────────────────
 
@@ -503,7 +470,7 @@ class ChessProductionEnv(ChessBaseEnv):
             result["reason"] = reason
             return result
 
-        place_pos, plunge_steps, reason = self._plunge_to_grasp_z(dst_xy)
+        place_pos, reason = self._plunge_to_grasp_z(dst_xy)
         if reason:
             result["reason"] = reason
             return result
@@ -519,15 +486,9 @@ class ChessProductionEnv(ChessBaseEnv):
             result["reason"] = reason
             return result
 
-        retract_steps = self._place_retract(place_pos[:2])
+        self._place_retract(place_pos[:2])
 
         result["success"] = True
-        result["total_steps_used"] = (
-            plunge_steps
-            + self.RELEASE_RAMP_STEPS
-            + self.RELEASE_SETTLE_STEPS
-            + retract_steps
-        )
         return result
 
     def _place_release_fingers(self, release_target: np.ndarray) -> None:
@@ -566,9 +527,6 @@ class ChessProductionEnv(ChessBaseEnv):
             )
         return piece_pos, None
 
-    def _place_retract(self, place_xy: np.ndarray) -> int:
+    def _place_retract(self, place_xy: np.ndarray) -> None:
         """Retract from GRASP_Z to HOVER_Z over the placement XY. Always succeeds."""
-        _, steps = self._retract_to_hover(
-            lambda: place_xy, self.GRASP_Z, self.GRASP_RETRACT_STEP_M
-        )
-        return steps
+        self._retract_to_hover(lambda: place_xy, self.GRASP_Z, self.GRASP_RETRACT_STEP_M)

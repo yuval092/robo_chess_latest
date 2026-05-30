@@ -23,7 +23,6 @@ class StageResult:
     """Result of a single waypoint stage."""
 
     success: bool
-    steps: int
     crash_reason: str | None
     final_pos: np.ndarray
     error_mm: float
@@ -113,9 +112,6 @@ class ModelEmbeddedController:
         grip_after = self._env.get_grip_pos()
         return StageResult(
             success=success,
-            steps=result_dict.get(
-                "total_steps_used", result_dict.get("close_steps_used", 0)
-            ),
             crash_reason=None if success else result_dict.get("reason", "GRASP_FAILED"),
             final_pos=grip_after.copy(),
             error_mm=float(np.linalg.norm(grip_after - grip_before)) * 1000.0,
@@ -130,7 +126,6 @@ class ModelEmbeddedController:
         grip_after = self._env.get_grip_pos()
         return StageResult(
             success=success,
-            steps=result_dict.get("total_steps_used", 0),
             crash_reason=None if success else result_dict.get("reason", "PLACE_FAILED"),
             final_pos=grip_after.copy(),
             error_mm=0.0,
@@ -186,8 +181,8 @@ class ModelEmbeddedController:
         if precondition_failure:
             return precondition_failure
         
-        success, step_idx, crash_reason = self._run_inference_loop(stage, target_pos, model)
-        return self._build_model_stage_result(target_pos, success, step_idx, crash_reason)
+        success, crash_reason = self._run_inference_loop(stage, target_pos, model)
+        return self._build_model_stage_result(target_pos, success, crash_reason)
 
     def _get_stage_model(self, stage: str) -> SAC:
         """Helper to get the model for a stage, with error handling."""
@@ -230,7 +225,6 @@ class ModelEmbeddedController:
         if abs(l_finger - expected_finger) > 0.003:
             return StageResult(
                 success=False,
-                steps=0,
                 crash_reason=(
                     f"PRECONDITION_FINGER (actual={l_finger:.4f}, "
                     f"expected={expected_finger:.4f})"
@@ -261,20 +255,19 @@ class ModelEmbeddedController:
 
     def _run_inference_loop(
         self, stage: str, target_pos: np.ndarray, model: SAC
-    ) -> tuple[bool, int, str | None]:
+    ) -> tuple[bool, str | None]:
         """Step the model until the target is reached, a crash occurs, or max steps is hit.
 
-        Returns (success, step_idx, crash_reason).
+        Returns (success, crash_reason).
         """
         env = self._env
         previous_pretrained_obs_format = env._use_pretrained_obs_format
         env._use_pretrained_obs_format = True
         crash_reason = None
         success = False
-        step_idx = 0
 
         try:
-            for step_idx in range(self._max_steps):
+            for _ in range(self._max_steps):
                 grip_pos = self._env.get_grip_pos()
                 speed = float(np.linalg.norm(self._env.get_grip_vel()))
                 if bool(env._is_success(grip_pos, target_pos)) and speed < env.env_cfg["stability_vel_threshold"]:
@@ -288,23 +281,21 @@ class ModelEmbeddedController:
         finally:
             env._use_pretrained_obs_format = previous_pretrained_obs_format
 
-        return success, step_idx, crash_reason
+        return success, crash_reason
 
     def _build_model_stage_result(
         self,
         target_pos: np.ndarray,
         success: bool,
-        step_idx: int,
         crash_reason: str | None,
     ) -> StageResult:
         """Build a StageResult from the inference loop outcome."""
         grip_pos = self._env.get_grip_pos()
         dist = float(np.linalg.norm(target_pos - grip_pos))
-        if not success and crash_reason is None and step_idx + 1 >= self._max_steps:
+        if not success and crash_reason is None:
             crash_reason = "TIMEOUT"
         return StageResult(
             success=success,
-            steps=step_idx + 1,
             crash_reason=crash_reason if not success else None,
             final_pos=grip_pos.copy(),
             error_mm=dist * M_TO_MM,
