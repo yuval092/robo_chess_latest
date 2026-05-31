@@ -92,7 +92,7 @@ def run_game(args: argparse.Namespace) -> int:
         descend_model=args.descend_model,
         ascend_model=args.ascend_model,
     )
-    backend = QueuedUIBackend(orchestrator)
+    backend = QueuedUIBackend(orchestrator, env)
     app = create_app(backend)
     server = threading.Thread(
         target=lambda: app.run(
@@ -108,7 +108,7 @@ def run_game(args: argparse.Namespace) -> int:
 
     try:
         while True:
-            backend.process_request(env=env, timeout=0.05)
+            backend.process_request(timeout=0.05)
             if args.visualize:
                 env.render()
             time.sleep(0.01)
