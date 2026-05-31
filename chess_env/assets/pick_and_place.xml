@@ -8,14 +8,20 @@
 	<include file="shared.xml"></include>
 
 	<worldbody>
+		<!-- Static source-of-truth scene. World coordinates use metres; the chess board
+		     is anchored by table0 at (0.88, 0.2641, 0), with board squares stored as
+		     table-local offsets and off-board zones stored in world space. -->
 		<geom name="floor0" pos="0.88 0.2641 0" size="1.0 1.0 1" type="plane" condim="3" material="floor_mat"></geom>
 		<include file="robot.xml"></include>
 
+		<!-- Table and board geometry. The table surface top is z=0.400 m.
+		     The 8x8 board uses 0.08 m square spacing, visual-only geoms, and
+		     alternating materials from shared.xml. -->
 		<body pos="0.88 0.2641 0" name="table0">
 			<geom name="table0_surface" type="box" size="0.35 0.35 0.025"
 				  pos="0 0 0.375" mass="2000" material="wood_table_mat"
 				  solref="0.002 1" solimp="0.99 0.999 0.001"/>
-			<!-- generated board squares start -->
+			<!-- Static source-of-truth board square visuals. -->
 			<geom name="board_a1_visual" type="box" size="0.040 0.040 0.0005" pos="-0.2800 -0.2800 0.4006" material="chess_dark_square_mat" contype="0" conaffinity="0" mass="0"/>
 			<geom name="board_b1_visual" type="box" size="0.040 0.040 0.0005" pos="-0.2000 -0.2800 0.4006" material="chess_light_square_mat" contype="0" conaffinity="0" mass="0"/>
 			<geom name="board_c1_visual" type="box" size="0.040 0.040 0.0005" pos="-0.1200 -0.2800 0.4006" material="chess_dark_square_mat" contype="0" conaffinity="0" mass="0"/>
@@ -80,7 +86,7 @@
 			<geom name="board_f8_visual" type="box" size="0.040 0.040 0.0005" pos="0.1200 0.2800 0.4006" material="chess_dark_square_mat" contype="0" conaffinity="0" mass="0"/>
 			<geom name="board_g8_visual" type="box" size="0.040 0.040 0.0005" pos="0.2000 0.2800 0.4006" material="chess_light_square_mat" contype="0" conaffinity="0" mass="0"/>
 			<geom name="board_h8_visual" type="box" size="0.040 0.040 0.0005" pos="0.2800 0.2800 0.4006" material="chess_dark_square_mat" contype="0" conaffinity="0" mass="0"/>
-			<!-- generated board squares end -->
+			<!-- End static board square visuals. -->
 			<geom name="table0_leg_far_plus" type="box" size="0.04 0.04 0.1875"
 				  pos="0.31 0.31 0.1875" mass="0" material="table_mat"/>
 			<geom name="table0_leg_far_minus" type="box" size="0.04 0.04 0.1875"
@@ -91,20 +97,26 @@
 				  pos="-0.31 -0.31 0.1875" mass="0" material="table_mat"/>
 		</body>
 
+		<!-- Legacy Fetch object0 remains in the scene for specialist stage training.
+		     Runtime chess piece motion usually hides it and routes manipulation through
+		     active piece bodies. -->
 		<body name="object0" pos="0.01 0.01 0.01">
 			<joint name="object0:joint" type="free" damping="0.1"></joint>
 			<geom size="0.015 0.015 0.015" type="box" condim="6" name="object0" material="block_mat" mass="0.05" friction="2.0 0.005 0.0001" solref="0.002 1" solimp="0.99 0.999 0.001"></geom>
 			<site name="object0" pos="0 0 0" size="0.015 0.015 0.015" rgba="1 0 0 0" type="sphere"></site>
 		</body>
 
-		<!-- generated zone markers start -->
-		<geom name="zone_white_graveyard" type="box" size="0.0950 0.0950 0.002" pos="0.7075 -0.2325 0.0020" material="white_graveyard_mat" contype="0" conaffinity="0" mass="0"/>
-		<geom name="zone_black_graveyard" type="box" size="0.0950 0.0950 0.002" pos="0.7075 0.7475 0.0020" material="black_graveyard_mat" contype="0" conaffinity="0" mass="0"/>
+		<!-- Static source-of-truth off-board zone markers. Graveyards and promotion
+		     reserves are world-space, visual-only geoms aligned to configured slots. -->
+		<geom name="zone_white_graveyard" type="box" size="0.1400 0.0950 0.002" pos="0.6625 -0.2325 0.0020" material="white_graveyard_mat" contype="0" conaffinity="0" mass="0"/>
+		<geom name="zone_black_graveyard" type="box" size="0.1400 0.0950 0.002" pos="0.6625 0.7475 0.0020" material="black_graveyard_mat" contype="0" conaffinity="0" mass="0"/>
 		<geom name="zone_white_reserve" type="box" size="0.1850 0.0950 0.002" pos="0.9775 -0.2325 0.0020" material="white_reserve_mat" contype="0" conaffinity="0" mass="0"/>
 		<geom name="zone_black_reserve" type="box" size="0.1850 0.0950 0.002" pos="0.9775 0.7475 0.0020" material="black_reserve_mat" contype="0" conaffinity="0" mass="0"/>
-		<!-- generated zone markers end -->
+		<!-- End static zone markers. -->
 
-		<!-- generated chess pieces start -->
+		<!-- Static source-of-truth chess pieces. Active pieces start on board squares;
+		     reserve pieces start in promotion banks. Each piece has a colliding
+		     transparent cube plus a visual-only STL mesh from chess_env/stls/chess. -->
 		<body name="piece_white_rook_a" pos="0.6000 -0.0159 0.4150"> <!-- a1 -->
 			<joint name="piece_white_rook_a:joint" type="free" damping="8.0"/>
 			<geom name="piece_white_rook_a_cube" type="box" size="0.015 0.015 0.015"
@@ -1065,7 +1077,7 @@
 			      contype="0" conaffinity="0" mass="0" euler="0 0 4.7123889804"/>
 			<site name="piece_black_reserve_knight_8_site" pos="0 0 0" size="0.005"/>
 		</body>
-		<!-- generated chess pieces end -->
+		<!-- End static chess pieces. -->
 
 		<light directional="true" ambient="0.2 0.2 0.2" diffuse="0.8 0.8 0.8" specular="0.3 0.3 0.3" castshadow="false" pos="0 0 4" dir="0 0 -1" name="light0"></light>
 	</worldbody>

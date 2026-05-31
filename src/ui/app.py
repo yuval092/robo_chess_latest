@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from dataclasses import asdict, is_dataclass
+from http import HTTPStatus
 from typing import Protocol
 
 from flask import Flask, jsonify, render_template, request
@@ -29,7 +30,6 @@ class UIBackend(Protocol):
 
 
 def to_jsonable(value):
-    """Run to jsonable logic."""
     if is_dataclass(value):
         return {key: to_jsonable(item) for key, item in asdict(value).items()}
     if isinstance(value, dict):
@@ -40,60 +40,37 @@ def to_jsonable(value):
 
 
 def create_app(backend: UIBackend) -> Flask:
-    """Run create app logic."""
     app = Flask(__name__)
 
     @app.get("/")
     def index():
-        """Run index logic."""
         return render_template("index.html")
 
     @app.get("/api/snapshot")
     def api_snapshot():
-        """Run api snapshot logic."""
         return jsonify(to_jsonable(backend.snapshot()))
 
     @app.post("/api/new-game")
     def api_new_game():
-        """Run api new game logic."""
         return jsonify(to_jsonable(backend.new_game()))
 
     @app.post("/api/move")
     def api_move():
-        """Run api move logic."""
         payload = request.get_json(silent=True) or {}
         src = payload.get("src")
         dst = payload.get("dst")
         if not src or not dst:
             return jsonify(
                 {"accepted": False, "error": "src and dst are required"}
-            ), 400
+            ), HTTPStatus.BAD_REQUEST
         result = backend.submit_human_move(src, dst, payload.get("promotion"))
-        status = 200 if result.accepted else 400
+        status = HTTPStatus.OK if result.accepted else HTTPStatus.BAD_REQUEST
         return jsonify(to_jsonable(result)), status
-
-    @app.post("/api/promote")
-    def api_promote():
-        """Run api promote logic."""
-        return jsonify(
-            {
-                "accepted": False,
-                "error": "Promotion continuation is not implemented yet.",
-            }
-        ), 501
 
     @app.post("/api/let-computer-play")
     def api_let_computer_play():
-        """Run api let computer play logic."""
         result = backend.let_computer_play_current_turn()
-        status = 200 if result.accepted else 400
+        status = HTTPStatus.OK if result.accepted else HTTPStatus.BAD_REQUEST
         return jsonify(to_jsonable(result)), status
-
-    @app.post("/api/undo")
-    def api_undo():
-        """Run api undo logic."""
-        return jsonify(
-            {"accepted": False, "error": "Undo is not implemented yet."}
-        ), 501
 
     return app

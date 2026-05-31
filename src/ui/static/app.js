@@ -28,10 +28,6 @@ let requestInFlight = false;
 // Promotion state
 let pendingPromotion = null; // { src, dst } while dialog is open
 
-// Busy-poll backoff
-let busyPollDelay = 200;
-let busyPollTimer = null;
-
 function boardSquares() {
   const squares = [];
   const ranks = flipped ? [1, 2, 3, 4, 5, 6, 7, 8] : [8, 7, 6, 5, 4, 3, 2, 1];
@@ -64,9 +60,6 @@ function resultLabel(status) {
   if (status.outcome === "1-0") return "White wins";
   if (status.outcome === "0-1") return "Black wins";
   if (status.outcome === "1/2-1/2") return "Draw";
-  if (status.is_checkmate && status.turn === "black") return "White wins";
-  if (status.is_checkmate && status.turn === "white") return "Black wins";
-  if (status.is_game_over) return "Game over";
   return null;
 }
 
@@ -84,14 +77,11 @@ function terminalReason(status) {
 
 function stateKey() {
   const status = snapshot.status || {};
-  if (snapshot.is_busy || requestInFlight) return "busy";
+  if (requestInFlight) return "busy";
   if (status.is_game_over) {
-    if (status.outcome === "1-0") return "white-wins";
-    if (status.outcome === "0-1") return "black-wins";
+    if (status.outcome === "1-0")    return "white-wins";
+    if (status.outcome === "0-1")    return "black-wins";
     if (status.outcome === "1/2-1/2") return "draw";
-    if (status.is_checkmate && status.turn === "black") return "white-wins";
-    if (status.is_checkmate && status.turn === "white") return "black-wins";
-    return "game-over";
   }
   if (status.is_check) return "check";
   return "ready";
@@ -125,7 +115,7 @@ function renderBoard() {
       button.classList.add("last");
     }
     button.dataset.square = square;
-    button.disabled = Boolean(snapshot?.is_busy || requestInFlight || isGameOver());
+    button.disabled = Boolean(requestInFlight || isGameOver());
     const piece = pieces[snapshot?.board?.[square]] || "";
     if (piece) {
       const pieceEl = document.createElement("span");
@@ -143,7 +133,7 @@ function renderBoard() {
 }
 
 async function onSquare(square) {
-  if (!snapshot || snapshot.is_busy || requestInFlight || isGameOver()) return;
+  if (!snapshot || requestInFlight || isGameOver()) return;
   const piece = snapshot.board[square];
   if (!selected) {
     if (!piece) return;
@@ -209,7 +199,7 @@ promotionDialog.addEventListener("cancel", () => {
 
 function stateText() {
   const status = snapshot.status || {};
-  if (snapshot.is_busy || requestInFlight) return "Busy";
+  if (requestInFlight) return "Busy";
   if (status.is_game_over) return resultLabel(status) || "Game over";
   if (status.is_checkmate) return "Checkmate";
   if (status.is_stalemate) return "Stalemate";
@@ -258,12 +248,10 @@ function renderSnapshot() {
   fenEl.textContent = snapshot.fen || "-";
   renderHistory();
   errorEl.textContent = snapshot.error || "";
-  newGameBtn.disabled = Boolean(snapshot.is_busy || requestInFlight);
-  computerBtn.disabled = Boolean(snapshot.is_busy || requestInFlight || terminal);
+  newGameBtn.disabled = Boolean(requestInFlight);
+  computerBtn.disabled = Boolean(requestInFlight || terminal);
   refreshBtn.disabled = Boolean(requestInFlight);
   renderBoard();
-
-  if (snapshot.is_busy) scheduleBusyPoll();
 }
 
 function showError(msg) {
@@ -308,17 +296,6 @@ async function postJson(url, payload = {}) {
   }
 }
 
-function scheduleBusyPoll() {
-  if (busyPollTimer !== null) return; // already scheduled
-  busyPollTimer = setTimeout(async () => {
-    busyPollTimer = null;
-    if (!snapshot?.is_busy) { busyPollDelay = 200; return; }
-    await loadSnapshot();
-    busyPollDelay = Math.min(1500, Math.round(busyPollDelay * 1.5));
-    if (snapshot?.is_busy) scheduleBusyPoll();
-    else busyPollDelay = 200;
-  }, busyPollDelay);
-}
 
 newGameBtn.addEventListener("click", async () => {
   selected = null;

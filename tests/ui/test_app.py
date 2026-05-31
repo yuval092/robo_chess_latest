@@ -1,4 +1,5 @@
 from dataclasses import dataclass
+from http import HTTPStatus
 
 import pytest
 
@@ -26,6 +27,9 @@ class FakePhysicalExecutor:
     def return_to_home(self):
         return FakePhysicalResult(True)
 
+    def reset_board_state(self):
+        pass
+
 
 _ENGINE_CFG = {"stockfish_path": "stockfish", "skill_level": 1}
 
@@ -48,7 +52,7 @@ def client():
 def test_snapshot_returns_initial_board(client):
     response = client.get("/api/snapshot")
 
-    assert response.status_code == 200
+    assert response.status_code == HTTPStatus.OK
     data = response.get_json()
     assert data["board"]["e2"] == "P"
     assert data["turn"] == "white"
@@ -58,7 +62,7 @@ def test_snapshot_returns_initial_board(client):
 def test_index_renders_interactive_controls(client):
     response = client.get("/")
 
-    assert response.status_code == 200
+    assert response.status_code == HTTPStatus.OK
     html = response.get_data(as_text=True)
     for element_id in [
         "board",
@@ -77,7 +81,7 @@ def test_new_game_endpoint_resets_snapshot(client):
 
     response = client.post("/api/new-game", json={})
 
-    assert response.status_code == 200
+    assert response.status_code == HTTPStatus.OK
     data = response.get_json()
     assert data["board"]["e2"] == "P"
     assert data["board"]["e4"] is None
@@ -87,14 +91,14 @@ def test_new_game_endpoint_resets_snapshot(client):
 def test_illegal_move_returns_400(client):
     response = client.post("/api/move", json={"src": "e2", "dst": "e5"})
 
-    assert response.status_code == 400
+    assert response.status_code == HTTPStatus.BAD_REQUEST
     assert response.get_json()["accepted"] is False
 
 
 def test_legal_move_returns_result_snapshot(client):
     response = client.post("/api/move", json={"src": "e2", "dst": "e4"})
 
-    assert response.status_code == 200
+    assert response.status_code == HTTPStatus.OK
     data = response.get_json()
     assert data["accepted"] is True
     assert data["physical_success"] is True
@@ -104,23 +108,10 @@ def test_legal_move_returns_result_snapshot(client):
 def test_let_computer_play_returns_legal_move(client):
     response = client.post("/api/let-computer-play", json={})
 
-    assert response.status_code == 200
+    assert response.status_code == HTTPStatus.OK
     data = response.get_json()
     assert data["accepted"] is True
     assert data["move_uci"] is not None
 
 
-def test_busy_state_is_represented():
-    orchestrator = GameOrchestrator(
-        ChessService(),
-        FakePhysicalExecutor(),
-        LogicalPieceTracker(),
-        auto_computer_reply=False,
-    )
-    orchestrator.is_busy = True
-    app = create_app(orchestrator)
-    app.config.update(TESTING=True)
 
-    response = app.test_client().get("/api/snapshot")
-
-    assert response.get_json()["is_busy"] is True

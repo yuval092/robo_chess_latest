@@ -29,17 +29,10 @@ class RemoveFromBoardCommand:
     graveyard_slot: str
 
 
-@dataclass(frozen=True)
-class PhysicalPlan:
-    chess_move_uci: str
-    commands: list
-
-
 class LogicalPieceTracker:
     """Tracks stable physical piece ids against logical chess squares."""
 
     def __init__(self, starting_square_map: dict[str, str] | None = None):
-        """Initialise this object."""
         if starting_square_map is None:
             starting_square_map = PieceRegistry().starting_square_map()
         self._piece_to_square: dict[str, str | None] = dict(starting_square_map)
@@ -61,36 +54,26 @@ class LogicalPieceTracker:
         """Return the piece ID occupying a square."""
         return self._square_to_piece.get(square)
 
-    def set_piece_at(self, square: str, piece_id: str | None) -> None:
-        # Evict any existing occupant of this square
-        """Update logical piece occupancy for a square."""
+    def _get_piece_map(self, piece_id: str) -> dict:
+        """Return the forward map (piece→square) that owns this piece_id."""
+        return self._reserve_to_square if piece_id in self._reserve_to_square else self._piece_to_square
+
+    def _evict_square(self, square: str) -> None:
+        """Remove any piece currently on this square."""
         old_occupant = self._square_to_piece.pop(square, None)
         if old_occupant is not None:
-            if old_occupant in self._piece_to_square:
-                self._piece_to_square[old_occupant] = None
-            else:
-                self._reserve_to_square[old_occupant] = None
+            self._get_piece_map(old_occupant)[old_occupant] = None
 
-        if piece_id is not None:
-            # Remove piece_id's old square entry from inverse map
-            old_sq = self._piece_to_square.get(piece_id) or self._reserve_to_square.get(
-                piece_id
-            )
-            if old_sq is not None:
-                self._square_to_piece.pop(old_sq, None)
-            # Update forward map
-            if piece_id in self._reserve_to_square:
-                self._reserve_to_square[piece_id] = square
-            else:
-                self._piece_to_square[piece_id] = square
-            # Update inverse map
-            self._square_to_piece[square] = piece_id
+    def place_piece_at(self, square: str, piece_id: str) -> None:
+        """Place a piece on a square, evicting any current occupant."""
+        self._evict_square(square)
+        old_sq = self._piece_to_square.get(piece_id) or self._reserve_to_square.get(piece_id)
+        if old_sq is not None:
+            self._square_to_piece.pop(old_sq, None)
+        self._get_piece_map(piece_id)[piece_id] = square
+        self._square_to_piece[square] = piece_id
 
-    def captured_pieces(self, color: str) -> list[str]:
-        """Return captured piece IDs for a colour."""
-        return list(self._captured[color])
-
-    def reserve_piece_for(self, color: str, piece_type: str) -> str:
+    def find_reserve_piece(self, color: str, piece_type: str) -> str:
         """Reserve a promotion piece for a colour and type."""
         prefix = f"{color}_reserve_{piece_type}_"
         for piece_id in sorted(self._reserve_to_square):
@@ -105,51 +88,33 @@ class LogicalPieceTracker:
         """Return the next graveyard slot ID for a colour."""
         return f"slot_{len(self._captured[color]):02d}"
 
-    def next_promotion_reserve_slot(self, color: str) -> str:
-        # Count only pawns that are off-board AND not captured (i.e., they were promoted out)
-        """Return the next promotion reserve slot ID for a colour."""
-        captured_set = set(self._captured[color])
-        promoted_out = sum(
-            1
-            for piece_id, square in self._piece_to_square.items()
-            if piece_id.startswith(f"{color}_pawn_")
-            and square is None
-            and piece_id not in captured_set
-        )
-        return f"slot_{promoted_out:02d}"
-
-    def apply_committed_move(self, move: chess.Move, plan: PhysicalPlan) -> None:
+    def apply_plan(self, plan: list) -> None:
         """Apply a committed physical plan to logical occupancy."""
-        for command in plan.commands:
+        for command in plan:
             if isinstance(command, RemoveFromBoardCommand):
                 self._remove_piece(command.piece_id)
             elif isinstance(command, ArmMoveCommand):
-                self.set_piece_at(command.dst_square, command.piece_id)
+                self.place_piece_at(command.dst_square, command.piece_id)
             elif isinstance(command, TeleportCommand):
                 if command.destination_kind == "square":
-                    self.set_piece_at(command.destination_id, command.piece_id)
+                    self.place_piece_at(command.destination_id, command.piece_id)
                 else:
-                    self._set_off_board(command.piece_id)
+                    self._remove_piece_from_board(command.piece_id)
 
     def _remove_piece(self, piece_id: str) -> None:
         """Mark a piece as removed from the board."""
-        self._set_off_board(piece_id)
+        self._remove_piece_from_board(piece_id)
         color = "white" if piece_id.startswith("white_") else "black"
         if piece_id not in self._captured[color]:
             self._captured[color].append(piece_id)
 
-    def _set_off_board(self, piece_id: str) -> None:
+    def _remove_piece_from_board(self, piece_id: str) -> None:
         """Clear a piece from board occupancy."""
-        if piece_id in self._piece_to_square:
-            old_sq = self._piece_to_square[piece_id]
-            self._piece_to_square[piece_id] = None
-            if old_sq is not None:
-                self._square_to_piece.pop(old_sq, None)
-        elif piece_id in self._reserve_to_square:
-            old_sq = self._reserve_to_square[piece_id]
-            self._reserve_to_square[piece_id] = None
-            if old_sq is not None:
-                self._square_to_piece.pop(old_sq, None)
+        piece_map = self._get_piece_map(piece_id)
+        old_sq = piece_map[piece_id]
+        piece_map[piece_id] = None
+        if old_sq is not None:
+            self._square_to_piece.pop(old_sq, None)
 
 
 class MovePlanner:
@@ -163,11 +128,10 @@ class MovePlanner:
     }
 
     def __init__(self, board: chess.Board, tracker: LogicalPieceTracker):
-        """Initialise this object."""
         self.board = board
         self.tracker = tracker
 
-    def plan(self, move: chess.Move) -> PhysicalPlan:
+    def plan(self, move: chess.Move) -> list:
         """Translate a chess move into a physical plan."""
         if move not in self.board.legal_moves:
             raise ValueError(f"Cannot plan illegal move {move.uci()}")
@@ -181,38 +145,37 @@ class MovePlanner:
         commands: list = []
 
         if self.board.is_castling(move):
-            commands.extend(self._castle_commands(move, moving_piece_id, src, dst))
-            return PhysicalPlan(move.uci(), commands)
+            commands.extend(self._build_castle_commands(move, moving_piece_id, src, dst))
+            return commands
 
         captured_piece_id = self._captured_piece_id(move)
         if captured_piece_id is not None:
-            captured_piece = self.board.piece_at(self._captured_square(move))
-            color = (
-                "white"
-                if captured_piece and captured_piece.color == chess.WHITE
-                else "black"
-            )
-            commands.append(
-                RemoveFromBoardCommand(
-                    captured_piece_id, self.tracker.next_graveyard_slot(color)
-                )
-            )
+            commands.append(self._build_capture_command(move, captured_piece_id))
 
         commands.append(ArmMoveCommand(moving_piece_id, src, dst))
 
         if move.promotion is not None:
-            color = "white" if self.board.turn == chess.WHITE else "black"
-            promoted_type = self.PROMOTION_NAMES[move.promotion]
-            promoted_piece_id = self.tracker.reserve_piece_for(color, promoted_type)
-            reserve_slot = self.tracker.next_promotion_reserve_slot(color)
-            commands.append(
-                TeleportCommand(moving_piece_id, "promotion_reserve", reserve_slot)
-            )
-            commands.append(TeleportCommand(promoted_piece_id, "square", dst))
+            commands.extend(self._build_promotion_commands(move, moving_piece_id, dst))
 
-        return PhysicalPlan(move.uci(), commands)
+        return commands
+    
+    def _build_promotion_commands(self, move: chess.Move, pawn_id: str, dst: str) -> list:
+        """Build commands to swap the pawn out for a reserve promotion piece."""
+        color = "white" if self.board.turn == chess.WHITE else "black"
+        promoted_type = self.PROMOTION_NAMES[move.promotion]
+        promoted_piece_id = self.tracker.find_reserve_piece(color, promoted_type)
+        return [
+            RemoveFromBoardCommand(pawn_id, self.tracker.next_graveyard_slot(color)),
+            TeleportCommand(promoted_piece_id, "square", dst),
+        ]
 
-    def _castle_commands(
+    def _build_capture_command(self, move: chess.Move, captured_piece_id: str) -> RemoveFromBoardCommand:
+        """Build the remove command for a captured piece."""
+        captured_piece = self.board.piece_at(self._captured_square(move))
+        color = "white" if captured_piece.color == chess.WHITE else "black"
+        return RemoveFromBoardCommand(captured_piece_id, self.tracker.next_graveyard_slot(color))
+
+    def _build_castle_commands(
         self, move: chess.Move, king_id: str, king_src: str, king_dst: str
     ) -> list[ArmMoveCommand]:
         """Build physical commands for a castle move."""

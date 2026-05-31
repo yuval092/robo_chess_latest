@@ -1,28 +1,13 @@
 import gymnasium as gym
 import numpy as np
-import pytest
 
-from src.chess_env.waypoints import SAFE_Z
+from src.utils.io import load_config
 
-
-def test_transition_validate():
-    env = gym.make("ChessFetchTask-v0", render_mode=None)
-    env.reset()
-    diag = env.unwrapped.transition_validate()
-    assert "grip_speed_mm_s" in diag
-    assert "is_velocity_ok" in diag
-    assert diag["error_from_nominal_mm"] is None
-
-    # Test with nominal position
-    nominal_pos = np.array(diag["grip_pos"]) + np.array([0.001, 0, 0])  # 1mm away
-    diag_with_nominal = env.unwrapped.transition_validate(nominal_exit_pos=nominal_pos)
-    assert pytest.approx(diag_with_nominal["error_from_nominal_mm"], abs=1e-3) == 1.0
-
-    env.close()
+SAFE_Z = load_config("env")["safe_z"]
 
 
 def test_soft_reset_flow():
-    env = gym.make("ChessFetchTask-v0", render_mode=None)
+    env = gym.make("ChessFetchTask-Play-v0", render_mode=None)
     env.reset()
 
     # Simulate a success state
@@ -32,7 +17,7 @@ def test_soft_reset_flow():
     exit_wp = np.array([0.5, 0.5, SAFE_Z])
     next_goal = np.array([0.5, 0.5, 0.460])  # descend (HOVER_Z)
 
-    obs, info = uw.soft_reset(
+    obs = uw.soft_reset(
         new_scenario="descend",
         new_goal_pos=next_goal,
         nominal_exit_pos=exit_wp,
@@ -40,10 +25,7 @@ def test_soft_reset_flow():
     )
 
     assert isinstance(obs, dict)
-    assert "grip_pos" in obs
     assert "observation" in obs
-    assert "halt_steps" in info
-    assert "align_steps" in info
     assert uw.current_scenario == "descend"
     assert np.allclose(uw.goal, next_goal)
     assert uw.episode_steps == 0
@@ -51,7 +33,7 @@ def test_soft_reset_flow():
 
 
 def test_soft_reset_finger_validation():
-    env = gym.make("ChessFetchTask-v0", render_mode=None)
+    env = gym.make("ChessFetchTask-Play-v0", render_mode=None)
     env.reset()
     uw = env.unwrapped
 
@@ -60,11 +42,11 @@ def test_soft_reset_finger_validation():
     next_goal = np.array([0.5, 0.5, 0.460])  # HOVER_Z
 
     # This should pass without error with the current physics
-    obs, info = uw.soft_reset(
+    obs = uw.soft_reset(
         new_scenario="descend",
         new_goal_pos=next_goal,
         nominal_exit_pos=exit_wp,
         nominal_xy=nominal_xy,
     )
-    assert isinstance(info, dict)
+    assert isinstance(obs, dict)
     env.close()

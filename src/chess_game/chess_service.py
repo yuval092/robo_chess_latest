@@ -2,18 +2,114 @@
 
 from __future__ import annotations
 
-import json
 import logging
+import os
+import select
+import subprocess
+import time
 from dataclasses import dataclass
-from pathlib import Path
 from typing import Any
 
 import chess
-import chess.engine
 
 
 class IllegalMoveError(ValueError):
     pass
+
+
+class UciEngine:
+    """Minimal synchronous UCI wrapper for Stockfish-style engines."""
+
+    def __init__(self, command: str, *, skill_level: int | None = None, timeout: float = 5.0):
+        self._timeout = timeout
+        self._stdout_buffer = b""
+        self._proc = subprocess.Popen(
+            [command],
+            stdin=subprocess.PIPE,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.DEVNULL,
+            bufsize=0,
+        )
+        self._send("uci")
+        self._read_until("uciok")
+        if skill_level is not None:
+            self._send(f"setoption name Skill Level value {skill_level}")
+        self._send("isready")
+        self._read_until("readyok")
+
+    def choose_move(self, board: chess.Board, think_time: float) -> chess.Move:
+        self._send(f"position fen {board.fen()}")
+        self._send(f"go movetime {max(1, int(think_time * 1000))}")
+        lines = self._read_until_prefix("bestmove ")
+        bestmove = lines[-1].split()[1]
+        if bestmove == "(none)":
+            raise RuntimeError("Stockfish returned no move.")
+        move = chess.Move.from_uci(bestmove)
+        if move not in board.legal_moves:
+            raise RuntimeError("Stockfish returned an invalid move.")
+        return move
+
+    def close(self) -> None:
+        if self._proc.poll() is not None:
+            return
+        try:
+            self._send("quit")
+            self._proc.wait(timeout=1.0)
+        except Exception:
+            self._proc.kill()
+        finally:
+            self._proc.stdin and self._proc.stdin.close()
+            self._proc.stdout and self._proc.stdout.close()
+
+    def _send(self, command: str) -> None:
+        if self._proc.stdin is None:
+            raise RuntimeError("Chess engine stdin is closed.")
+        self._proc.stdin.write((command + "\n").encode("utf-8"))
+        self._proc.stdin.flush()
+
+    def _read_until(self, marker: str) -> list[str]:
+        lines = []
+        deadline = time.monotonic() + self._timeout
+        while time.monotonic() < deadline:
+            line = self._read_line(deadline)
+            if line is None:
+                continue
+            lines.append(line)
+            if line == marker:
+                return lines
+        raise TimeoutError(f"Timed out waiting for UCI marker {marker!r}.")
+
+    def _read_until_prefix(self, prefix: str) -> list[str]:
+        lines = []
+        deadline = time.monotonic() + self._timeout
+        while time.monotonic() < deadline:
+            line = self._read_line(deadline)
+            if line is None:
+                continue
+            lines.append(line)
+            if line.startswith(prefix):
+                return lines
+        raise TimeoutError(f"Timed out waiting for UCI line prefix {prefix!r}.")
+
+    def _read_line(self, deadline: float) -> str | None:
+        if self._proc.stdout is None:
+            raise RuntimeError("Chess engine stdout is closed.")
+        if b"\n" in self._stdout_buffer:
+            line, self._stdout_buffer = self._stdout_buffer.split(b"\n", 1)
+            return line.decode("utf-8", errors="replace").strip()
+
+        remaining = max(0.0, deadline - time.monotonic())
+        ready, _, _ = select.select([self._proc.stdout], [], [], remaining)
+        if not ready:
+            return None
+        chunk = os.read(self._proc.stdout.fileno(), 4096)
+        if chunk == b"":
+            raise RuntimeError("Chess engine exited unexpectedly.")
+        self._stdout_buffer += chunk
+        if b"\n" not in self._stdout_buffer:
+            return None
+        line, self._stdout_buffer = self._stdout_buffer.split(b"\n", 1)
+        return line.decode("utf-8", errors="replace").strip()
 
 
 @dataclass(frozen=True)
@@ -36,7 +132,7 @@ class GameStatus:
 class ChessService:
     def __init__(
         self,
-        starting_fen: str | None = None,
+        starting_fen: str | None = None, # is the state of the chess board at the start of the game in a string.
         engine_cfg: dict[str, Any] | None = None,
     ):
         """Initialise the chess service, optionally starting a Stockfish engine.
@@ -47,8 +143,8 @@ class ChessService:
           think_time_s    — seconds per move (default: 0.5)
         """
         self._board = chess.Board(starting_fen) if starting_fen else chess.Board()
-        self._san_history: list[str] = []
-        self._engine: chess.engine.SimpleEngine | None = None
+        self._san_history: list[str] = [] # move history in Standard Algebraic Notation (SAN)
+        self._engine: UciEngine | None = None
         self._think_time: float = 0.5
         self._logger = logging.getLogger(__name__)
 
@@ -56,9 +152,8 @@ class ChessService:
             self._think_time = float(engine_cfg.get("think_time_s", 0.5))
             path = engine_cfg.get("stockfish_path", "stockfish")
             if path:
-                self._engine = chess.engine.SimpleEngine.popen_uci(path)
                 skill = int(engine_cfg.get("skill_level", 5))
-                self._engine.configure({"Skill Level": skill})
+                self._engine = UciEngine(path, skill_level=skill)
 
     # ── Lifecycle ─────────────────────────────────────────────────────────────
 
@@ -66,7 +161,7 @@ class ChessService:
         """Shut down the Stockfish process if one is running."""
         if self._engine is not None:
             try:
-                self._engine.quit()
+                self._engine.close()
             except Exception:
                 pass
             self._engine = None
@@ -82,15 +177,16 @@ class ChessService:
         """Return all legal moves as UCI strings."""
         return [move.uci() for move in self._board.legal_moves]
 
-    def validate_uci(self, uci: str) -> chess.Move:
+    def parse_uci(self, uci: str) -> chess.Move:
         """Parse and validate a UCI move string."""
         try:
             move = chess.Move.from_uci(uci)
         except ValueError as exc:
             raise IllegalMoveError(f"Invalid UCI move: {uci}") from exc
-        return self._validate_move(move)
+        self._validate_move(move)
+        return move
 
-    def validate_square_move(
+    def construct_move_from_squares(
         self, src: str, dst: str, promotion: str | None = None
     ) -> chess.Move:
         """Construct and validate a move from source and destination squares."""
@@ -102,11 +198,12 @@ class ChessService:
         move = chess.Move(
             from_square, to_square, promotion=self._parse_promotion(promotion)
         )
-        return self._validate_move(move)
+        self._validate_move(move)
+        return move
 
     def push(self, move: chess.Move) -> None:
         """Commit a validated move to the board."""
-        move = self._validate_move(move)
+        self._validate_move(move)
         self._san_history.append(self._board.san(move))
         self._board.push(move)
 
@@ -144,10 +241,6 @@ class ChessService:
         """Return the SAN move history."""
         return list(self._san_history)
 
-    def piece_at(self, square: str) -> chess.Piece | None:
-        """Return the piece at a square, if present."""
-        return self._board.piece_at(chess.parse_square(square))
-
     def side_to_move(self) -> chess.Color:
         """Return the side whose turn it is."""
         return self._board.turn
@@ -162,43 +255,16 @@ class ChessService:
             raise RuntimeError(
                 "No chess engine configured. Pass engine_cfg when creating ChessService."
             )
-        result = self._engine.play(
-            self._board,
-            chess.engine.Limit(time=self._think_time),
-        )
-        if result.move is None or result.move not in self._board.legal_moves:
-            raise RuntimeError("Stockfish returned an invalid move.")
-        return result.move
-
-    # ── Persistence ───────────────────────────────────────────────────────────
-
-    def save_to_file(self, path: str) -> None:
-        """Save the current game state to JSON."""
-        data = {
-            "fen": self.fen(),
-            "san_history": self.san_history(),
-            "half_move_clock": self._board.halfmove_clock,
-            "full_move_number": self._board.fullmove_number,
-        }
-        Path(path).write_text(json.dumps(data, indent=2, sort_keys=True))
-
-    @classmethod
-    def load_from_file(cls, path: str) -> ChessService:
-        """Load a game state from JSON."""
-        data = json.loads(Path(path).read_text())
-        service = cls(data["fen"])
-        service._san_history = list(data.get("san_history", []))
-        return service
+        return self._engine.choose_move(self._board, self._think_time)
 
     # ── Internal helpers ──────────────────────────────────────────────────────
 
-    def _validate_move(self, move: chess.Move) -> chess.Move:
+    def _validate_move(self, move: chess.Move) -> None:
         """Raise IllegalMoveError if the move is not legal in the current position."""
         if move not in self._board.legal_moves:
             raise IllegalMoveError(
                 f"Illegal move {move.uci()} for position {self._board.fen()}"
             )
-        return move
 
     @staticmethod
     def _parse_promotion(promotion: str | None) -> int | None:

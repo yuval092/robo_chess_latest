@@ -7,9 +7,10 @@ from dataclasses import dataclass
 
 import numpy as np
 
+from src.chess_env.model_controller import ModelEmbeddedController
+from src.chess_game.board_mapper import BoardMapper
 from src.chess_game.move_planner import (
     ArmMoveCommand,
-    PhysicalPlan,
     RemoveFromBoardCommand,
     TeleportCommand,
 )
@@ -28,31 +29,27 @@ class PhysicalExecutionResult:
 
 
 class PhysicalPlanExecutor:
-    def __init__(
-        self,
-        movement_executor: MovementExecutor,
-        piece_teleporter: PieceTeleporter,
-        occupancy: PhysicalOccupancy,
-        controller=None,
-        env=None,
-    ):
-        """Initialise this object."""
-        self.movement_executor = movement_executor
-        self.piece_teleporter = piece_teleporter
-        self.occupancy = occupancy
-        self.controller = controller
+    def __init__(self, env, controller: ModelEmbeddedController, occupancy: PhysicalOccupancy | None = None):
         self.env = env.unwrapped if hasattr(env, "unwrapped") else env
+        self.controller = controller
+        board_mapper = BoardMapper.from_configs()
+        self.occupancy = occupancy or PhysicalOccupancy(PieceRegistry().starting_square_map())
+        self.piece_teleporter = PieceTeleporter(env, board_mapper)
+        self.movement_executor = MovementExecutor(
+            env, controller, board_mapper, self.occupancy, self.piece_teleporter
+        )
         self._handlers: dict[type, Callable] = {
             RemoveFromBoardCommand: self._handle_remove,
             ArmMoveCommand: self._handle_arm_move,
             TeleportCommand: self._handle_teleport,
         }
+        self._home_xy = np.array(load_config("env")["home_position_xy"])
 
-    def execute(self, plan: PhysicalPlan) -> PhysicalExecutionResult:
+    def execute(self, plan: list) -> PhysicalExecutionResult:
         """Execute all commands in a plan and stop on first arm-move failure."""
         results = []
         try:
-            for command in plan.commands:
+            for command in plan:
                 handler = self._handlers.get(type(command))
                 if handler is None:
                     return PhysicalExecutionResult(
@@ -60,19 +57,18 @@ class PhysicalPlanExecutor:
                     )
                 result = handler(command)
                 results.append((command, result))
-                if hasattr(result, "success") and not result.success:
+                if result is not None and not result.success:
                     return PhysicalExecutionResult(False, results, result.error)
         except Exception as exc:
             return PhysicalExecutionResult(False, results, str(exc))
         return PhysicalExecutionResult(True, results)
 
-    def _handle_remove(self, command: RemoveFromBoardCommand) -> bool:
+    def _handle_remove(self, command: RemoveFromBoardCommand) -> None:
         """Teleport a captured piece to graveyard and clear occupancy."""
         self.piece_teleporter.teleport_piece_to_graveyard(
             command.piece_id, command.graveyard_slot
         )
         self.occupancy.set_piece_square(command.piece_id, None)
-        return True
 
     def _handle_arm_move(self, command: ArmMoveCommand):
         """Execute a board-to-board arm move."""
@@ -80,58 +76,38 @@ class PhysicalPlanExecutor:
             command.piece_id, command.src_square, command.dst_square
         )
 
-    def _handle_teleport(self, command: TeleportCommand) -> bool:
+    def _handle_teleport(self, command: TeleportCommand) -> None:
         """Teleport a piece to the requested destination kind."""
+        new_square = None
         if command.destination_kind == "promotion_reserve":
             self.piece_teleporter.teleport_piece_to_promotion_reserve(
                 command.piece_id, command.destination_id
             )
-            self.occupancy.set_piece_square(command.piece_id, None)
         elif command.destination_kind == "graveyard":
             self.piece_teleporter.teleport_piece_to_graveyard(
                 command.piece_id, command.destination_id
             )
-            self.occupancy.set_piece_square(command.piece_id, None)
         elif command.destination_kind == "square":
             self.piece_teleporter.teleport_piece_to_square(
                 command.piece_id, command.destination_id
             )
-            self.occupancy.set_piece_square(command.piece_id, command.destination_id)
+            new_square = command.destination_id
         else:
             raise ValueError(f"Unknown teleport destination {command.destination_kind}")
-        return True
+        self.occupancy.set_piece_square(command.piece_id, new_square)
 
     def return_to_home(self) -> PhysicalExecutionResult:
-        """Run return to home logic."""
-        if self.controller is None or self.env is None:
-            return PhysicalExecutionResult(True, [], None)
-        home_xy = np.array(load_config("env")["home_position_xy"])
-        result = self.controller.run_transit(home_xy)
+        result = self.controller.run_transit(self._home_xy)
         command_results = [("return_to_home", result)]
         if not result.success:
             return PhysicalExecutionResult(False, command_results, result.crash_reason)
 
-        if hasattr(self.env, "reset_arm_to_home_posture"):
-            posture_result = self.env.reset_arm_to_home_posture()
-            if not posture_result.get("success", False):
-                return PhysicalExecutionResult(
-                    False, command_results, posture_result.get("reason")
-                )
-
-        return PhysicalExecutionResult(True, command_results, None)
+        error = self.env.reset_arm_to_home_posture()
+        return PhysicalExecutionResult(error is None, command_results, error)
 
     def reset_board_state(self) -> None:
         """Reset physical chess pieces and expected occupancy to the standard start."""
         starting_square_map = PieceRegistry().starting_square_map()
-        if self.env is not None and hasattr(self.env, "_reset_chess_piece_bodies"):
-            self.env._reset_chess_piece_bodies()
-            if hasattr(self.env, "clear_active_piece"):
-                self.env.clear_active_piece()
-        else:
-            for piece_id, square in starting_square_map.items():
-                self.piece_teleporter.teleport_piece_to_square(piece_id, square)
+        self.env._reset_chess_piece_bodies()
+        self.env.clear_active_piece()
         self.occupancy.reset(starting_square_map)
-
-    def reset_occupancy(self) -> None:
-        """Run reset occupancy logic."""
-        self.reset_board_state()

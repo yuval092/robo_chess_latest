@@ -5,7 +5,6 @@ from src.chess_game.board_mapper import BoardMapper
 from src.physical.occupancy import PhysicalOccupancy
 from src.physical.piece_registry import PieceRegistry
 from src.physical.piece_teleport import PieceTeleporter
-from src.physical.plan_executor import PhysicalPlanExecutor
 
 
 def piece_xyz(uw, piece_id):
@@ -15,19 +14,19 @@ def piece_xyz(uw, piece_id):
     return uw.data.qpos[qpos_start : qpos_start + 3].copy()
 
 
-def test_set_active_piece_routes_cube_position_to_selected_piece():
-    env = gym.make("ChessFetchTask-v0", render_mode=None, show_chess_pieces=True)
+def test_set_active_piece_routes_position_to_selected_piece():
+    env = gym.make("ChessFetchTask-Play-v0", render_mode=None, show_chess_pieces=True)
     env.reset()
     uw = env.unwrapped
 
     uw.set_active_piece("white_pawn_e")
 
-    assert np.allclose(uw.get_cube_position(), piece_xyz(uw, "white_pawn_e"))
+    assert np.allclose(uw.get_active_piece_position(), piece_xyz(uw, "white_pawn_e"))
     env.close()
 
 
 def test_teleport_piece_to_square_sets_pose_and_zeroes_velocity():
-    env = gym.make("ChessFetchTask-v0", render_mode=None, show_chess_pieces=True)
+    env = gym.make("ChessFetchTask-Play-v0", render_mode=None, show_chess_pieces=True)
     env.reset()
     uw = env.unwrapped
     mapper = BoardMapper.from_configs()
@@ -46,14 +45,14 @@ def test_teleport_piece_to_square_sets_pose_and_zeroes_velocity():
 
 
 def test_teleport_piece_to_graveyard_slot():
-    env = gym.make("ChessFetchTask-v0", render_mode=None, show_chess_pieces=True)
+    env = gym.make("ChessFetchTask-Play-v0", render_mode=None, show_chess_pieces=True)
     env.reset()
     teleporter = PieceTeleporter(env)
 
     teleporter.teleport_piece_to_graveyard("white_pawn_e", "slot_03")
 
     assert np.allclose(
-        piece_xyz(env.unwrapped, "white_pawn_e"), [0.640, -0.300 + 3 * 0.045, 0.015]
+        piece_xyz(env.unwrapped, "white_pawn_e"), [0.550, -0.300 + 3 * 0.045, 0.015]
     )
     env.close()
 
@@ -73,22 +72,3 @@ def test_physical_occupancy_rejects_collisions():
         assert "occupied" in str(exc)
     else:
         raise AssertionError("Expected occupied square rejection")
-
-
-def test_plan_executor_reset_board_state_restores_active_piece_occupancy():
-    class FakeTeleporter:
-        def __init__(self):
-            self.squares = []
-
-        def teleport_piece_to_square(self, piece_id, square):
-            self.squares.append((piece_id, square))
-
-    teleporter = FakeTeleporter()
-    occupancy = PhysicalOccupancy(PieceRegistry().starting_square_map())
-    occupancy.set_piece_square("white_pawn_e", "e4")
-
-    executor = PhysicalPlanExecutor(None, teleporter, occupancy)
-    executor.reset_board_state()
-
-    assert occupancy.piece_at_square("e2") == "white_pawn_e"
-    assert ("white_pawn_e", "e2") in teleporter.squares
