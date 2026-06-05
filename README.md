@@ -20,10 +20,10 @@ Install Stockfish separately and make sure the configured executable is on
 Start the web UI and live MuJoCo simulation:
 
 ```bash
-python main.py
+robo-chess-play
 ```
 
-Open `http://127.0.0.1:8000` in your browser. The MuJoCo viewer is always shown.
+Open `http://127.0.0.1:9999` in your browser. The MuJoCo viewer is always shown.
 Model paths are read from `configs/deployed_models.yaml`.
 
 ## Full Board Sweep

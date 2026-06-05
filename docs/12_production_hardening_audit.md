@@ -212,13 +212,12 @@ The wheel builds successfully, but inspection shows it omits:
 - `src/ui/static/styles.css`
 - `main.py`
 
-The wheel only exposes the training console script:
+The wheel exposes console scripts for play and training:
 
 ```text
+robo-chess-play
 robo-chess-train
 ```
-
-There is no installed play-mode entry point such as `robo-chess-play`.
 
 Consequences:
 
@@ -228,8 +227,7 @@ Consequences:
 - The browser UI cannot render because Flask templates and static files are
   absent.
 - Deployed controller models are absent.
-- The documented `python main.py` command is not available from an installed
-  wheel.
+- Runtime resources still need clean-install verification.
 
 Required fix:
 
@@ -237,7 +235,6 @@ Required fix:
 - For a product-like package, include configs, textures, UI files, and an
   explicit model acquisition strategy.
 - Use package-resource APIs rather than repository-relative paths.
-- Add `robo-chess-play` as a console script.
 - Add a clean-install smoke test in an isolated temporary environment.
 
 ## Adversarial Check Matrix
@@ -430,7 +427,7 @@ invariants.
 | Reproduce Gymnasium Robotics behavior | Environment version warning indicates behavior drift is possible. | `PARTIAL` | Pin known-good versions. |
 | Run on Windows | Training uses `SubprocVecEnv(..., start_method="fork")`; unsupported platform risk. | `PARTIAL` | Declare supported platform or select start method by OS. |
 | Run on machine without writable Matplotlib config directory | Library import falls back to temporary cache with warning. | `PARTIAL` | Set writable runtime cache directory in deployment docs. |
-| Run product command after installation | Only training console command exists. | `FAIL` | Add `robo-chess-play`. |
+| Run product command after installation | Play console command exists; resource packaging still needs smoke testing. | `PARTIAL` | Add clean-install smoke test. |
 | Use Flask development server as store product | Suitable for local demo, not hardened deployment. | `PARTIAL` | State local-only scope or use production server wrapper. |
 
 Built wheel inspection confirmed that only XML and STL assets were included from
@@ -638,12 +635,11 @@ The following order minimizes rework.
 1. Add package data for textures, templates, and static browser files.
 2. Package configs or support an explicit external config directory.
 3. Add model manifest and documented model installation path.
-4. Add `robo-chess-play` console entry point.
-5. Resolve resources with `importlib.resources` or a deliberate application
+4. Resolve resources with `importlib.resources` or a deliberate application
    data directory.
-6. Pin tested dependency versions or add a constraints file.
-7. Add clean-wheel installation smoke test.
-8. Add launch-from-different-CWD test.
+5. Pin tested dependency versions or add a constraints file.
+6. Add clean-wheel installation smoke test.
+7. Add launch-from-different-CWD test.
 
 ### Phase 7: Expand Fault-Injection Tests
 

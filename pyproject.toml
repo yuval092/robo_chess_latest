@@ -28,6 +28,7 @@ include = ["src*", "chess_env*", "training*"]
 "chess_env" = ["assets/*.xml", "stls/chess/*.stl", "stls/fetch/*.stl"]
 
 [project.scripts]
+robo-chess-play = "src.play:main"
 robo-chess-train = "training.main:main"
 
 [tool.ruff]

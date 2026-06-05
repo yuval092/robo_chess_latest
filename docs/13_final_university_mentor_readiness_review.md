@@ -180,7 +180,8 @@ The wheel builds but omits runtime resources:
 - Flask templates and static files
 - `main.py`
 
-It also exposes only `robo-chess-train`, not a play-mode command.
+It now exposes `robo-chess-play`, but the remaining runtime resources still need
+packaging review.
 
 Mentor check:
 
@@ -193,7 +194,6 @@ Current behavior:
 Required fix:
 
 - Package all runtime resources or define an external app-data layout.
-- Add `robo-chess-play`.
 - Resolve resources independent of current working directory.
 - Add clean-install smoke tests.
 
@@ -419,11 +419,10 @@ Required fix:
 
 ### Phase 6: Make packaging product-ready
 
-1. Add `robo-chess-play`.
-2. Package configs, textures, UI templates/static files, and required assets.
-3. Decide whether deployed models are packaged or externally installed.
-4. Resolve all resource paths independent of CWD.
-5. Pin tested dependency versions.
+1. Package configs, textures, UI templates/static files, and required assets.
+2. Decide whether deployed models are packaged or externally installed.
+3. Resolve all resource paths independent of CWD.
+4. Pin tested dependency versions.
 6. Add clean-install and CWD-independent smoke tests.
 
 ### Phase 7: Add robustness test suite

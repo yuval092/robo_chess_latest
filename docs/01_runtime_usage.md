@@ -3,10 +3,10 @@
 ## Starting the Game
 
 ```bash
-python main.py
+robo-chess-play
 ```
 
-Opens the MuJoCo viewer and starts a Flask server at `http://127.0.0.1:8000`.
+Opens the MuJoCo viewer and starts a Flask server at `http://127.0.0.1:9999`.
 Play mode does not accept CLI options; runtime settings come from configuration files.
 
 ### Model Paths
@@ -33,7 +33,7 @@ Chess game settings live in `configs/chess.yaml`:
 
 ## Web UI
 
-Open `http://127.0.0.1:8000` in any browser. The UI allows:
+Open `http://127.0.0.1:9999` in any browser. The UI allows:
 
 - Clicking a piece then a destination square to submit a human move.
 - Clicking "Let Computer Play" to trigger the engine.
