@@ -1,90 +1,32 @@
 # RoboChess
 
-RoboChess is a MuJoCo simulation of a robotic chess player. A simulated Fetch
-arm picks up and places chess pieces on an 8x8 board while game state is managed
-with `python-chess` and an optional Stockfish UCI engine.
-
-The project is simulation-only. There is no real hardware integration.
+Project: RoboChess.
+Students: Alon Sternberg, Yuval Farkash.
+Description: MuJoCo simulation of a robotic chess player. A simulated Fetch arm picks up and places chess pieces on an 8x8 board.
 
 ## Install
 
-```bash
-pip install -e .
-```
+0. (Optional) Create a python virtual environment (venv): `python3 -m venv .venv && source .venv/bin/activate`
 
-Install Stockfish separately and make sure the configured executable is on
-`PATH` if you want computer moves.
+1. Install the game: `pip3 install -e .`
+
+2. Install Stockfish, and make sure the executable is on `PATH` env var:
+    1. Ubuntu: `sudo apt install stockfish`.
+    2. Windows: https://stockfishchess.org/download/
 
 ## Play
 
-Start the web UI and live MuJoCo simulation:
+In order to start playing the chess game, follow the instructions:
 
-```bash
-robo-chess-play
-```
+1. Start the game: `robo-chess-play`
 
-Open `http://127.0.0.1:9999` in your browser. The MuJoCo viewer is always shown.
-Model paths are read from `configs/deployed_models.yaml`.
-
-## Full Board Sweep
-
-The exhaustive 64x63 physical move sweep is test-only and is skipped unless
-explicitly requested:
-
-```bash
-RUN_EXHAUSTIVE_PHYSICAL_MOVES=1 pytest tests/integration/test_all_square_moves.py -s
-```
-
-The sweep uses `black_rook_a` by default and is not part of normal runtime.
+2. Open the browser at `http://localhost:9999`. The UI should be presented to you.
 
 ## Training
 
-Only training is installed as a console script:
-
-```bash
-robo-chess-train --stage transit
-robo-chess-train --stage descend
-robo-chess-train --stage ascend
-```
-
-After training, update `configs/deployed_models.yaml`.
-
-## Scene Assets
-
-`chess_env/assets/pick_and_place.xml` and the STL files under
-`chess_env/stls/` are checked-in source-of-truth assets. Runtime startup does
-not regenerate XML fragments or meshes.
+In case you wish to train a new RL model, use the `robo-chess-train` command.
+You can run `robo-chess-train --help` to see all of the different parameters.
 
 ## Tests
 
-```bash
-pytest
-```
-
-Some tests require MuJoCo. Tests that use Stockfish require the `stockfish`
-executable to be available on `PATH`.
-
-The exhaustive physical move sweep remains opt-in for pytest:
-
-```bash
-RUN_EXHAUSTIVE_PHYSICAL_MOVES=1 pytest tests/integration/test_all_square_moves.py -s
-```
-
-## Project Structure
-
-```text
-robo_chess_latest/
-├── main.py             # Play-mode runtime entry point
-├── src/
-│   ├── chess_env/      # MuJoCo environment and model controller infrastructure
-│   ├── chess_game/     # Chess rules, Stockfish wrapper, move planning
-│   ├── physical/       # Physical execution pipeline and piece teleports
-│   ├── ui/             # Flask app, queued backend, browser assets
-│   └── utils/          # Config loading, validation, shared helpers
-├── training/           # SAC training pipeline and training CLI
-├── chess_env/          # MuJoCo XML, textures, STL assets
-├── configs/            # YAML configuration files
-├── docs/               # Detailed project documentation
-├── models/             # Deployed and pretrained model checkpoints
-└── tests/              # pytest suite
-```
+Feel free to run our unit & integration tests: `PYTHONPATH=. pytest`
