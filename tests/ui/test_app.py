@@ -95,6 +95,19 @@ def test_illegal_move_returns_400(client):
     assert response.get_json()["accepted"] is False
 
 
+@pytest.mark.parametrize(
+    ("payload", "error"),
+    [
+        (["e2", "e4"], "JSON body must be an object"),
+        ({"src": "e2", "dst": "e4", "promotion": 123}, "promotion must be a string"),
+    ],
+)
+def test_bad_move_payload_returns_400(client, payload, error):
+    response = client.post("/api/move", json=payload)
+    assert response.status_code == HTTPStatus.BAD_REQUEST
+    assert response.get_json() == {"accepted": False, "error": error}
+
+
 def test_legal_move_returns_result_snapshot(client):
     response = client.post("/api/move", json={"src": "e2", "dst": "e4"})
 
@@ -114,4 +127,19 @@ def test_let_computer_play_returns_legal_move(client):
     assert data["move_uci"] is not None
 
 
+def test_unexpected_backend_error_returns_json():
+    class BrokenBackend:
+        def snapshot(self):
+            raise RuntimeError("broken snapshot")
+
+    app = create_app(BrokenBackend())
+    app.config.update(TESTING=True, PROPAGATE_EXCEPTIONS=False)
+
+    response = app.test_client().get("/api/snapshot")
+
+    assert response.status_code == HTTPStatus.INTERNAL_SERVER_ERROR
+    assert response.get_json() == {
+        "accepted": False,
+        "error": "broken snapshot",
+    }
 

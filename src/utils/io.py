@@ -8,7 +8,8 @@ from pathlib import Path
 
 import yaml
 
-_CONFIG_ROOT = Path(__file__).resolve().parents[2] / "configs"
+_PROJECT_ROOT = Path(__file__).resolve().parents[2]
+_CONFIG_ROOT = _PROJECT_ROOT / "configs"
 
 
 def load_config(config_name: str) -> dict:
@@ -33,13 +34,17 @@ def resolve_model_paths(overrides: dict[str, str] | None = None) -> dict[str, st
             f"Missing model path(s) for {', '.join(missing)}. "
             f"Set configs/deployed_models.yaml or pass {flags}."
         )
-    not_found = [stage for stage, path in paths.items() if not os.path.exists(path)]
+    resolved = {
+        stage: str(Path(path) if Path(path).is_absolute() else _PROJECT_ROOT / path)
+        for stage, path in paths.items()
+    }
+    not_found = [stage for stage, path in resolved.items() if not os.path.exists(path)]
     if not_found:
         raise FileNotFoundError(
             f"Model file(s) not found for: {', '.join(not_found)}. "
             f"Check paths in configs/deployed_models.yaml."
         )
-    return paths
+    return resolved
 
 
 def setup_logger(name: str, log_file: str) -> logging.Logger:

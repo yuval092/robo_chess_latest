@@ -30,12 +30,16 @@ class UciEngine:
             stderr=subprocess.DEVNULL,
             bufsize=0,
         )
-        self._send("uci")
-        self._read_until("uciok")
-        if skill_level is not None:
-            self._send(f"setoption name Skill Level value {skill_level}")
-        self._send("isready")
-        self._read_until("readyok")
+        try:
+            self._send("uci")
+            self._read_until("uciok")
+            if skill_level is not None:
+                self._send(f"setoption name Skill Level value {skill_level}")
+            self._send("isready")
+            self._read_until("readyok")
+        except Exception:
+            self.close()
+            raise
 
     def choose_move(self, board: chess.Board, think_time: float) -> chess.Move:
         self._send(f"position fen {board.fen()}")
@@ -153,7 +157,9 @@ class ChessService:
             path = engine_cfg.get("stockfish_path", "stockfish")
             if path:
                 skill = int(engine_cfg.get("skill_level", 5))
-                self._engine = UciEngine(path, skill_level=skill)
+                self._engine = UciEngine(
+                    path, skill_level=skill, timeout=max(5.0, self._think_time + 1.0)
+                )
 
     # ── Lifecycle ─────────────────────────────────────────────────────────────
 
@@ -271,6 +277,8 @@ class ChessService:
         """Convert a promotion letter to a python-chess piece type constant."""
         if promotion is None:
             return None
+        if not isinstance(promotion, str):
+            raise IllegalMoveError(f"Unsupported promotion piece: {promotion}")
         promotion_map = {
             "q": chess.QUEEN,
             "r": chess.ROOK,

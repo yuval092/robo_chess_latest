@@ -12,6 +12,11 @@ from src.physical.plan_executor import PhysicalPlanExecutor
 from src.utils.io import load_config
 
 
+READY = "READY"
+BUSY = "BUSY"
+FAULTED = "FAULTED"
+
+
 @dataclass(frozen=True)
 class GameSnapshot:
     fen: str
@@ -23,6 +28,7 @@ class GameSnapshot:
     last_move: str | None
     move_history_san: list[str]
     error: str | None
+    state: str
 
 
 @dataclass(frozen=True)
@@ -58,15 +64,18 @@ class GameOrchestrator:
         self._engine_cfg = engine_cfg
         self.error: str | None = None
         self.last_move: str | None = None
+        self.state = READY
 
     def new_game(self) -> GameSnapshot:
         """Reset the game and physical state, restarting the chess engine."""
+        new_service = ChessService(engine_cfg=self._engine_cfg)
         self.chess_service.close()
-        self.chess_service = ChessService(engine_cfg=self._engine_cfg)
+        self.chess_service = new_service
         self.piece_tracker = LogicalPieceTracker()
         self.physical_executor.reset_board_state()
         self.error = None
         self.last_move = None
+        self.state = READY
         return self.snapshot()
 
     def snapshot(self) -> GameSnapshot:
@@ -85,12 +94,17 @@ class GameOrchestrator:
             last_move=self.last_move,
             move_history_san=self.chess_service.san_history(),
             error=self.error,
+            state=self.state,
         )
 
     def submit_human_move(
         self, src: str, dst: str, promotion: str | None = None
     ) -> MoveExecutionResult:
         """Validate and execute a human move request."""
+        if self.state == FAULTED:
+            return self._rejected("System is faulted. Start a new game to recover.")
+        if self.state == BUSY:
+            return self._rejected("System is busy.")
         if self.human_color != "both" and self._turn_color_name() != self.human_color:
             return self._rejected("It is not the human side's turn.")
         try:
@@ -102,12 +116,16 @@ class GameOrchestrator:
 
     def let_computer_play_current_turn(self) -> MoveExecutionResult:
         """Execute one computer-selected move."""
+        if self.state == FAULTED:
+            return self._rejected("System is faulted. Start a new game to recover.")
+        if self.state == BUSY:
+            return self._rejected("System is busy.")
         if self.chess_service.board.is_game_over(claim_draw=True):
             return self._rejected(self._game_over_message())
         try:
             move = self.chess_service.choose_engine_move()
-        except IllegalMoveError as exc:
-            return self._rejected(str(exc))
+        except (IllegalMoveError, RuntimeError, TimeoutError, OSError) as exc:
+            return self._fault(f"ENGINE_ERROR: {exc}")
         result = self._execute_move(move)
         return self._auto_play_if_computer_turn(result)
 
@@ -118,11 +136,16 @@ class GameOrchestrator:
         except ValueError as exc:
             return self._rejected(str(exc))
         try:
+            self.state = BUSY
             physical_success, error = self._run_plan(move, plan)
         except Exception as exc:
-            self.error = f"INTERNAL_ERROR: {exc}"
-            raise
-        self.error = error
+            return self._fault(f"INTERNAL_ERROR: {exc}", move.uci())
+        if physical_success and error is None:
+            self.state = READY
+            self.error = None
+        else:
+            error = error or "MOVE_FAILED"
+            self._fault(error)
         return MoveExecutionResult(True, physical_success, move.uci(), error, self.snapshot())
 
     def _run_plan(self, move: chess.Move, plan: list) -> tuple[bool, str | None]:
@@ -138,6 +161,8 @@ class GameOrchestrator:
         self.chess_service.push(move)
         self.piece_tracker.apply_plan(plan)
         self.last_move = move.uci()
+        if not home_result.success:
+            return True, home_result.error or "HOME_RETURN_FAILED"
         return True, home_result.error
 
     def _auto_play_if_computer_turn(self, result: MoveExecutionResult) -> MoveExecutionResult:
@@ -145,6 +170,8 @@ class GameOrchestrator:
         if (
             result.accepted
             and result.physical_success
+            and result.error is None
+            and self.state == READY
             and self.auto_computer_reply
             and self.human_color != "both"
             and self._turn_color_name() != self.human_color
@@ -157,6 +184,12 @@ class GameOrchestrator:
         """Return a rejected move result with a snapshot."""
         self.error = error
         return MoveExecutionResult(False, False, None, error, self.snapshot())
+
+    def _fault(self, error: str, move_uci: str | None = None) -> MoveExecutionResult:
+        """Enter the fault state and return a failed result."""
+        self.error = error
+        self.state = FAULTED
+        return MoveExecutionResult(False, False, move_uci, error, self.snapshot())
 
     def _turn_color_name(self) -> str:
         """Return the current turn as a colour name."""

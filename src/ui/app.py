@@ -7,6 +7,7 @@ from http import HTTPStatus
 from typing import Protocol
 
 from flask import Flask, jsonify, render_template, request
+from werkzeug.exceptions import HTTPException
 
 
 class UIBackend(Protocol):
@@ -42,6 +43,16 @@ def to_jsonable(value):
 def create_app(backend: UIBackend) -> Flask:
     app = Flask(__name__)
 
+    @app.errorhandler(Exception)
+    def handle_error(exc: Exception):
+        if isinstance(exc, HTTPException):
+            status = exc.code or HTTPStatus.INTERNAL_SERVER_ERROR
+            error = exc.description
+        else:
+            status = HTTPStatus.INTERNAL_SERVER_ERROR
+            error = str(exc) or exc.__class__.__name__
+        return jsonify({"accepted": False, "error": error}), status
+
     @app.get("/")
     def index():
         return render_template("index.html")
@@ -57,13 +68,22 @@ def create_app(backend: UIBackend) -> Flask:
     @app.post("/api/move")
     def api_move():
         payload = request.get_json(silent=True) or {}
+        if not isinstance(payload, dict):
+            return jsonify(
+                {"accepted": False, "error": "JSON body must be an object"}
+            ), HTTPStatus.BAD_REQUEST
         src = payload.get("src")
         dst = payload.get("dst")
-        if not src or not dst:
+        promotion = payload.get("promotion")
+        if not isinstance(src, str) or not isinstance(dst, str) or not src or not dst:
             return jsonify(
                 {"accepted": False, "error": "src and dst are required"}
             ), HTTPStatus.BAD_REQUEST
-        result = backend.submit_human_move(src, dst, payload.get("promotion"))
+        if promotion is not None and not isinstance(promotion, str):
+            return jsonify(
+                {"accepted": False, "error": "promotion must be a string"}
+            ), HTTPStatus.BAD_REQUEST
+        result = backend.submit_human_move(src, dst, promotion)
         status = HTTPStatus.OK if result.accepted else HTTPStatus.BAD_REQUEST
         return jsonify(to_jsonable(result)), status
 

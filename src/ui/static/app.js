@@ -56,6 +56,10 @@ function isGameOver() {
   return Boolean(snapshot?.status?.is_game_over);
 }
 
+function isFaulted() {
+  return snapshot?.state === "FAULTED";
+}
+
 function resultLabel(status) {
   if (status.outcome === "1-0") return "White wins";
   if (status.outcome === "0-1") return "Black wins";
@@ -78,6 +82,7 @@ function terminalReason(status) {
 function stateKey() {
   const status = snapshot.status || {};
   if (requestInFlight) return "busy";
+  if (isFaulted()) return "faulted";
   if (status.is_game_over) {
     if (status.outcome === "1-0")    return "white-wins";
     if (status.outcome === "0-1")    return "black-wins";
@@ -115,7 +120,7 @@ function renderBoard() {
       button.classList.add("last");
     }
     button.dataset.square = square;
-    button.disabled = Boolean(requestInFlight || isGameOver());
+    button.disabled = Boolean(requestInFlight || isGameOver() || isFaulted());
     const piece = pieces[snapshot?.board?.[square]] || "";
     if (piece) {
       const pieceEl = document.createElement("span");
@@ -133,7 +138,7 @@ function renderBoard() {
 }
 
 async function onSquare(square) {
-  if (!snapshot || requestInFlight || isGameOver()) return;
+  if (!snapshot || requestInFlight || isGameOver() || isFaulted()) return;
   const piece = snapshot.board[square];
   if (!selected) {
     if (!piece) return;
@@ -200,6 +205,7 @@ promotionDialog.addEventListener("cancel", () => {
 function stateText() {
   const status = snapshot.status || {};
   if (requestInFlight) return "Busy";
+  if (isFaulted()) return "Faulted";
   if (status.is_game_over) return resultLabel(status) || "Game over";
   if (status.is_checkmate) return "Checkmate";
   if (status.is_stalemate) return "Stalemate";
@@ -249,7 +255,7 @@ function renderSnapshot() {
   renderHistory();
   errorEl.textContent = snapshot.error || "";
   newGameBtn.disabled = Boolean(requestInFlight);
-  computerBtn.disabled = Boolean(requestInFlight || terminal);
+  computerBtn.disabled = Boolean(requestInFlight || terminal || isFaulted());
   refreshBtn.disabled = Boolean(requestInFlight);
   renderBoard();
 }
@@ -261,11 +267,22 @@ function showError(msg) {
 async function loadSnapshot() {
   try {
     const response = await fetch("/api/snapshot");
-    if (!response.ok) { showError(`Snapshot error ${response.status}`); return; }
-    snapshot = await response.json();
+    const data = await readJsonResponse(response);
+    if (!response.ok) { showError(data.error || `Snapshot error ${response.status}`); return; }
+    snapshot = data;
     renderSnapshot();
   } catch (err) {
-    showError(`Network error: ${err.message}`);
+    showError(`Server communication failed: ${err.message}`);
+  }
+}
+
+async function readJsonResponse(response) {
+  const text = await response.text();
+  if (!text) return {};
+  try {
+    return JSON.parse(text);
+  } catch {
+    return { error: text };
   }
 }
 
@@ -278,7 +295,7 @@ async function postJson(url, payload = {}) {
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify(payload),
     });
-    const data = await response.json();
+    const data = await readJsonResponse(response);
     if (!response.ok) {
       showError(data.error || `Server error ${response.status}`);
       return null;
@@ -288,7 +305,7 @@ async function postJson(url, payload = {}) {
     renderSnapshot();
     return data;
   } catch (err) {
-    showError(`Network error: ${err.message}`);
+    showError(`Server communication failed: ${err.message}`);
     return null;
   } finally {
     requestInFlight = false;

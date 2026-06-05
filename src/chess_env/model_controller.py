@@ -10,6 +10,7 @@ from stable_baselines3 import SAC
 
 from src.chess_env.base_env import pretrained_obs_format_enabled
 from src.chess_env.simulation import reset_elapsed_steps, unwrap_env
+from src.utils.validation import ensure_finite_array
 
 M_TO_MM = 1000.0
 GRIPPER_CLOSED = -1.0
@@ -59,7 +60,10 @@ class ModelEmbeddedController:
 
         with pretrained_obs_format_enabled(self._wrapped_env):
             with contextlib.redirect_stdout(io.StringIO()):
-                self._models[stage] = SAC.load(path, env=self._wrapped_env)
+                try:
+                    self._models[stage] = SAC.load(path, env=self._wrapped_env)
+                except Exception as exc:
+                    raise RuntimeError(f"Failed to load {stage} model from {path}: {exc}") from exc
         print(f"[ModelEmbeddedController] Loaded {stage} model from {path}")
 
     def load_all(self, transit_path: str, descend_path: str, ascend_path: str) -> None:
@@ -70,17 +74,20 @@ class ModelEmbeddedController:
 
     def run_transit(self, target_xy: np.ndarray):
         """Move arm horizontally to target_xy at SAFE_Z."""
+        target_xy = ensure_finite_array("target_xy", target_xy, (2,))
         target_pos = np.array([target_xy[0], target_xy[1], self._env.SAFE_Z])
         return self._run_model_stage("transit", target_pos)
 
     def run_descend(self, tube_xy: np.ndarray):
         """Soft-reset to descend scenario, then lower arm from SAFE_Z to HOVER_Z."""
+        tube_xy = ensure_finite_array("tube_xy", tube_xy, (2,))
         self._prepare_stage("descend", tube_xy)
         target_pos = np.array([tube_xy[0], tube_xy[1], self._env.HOVER_Z])
         return self._run_model_stage("descend", target_pos)
 
     def run_ascend(self, tube_xy: np.ndarray):
         """Soft-reset to ascend scenario, then raise arm from HOVER_Z to SAFE_Z."""
+        tube_xy = ensure_finite_array("tube_xy", tube_xy, (2,))
         self._prepare_stage("ascend", tube_xy)
         target_pos = np.array([tube_xy[0], tube_xy[1], self._env.SAFE_Z])
         return self._run_model_stage("ascend", target_pos)
@@ -116,6 +123,7 @@ class ModelEmbeddedController:
 
     def run_place(self, dst_xy: np.ndarray):
         """Execute the scripted place pipeline and return StageResult."""
+        dst_xy = ensure_finite_array("dst_xy", dst_xy, (2,))
         reason = self._env.execute_place(dst_xy)
         grip_after = self._env.get_grip_pos()
         return StageResult(
@@ -155,6 +163,8 @@ class ModelEmbeddedController:
 
     def run_full_move(self, src_xy: np.ndarray, dst_xy: np.ndarray):
         """Full pick-and-place move. Called by MovementExecutor."""
+        src_xy = ensure_finite_array("src_xy", src_xy, (2,))
+        dst_xy = ensure_finite_array("dst_xy", dst_xy, (2,))
 
         pick = self.run_pick_sequence(src_xy)
         if not pick.success:
@@ -168,6 +178,7 @@ class ModelEmbeddedController:
 
     def _run_model_stage(self, stage: str, target_pos: np.ndarray) -> StageResult:
         """Run a model-backed movement stage."""
+        target_pos = ensure_finite_array("target_pos", target_pos, (3,))
         model = self._get_stage_model(stage)
         self._setup_model_stage_env(stage, target_pos)
 
@@ -233,8 +244,9 @@ class ModelEmbeddedController:
         """Predict an action, apply it to the environment."""
         env = self._env
         obs = env._get_obs()
+        self._validate_obs(obs)
         action, _ = model.predict(obs, deterministic=True)
-        action = np.array(action, dtype=np.float32)
+        action = ensure_finite_array("model_action", action, (4,)).astype(np.float32)
         action[ACTION_GRIPPER_IDX] = GRIPPER_CLOSED if stage in {"transit", "ascend"} else GRIPPER_OPEN
 
         env._set_action(action)
@@ -273,6 +285,11 @@ class ModelEmbeddedController:
             env._use_pretrained_obs_format = previous_pretrained_obs_format
 
         return "TIMEOUT"
+
+    def _validate_obs(self, obs: dict) -> None:
+        """Reject non-finite observations before model inference."""
+        for key in ("observation", "achieved_goal", "desired_goal"):
+            ensure_finite_array(f"obs.{key}", obs[key])
 
     def _build_model_stage_result(
         self,

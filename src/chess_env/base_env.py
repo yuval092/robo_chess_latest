@@ -22,6 +22,7 @@ from src.chess_env.simulation import IDENTITY_QUAT, ChessSimulationEnv
 from src.chess_game.board_mapper import BoardMapper
 from src.physical.piece_registry import PieceRegistry, reserve_piece_ids
 from src.utils.io import load_config
+from src.utils.validation import ensure_finite_array, ensure_finite_scalar
 
 
 PRETRAINED_OBS_SPACE = spaces.Dict(
@@ -214,11 +215,19 @@ class ChessBaseEnv(ChessSimulationEnv):
 
     def get_grip_pos(self) -> np.ndarray:
         """Return the current world position of the gripper site."""
-        return self._utils.get_site_xpos(self.model, self.data, "robot0:grip").copy()
+        return ensure_finite_array(
+            "grip_pos",
+            self._utils.get_site_xpos(self.model, self.data, "robot0:grip"),
+            (3,),
+        ).copy()
 
     def get_grip_vel(self) -> np.ndarray:
         """Return the current world velocity of the gripper site."""
-        return self._utils.get_site_xvelp(self.model, self.data, "robot0:grip").copy()
+        return ensure_finite_array(
+            "grip_vel",
+            self._utils.get_site_xvelp(self.model, self.data, "robot0:grip"),
+            (3,),
+        ).copy()
 
     def get_finger_angle(self) -> float:
         """Return the current left finger joint angle.
@@ -226,9 +235,12 @@ class ChessBaseEnv(ChessSimulationEnv):
         Both fingers are always driven to the same target simultaneously, so
         left mirrors right exactly — checking one is sufficient.
         """
-        return self._utils.get_joint_qpos(
-            self.model, self.data, "robot0:l_gripper_finger_joint"
-        ).item()
+        return ensure_finite_scalar(
+            "finger_angle",
+            self._utils.get_joint_qpos(
+                self.model, self.data, "robot0:l_gripper_finger_joint"
+            ).item(),
+        )
 
     def _move_grip_to(
         self,
@@ -237,6 +249,7 @@ class ChessBaseEnv(ChessSimulationEnv):
         tolerance: float = 0.001,
     ) -> bool:
         """Drive the arm so robot0:grip reaches target_pos. Handles site-to-body offsets."""
+        target_pos = ensure_finite_array("target_pos", target_pos, (3,))
         for _ in range(max_steps):
             if np.linalg.norm(target_pos - self.get_grip_pos()) < tolerance:
                 return True
@@ -246,6 +259,7 @@ class ChessBaseEnv(ChessSimulationEnv):
 
     def _step_grip_toward(self, target_pos: np.ndarray) -> None:
         """Reset mocap to the body, then pull the grip site toward target_pos for one step."""
+        target_pos = ensure_finite_array("target_pos", target_pos, (3,))
         self._set_action(np.zeros(4))
         self.data.mocap_pos[0][:3] += target_pos - self.get_grip_pos()
         self.data.mocap_quat[0][:] = self.VERTICAL_QUAT
@@ -268,11 +282,12 @@ class ChessBaseEnv(ChessSimulationEnv):
 
     def _settle_arm_to_start(self, arm_start_pos):
         """Move the arm to the starting position; prevents physics explosions and gravity sag."""
-        self._move_grip_to(
+        if not self._move_grip_to(
             arm_start_pos,
             max_steps=100,
             tolerance=self.SETTLE_TOLERANCE,
-        )
+        ):
+            raise RuntimeError("RESET_ARM_START_MOVE_FAILED")
         self.data.qvel[:] = 0.0
         self.data.qacc[:] = 0.0
         self.data.ctrl[:] = 0.0
@@ -284,8 +299,8 @@ class ChessBaseEnv(ChessSimulationEnv):
 
     def _is_success(self, achieved_goal, desired_goal):
         """Check XY and Z precision against the success threshold."""
-        achieved_goal = np.asarray(achieved_goal)
-        desired_goal = np.asarray(desired_goal)
+        achieved_goal = ensure_finite_array("achieved_goal", achieved_goal, (3,))
+        desired_goal = ensure_finite_array("desired_goal", desired_goal, (3,))
         d_xy = np.linalg.norm(achieved_goal[:2] - desired_goal[:2])
         d_z = abs(achieved_goal[2] - desired_goal[2])
         return float(d_xy < self.SUCCESS_THRESHOLD and d_z < self.SUCCESS_THRESHOLD)
@@ -293,8 +308,8 @@ class ChessBaseEnv(ChessSimulationEnv):
     # ── Chess-piece body placement ──────────────────────────────────────────
 
     def _set_freejoint_pose(self, joint_name: str, xyz: np.ndarray, quat=None) -> None:
-        quat = IDENTITY_QUAT if quat is None else np.asarray(quat, dtype=float)
-        xyz = np.asarray(xyz, dtype=float)
+        quat = IDENTITY_QUAT if quat is None else ensure_finite_array("quat", quat, (4,))
+        xyz = ensure_finite_array("xyz", xyz, (3,))
         joint_id = self.model.joint(joint_name).id
         qpos_start = self.model.jnt_qposadr[joint_id]
         dof_start = self.model.jnt_dofadr[joint_id]
@@ -461,7 +476,8 @@ class ChessBaseEnv(ChessSimulationEnv):
         """Set finger target, enforce it, then move the grip to target."""
         self.finger_target_joint = finger_state
         self._commit_finger_target()
-        self._move_grip_to(target, max_steps=max_steps, tolerance=0.003)
+        if not self._move_grip_to(target, max_steps=max_steps, tolerance=0.003):
+            raise RuntimeError("FINGER_MOVE_TO_TARGET_FAILED")
 
     def _validate_finger_state(self) -> bool:
         """Return False and log an error if the finger didn't reach its target."""
@@ -517,6 +533,10 @@ class ChessBaseEnv(ChessSimulationEnv):
         nominal_xy: np.ndarray | None = None,
     ) -> dict:
         """Transition to a new scenario without teleporting the arm."""
+        new_goal_pos = ensure_finite_array("new_goal_pos", new_goal_pos, (3,))
+        nominal_exit_pos = ensure_finite_array("nominal_exit_pos", nominal_exit_pos, (3,))
+        if nominal_xy is not None:
+            nominal_xy = ensure_finite_array("nominal_xy", nominal_xy, (2,))
         self._halt_arm()
         self._align_to_exit_pos(nominal_exit_pos)
 

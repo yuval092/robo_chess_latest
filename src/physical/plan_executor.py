@@ -97,13 +97,16 @@ class PhysicalPlanExecutor:
         self.occupancy.set_piece_square(command.piece_id, new_square)
 
     def return_to_home(self) -> PhysicalExecutionResult:
-        result = self.controller.run_transit(self._home_xy)
-        command_results = [("return_to_home", result)]
-        if not result.success:
-            return PhysicalExecutionResult(False, command_results, result.crash_reason)
+        try:
+            result = self.controller.run_transit(self._home_xy)
+            command_results = [("return_to_home", result)]
+            if not result.success:
+                return PhysicalExecutionResult(False, command_results, result.crash_reason)
 
-        error = self.env.reset_arm_to_home_posture()
-        return PhysicalExecutionResult(error is None, command_results, error)
+            error = self.env.reset_arm_to_home_posture()
+            return PhysicalExecutionResult(error is None, command_results, error)
+        except Exception as exc:
+            return PhysicalExecutionResult(False, [], str(exc))
 
     def reset_board_state(self) -> None:
         """Reset physical chess pieces and expected occupancy to the standard start."""

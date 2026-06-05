@@ -11,6 +11,7 @@ import math
 import numpy as np
 
 from src.chess_env.base_env import ChessBaseEnv
+from src.utils.validation import ensure_finite_array, ensure_finite_scalar
 
 PIECE_COM_GRIP_OFFSET = 0.015  # Piece center of mass sits ~15mm below the grip site when held at center
 
@@ -80,14 +81,19 @@ class ChessProductionEnv(ChessBaseEnv):
 
     def get_active_piece_position(self) -> np.ndarray:
         qpos_start = self._active_piece_qpos_start()
-        return self.data.qpos[qpos_start : qpos_start + 3].copy()
+        return ensure_finite_array(
+            "active_piece_position", self.data.qpos[qpos_start : qpos_start + 3], (3,)
+        ).copy()
 
     def get_active_piece_quat(self) -> np.ndarray:
         qpos_start = self._active_piece_qpos_start()
-        return self.data.qpos[qpos_start + 3 : qpos_start + 7].copy()
+        return ensure_finite_array(
+            "active_piece_quat", self.data.qpos[qpos_start + 3 : qpos_start + 7], (4,)
+        ).copy()
 
     def _check_piece_held(self, grip_pos: np.ndarray) -> str | None:
         """Verify the active piece is still in the gripper. Called when grasp_mode is on."""
+        grip_pos = ensure_finite_array("grip_pos", grip_pos, (3,))
         piece_pos = self.get_active_piece_position()
         xy_error = np.linalg.norm(piece_pos[:2] - grip_pos[:2])
         z_error = abs(piece_pos[2] - (grip_pos[2] - PIECE_COM_GRIP_OFFSET))
@@ -105,11 +111,16 @@ class ChessProductionEnv(ChessBaseEnv):
         self._home_posture_qpos = {}
         for joint_name in HOME_POSTURE_JOINTS:
             joint = self.model.joint(joint_name)
-            self._home_posture_qpos[joint_name] = float(
-                self.data.qpos[joint.qposadr[0]]
+            self._home_posture_qpos[joint_name] = ensure_finite_scalar(
+                joint_name,
+                self.data.qpos[joint.qposadr[0]],
             )
-        self._home_posture_mocap_pos = self.data.mocap_pos[0][:3].copy()
-        self._home_posture_mocap_quat = self.data.mocap_quat[0].copy()
+        self._home_posture_mocap_pos = ensure_finite_array(
+            "home_mocap_pos", self.data.mocap_pos[0][:3], (3,)
+        ).copy()
+        self._home_posture_mocap_quat = ensure_finite_array(
+            "home_mocap_quat", self.data.mocap_quat[0], (4,)
+        ).copy()
         self._home_posture_grip_pos = self.get_grip_pos()
 
     def _apply_home_posture_step(
@@ -134,7 +145,10 @@ class ChessProductionEnv(ChessBaseEnv):
 
         mocap_pos = start_mocap_pos + alpha * (self._home_posture_mocap_pos - start_mocap_pos)
         mocap_quat = start_mocap_quat + alpha * (self._home_posture_mocap_quat - start_mocap_quat)
-        mocap_quat /= np.linalg.norm(mocap_quat)
+        mocap_quat_norm = np.linalg.norm(mocap_quat)
+        if mocap_quat_norm <= 0.0 or not np.isfinite(mocap_quat_norm):
+            raise RuntimeError("HOME_POSTURE_INVALID_MOCAP_QUAT")
+        mocap_quat /= mocap_quat_norm
         self.data.mocap_pos[0][:3] = mocap_pos
         self.data.mocap_quat[0][:] = mocap_quat
         self._commit_finger_target()
@@ -195,6 +209,11 @@ class ChessProductionEnv(ChessBaseEnv):
         from target_z vs current Z. Returns a drop reason if verify_held detects the
         piece fell during ascent, or None on success.
         """
+        xy = ensure_finite_array("xy", xy, (2,))
+        target_z = ensure_finite_scalar("target_z", target_z)
+        step_m = ensure_finite_scalar("step_m", step_m)
+        if step_m <= 0.0 or not np.isfinite(step_m):
+            return "MOVE_Z_INVALID_STEP"
         step_target_z = self.get_grip_pos()[2]
         descending = target_z < step_target_z
         z_step = -step_m if descending else step_m
@@ -223,7 +242,7 @@ class ChessProductionEnv(ChessBaseEnv):
 
     def _check_hover_preconditions(self) -> str | None:
         """Verify speed, Z height, and (when not in grasp_mode) that fingers are open."""
-        grip_vel = self._utils.get_site_xvelp(self.model, self.data, "robot0:grip")
+        grip_vel = self.get_grip_vel()
         if float(np.linalg.norm(grip_vel)) > self.HOVER_SPEED_THRESHOLD:
             return "PRECONDITION_SPEED"
 
@@ -243,6 +262,7 @@ class ChessProductionEnv(ChessBaseEnv):
 
     def _align_over_xy(self, xy: np.ndarray) -> str | None:
         """Align the grip site over (xy) at current Z."""
+        xy = ensure_finite_array("xy", xy, (2,))
         grip_pos = self.get_grip_pos()
         align_target = np.array([xy[0], xy[1], grip_pos[2]])
         if self._move_grip_to(align_target, tolerance=self.GRASP_ALIGN_TOLERANCE):
@@ -304,7 +324,11 @@ class ChessProductionEnv(ChessBaseEnv):
         piece_pos = self.get_active_piece_position().copy()
 
         # Extract yaw from quaternion (rotation around Z axis).
-        w, x, y, z = self.get_active_piece_quat()
+        quat = self.get_active_piece_quat()
+        quat_norm = np.linalg.norm(quat)
+        if quat_norm <= 0.0 or not np.isfinite(quat_norm):
+            return piece_pos, "INVALID_PIECE_QUAT"
+        w, x, y, z = quat / quat_norm
         siny_cosp = 2.0 * (w * z + x * y)
         cosy_cosp = 1.0 - 2.0 * (y * y + z * z)
         yaw = abs(math.atan2(siny_cosp, cosy_cosp))
@@ -394,7 +418,8 @@ class ChessProductionEnv(ChessBaseEnv):
         if reason := self._verify_placement(dst_xy):
             return reason
 
-        self._move_z(place_pos[:2], self.HOVER_Z, self.GRASP_RETRACT_STEP_M)
+        if reason := self._move_z(place_pos[:2], self.HOVER_Z, self.GRASP_RETRACT_STEP_M):
+            return reason
         return None
 
     def _open_fingers(self, hold_pos: np.ndarray) -> None:
@@ -416,6 +441,7 @@ class ChessProductionEnv(ChessBaseEnv):
 
     def _verify_placement(self, dst_xy: np.ndarray) -> str | None:
         """Check XY drift against dst_xy and Z height against table surface."""
+        dst_xy = ensure_finite_array("dst_xy", dst_xy, (2,))
         piece_pos = self.get_active_piece_position()
         xy_error_mm = float(np.linalg.norm(piece_pos[:2] - dst_xy[:2])) * 1000
         z_error_mm = float(
@@ -427,4 +453,3 @@ class ChessProductionEnv(ChessBaseEnv):
         if z_error_mm > self.PLACE_VERIFY_Z_THRESHOLD * 1000:
             return f"PLACE_Z_FAILED ({z_error_mm:.1f}mm — piece not flat on table)"
         return None
-

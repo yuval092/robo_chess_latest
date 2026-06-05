@@ -22,6 +22,7 @@ from src.chess_game.move_planner import LogicalPieceTracker
 from src.physical.plan_executor import PhysicalPlanExecutor
 from src.ui.app import create_app
 from src.ui.queued_backend import QueuedUIBackend
+from src.utils.config_validation import validate_config
 from src.utils.io import load_config, resolve_model_paths
 
 
@@ -77,21 +78,30 @@ def build_orchestrator(
 
 
 def run_game(args: argparse.Namespace) -> int:
-    env = gym.make(
-        "ChessFetchTask-Play-v0",
-        render_mode="human" if args.visualize else None,
-        show_chess_pieces=True,
-        debug=args.debug,
-    )
-    env.reset()
-    orchestrator = build_orchestrator(
-        env,
-        args.visualize,
-        args.delay,
-        transit_model=args.transit_model,
-        descend_model=args.descend_model,
-        ascend_model=args.ascend_model,
-    )
+    env = None
+    orchestrator = None
+    try:
+        validate_config()
+        env = gym.make(
+            "ChessFetchTask-Play-v0",
+            render_mode="human" if args.visualize else None,
+            show_chess_pieces=True,
+            debug=args.debug,
+        )
+        env.reset()
+        orchestrator = build_orchestrator(
+            env,
+            args.visualize,
+            args.delay,
+            transit_model=args.transit_model,
+            descend_model=args.descend_model,
+            ascend_model=args.ascend_model,
+        )
+    except Exception as exc:
+        if env is not None:
+            env.close()
+        print(f"RoboChess startup failed: {exc}", file=sys.stderr)
+        return 1
     backend = QueuedUIBackend(orchestrator, env)
     app = create_app(backend)
     server = threading.Thread(
@@ -115,7 +125,10 @@ def run_game(args: argparse.Namespace) -> int:
     except KeyboardInterrupt:
         return 0
     finally:
-        env.close()
+        if orchestrator is not None:
+            orchestrator.chess_service.close()
+        if env is not None:
+            env.close()
 
 
 def build_parser() -> argparse.ArgumentParser:

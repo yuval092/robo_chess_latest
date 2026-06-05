@@ -11,6 +11,7 @@ from src.chess_game.board_mapper import BoardMapper
 from src.physical.occupancy import PhysicalOccupancy
 from src.physical.piece_teleport import PieceTeleporter
 from src.utils.io import load_config
+from src.utils.validation import ensure_finite_array
 
 M_TO_MM = 1000.0
 
@@ -70,6 +71,8 @@ class MovementExecutor:
         src_square: str | None = None,
         dst_square: str | None = None,
     ) -> PhysicalMoveResult:
+        src_xy = ensure_finite_array("src_xy", src_xy, (2,))
+        dst_xy = ensure_finite_array("dst_xy", dst_xy, (2,))
         self.env.set_active_piece(piece_id)
         sequence_result = self.controller.run_full_move(src_xy, dst_xy)
 
@@ -100,6 +103,7 @@ class MovementExecutor:
         stage_results: list,
     ) -> PhysicalMoveResult | None:
         """Return a failure result if the piece landed too far from the target, else None."""
+        dst_xy = ensure_finite_array("dst_xy", dst_xy, (2,))
         piece_pos = self.env.get_active_piece_position()
         expected_z = self.env.TABLE_SURFACE_Z + self.env.PIECE_HEIGHT / 2.0
         xy_error = float(np.linalg.norm(piece_pos[:2] - dst_xy[:2]))

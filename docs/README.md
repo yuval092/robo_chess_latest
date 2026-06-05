@@ -14,3 +14,6 @@
 | 09 | [Training](09_training.md) | Specialist models, curriculum, training loop |
 | 10 | [Configuration](10_configuration.md) | All config files with key reference |
 | 11 | [Testing](11_testing.md) | Test suite layout, integration tests, all-square sweep |
+| 12 | [Production Hardening Audit](12_production_hardening_audit.md) | Adversarial checks, graceful-failure gaps, prioritized hardening backlog |
+| 13 | [Final University Mentor Readiness Review](13_final_university_mentor_readiness_review.md) | Merged robustness review, validation of second review, final fix plan |
+| 14 | [Selected Hardening Changes](14_selected_hardening_changes.md) | Minimal implemented changes for fault state, startup validation, HTTP/UI errors, and sensor/action checks |

@@ -11,6 +11,7 @@ import numpy as np
 from src.chess_env.simulation import IDENTITY_QUAT, unwrap_env
 from src.chess_game.board_mapper import BoardMapper
 from src.utils.io import load_config
+from src.utils.validation import ensure_finite_array, ensure_finite_scalar
 
 
 class PieceTeleporter:
@@ -22,6 +23,7 @@ class PieceTeleporter:
         self.chess_cfg = load_config("chess")
 
     def teleport_piece_to_xyz(self, piece_id: str, xyz: np.ndarray) -> None:
+        xyz = ensure_finite_array("piece_xyz", xyz, (3,))
         joint_id = self.env.model.joint(f"piece_{piece_id}:joint").id
         qpos_start = self.env.model.jnt_qposadr[joint_id]
         dof_start  = self.env.model.jnt_dofadr[joint_id]
@@ -85,7 +87,8 @@ class PieceTeleporter:
         col = slot % slot_layout["cols"]
         if row >= slot_layout["rows"]:
             raise ValueError(f"Slot {slot_id} is outside configured slot grid")
-        origin = slot_layout["origin_xyz"]
+        origin = ensure_finite_array("slot_origin_xyz", slot_layout["origin_xyz"], (3,))
+        slot_gap_m = ensure_finite_scalar("slot_gap_m", slot_gap_m)
         return np.array(
             [origin[0] + row * slot_gap_m, origin[1] + col * slot_gap_m, origin[2]],
             dtype=float,

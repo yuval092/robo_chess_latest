@@ -9,6 +9,7 @@ import numpy as np
 from gymnasium_robotics.envs.fetch.pick_and_place import MujocoFetchPickAndPlaceEnv
 
 from src.utils.io import load_config
+from src.utils.validation import ensure_finite_array, ensure_finite_scalar
 
 _xml_path_lock = threading.Lock()
 
@@ -55,7 +56,9 @@ class ChessSimulationEnv(MujocoFetchPickAndPlaceEnv):
 
     def _init_table_constants(self) -> None:
         """Set board geometry constants from env config."""
-        self.TABLE_CENTER_XY = np.array(self.env_cfg["table_center_xy"])
+        self.TABLE_CENTER_XY = ensure_finite_array(
+            "table_center_xy", self.env_cfg["table_center_xy"], (2,)
+        )
         self.TABLE_HALF_X = self.env_cfg["table_half_x"]
         self.TABLE_HALF_Y = self.env_cfg["table_half_y"]
         self.TABLE_SURFACE_Z = self.env_cfg["table_surface_z"]
@@ -72,8 +75,13 @@ class ChessSimulationEnv(MujocoFetchPickAndPlaceEnv):
         """Set physics and control constants from physics config."""
         self.ENV_SETUP_STEPS = self.physics_cfg["env_setup_steps"]
         self.POS_CTRL_SCALE = self.physics_cfg["pos_ctrl_scale"]
-        raw_quat = np.array(self.physics_cfg["vertical_quat"])
-        self.VERTICAL_QUAT = raw_quat / np.linalg.norm(raw_quat)
+        raw_quat = ensure_finite_array(
+            "vertical_quat", self.physics_cfg["vertical_quat"], (4,)
+        )
+        quat_norm = np.linalg.norm(raw_quat)
+        if quat_norm <= 0.0:
+            raise ValueError("vertical_quat_INVALID_ZERO")
+        self.VERTICAL_QUAT = raw_quat / quat_norm
 
     def _load_chess_model(self, **kwargs) -> None:
         """Inject our chess board XML, call super().__init__, then restore the original path."""
@@ -103,7 +111,7 @@ class ChessSimulationEnv(MujocoFetchPickAndPlaceEnv):
 
     def _set_action(self, action):
         """Translate [dx, dy, dz, gripper] action into scaled mocap delta + finger enforcement."""
-        assert action.shape == (4,)
+        action = ensure_finite_array("action", action, (4,))
         pos_ctrl = action[:3].copy() * self.POS_CTRL_SCALE
         self._apply_finger_target()
         self._utils.mocap_set_action(
@@ -128,13 +136,17 @@ class ChessSimulationEnv(MujocoFetchPickAndPlaceEnv):
 
     def _set_finger_ctrl(self, joint_name: str, target: float) -> None:
         """Set the actuator ctrl target for a finger joint looked up by name."""
+        target = ensure_finite_scalar("finger_ctrl_target", target)
         actuator_id = mujoco.mj_name2id(
             self.model, mujoco.mjtObj.mjOBJ_ACTUATOR, joint_name
         )
+        if actuator_id < 0:
+            raise ValueError(f"Missing finger actuator: {joint_name}")
         self.data.ctrl[actuator_id] = target
 
     def _set_finger_state(self, joint_name: str, angle: float) -> None:
         """Snap a finger joint to the given angle and zero its velocity."""
+        angle = ensure_finite_scalar("finger_state_angle", angle)
         self._utils.set_joint_qpos(self.model, self.data, joint_name, angle)
         self._utils.set_joint_qvel(self.model, self.data, joint_name, 0.0)
 

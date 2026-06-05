@@ -14,10 +14,12 @@ class FakePhysicalResult:
 
 
 class FakePhysicalExecutor:
-    def __init__(self, success=True):
+    def __init__(self, success=True, home_success=True):
         self.success = success
+        self.home_success = home_success
         self.plans = []
         self.home_calls = 0
+        self.reset_calls = 0
 
     def execute(self, plan):
         self.plans.append(plan)
@@ -27,10 +29,12 @@ class FakePhysicalExecutor:
 
     def return_to_home(self):
         self.home_calls += 1
-        return FakePhysicalResult(True)
+        return FakePhysicalResult(
+            self.home_success, None if self.home_success else "HOME_FAILED"
+        )
 
     def reset_board_state(self):
-        pass
+        self.reset_calls += 1
 
 
 def make_orchestrator(executor=None, *, auto=False, human_color="white", service=None):
@@ -77,6 +81,45 @@ def test_physical_failure_leaves_fen_unchanged():
     assert not result.physical_success
     assert orchestrator.chess_service.fen() == fen_before
     assert orchestrator.piece_tracker.piece_id_at("e2") == "white_pawn_e"
+    assert result.snapshot.state == "FAULTED"
+
+
+def test_faulted_state_blocks_moves_until_new_game():
+    executor = FakePhysicalExecutor(success=False)
+    orchestrator = make_orchestrator(executor)
+
+    first = orchestrator.submit_human_move("e2", "e4")
+    second = orchestrator.submit_human_move("d2", "d4")
+    snapshot = orchestrator.new_game()
+
+    assert first.snapshot.state == "FAULTED"
+    assert not second.accepted
+    assert second.error == "System is faulted. Start a new game to recover."
+    assert snapshot.state == "READY"
+    assert executor.reset_calls == 1
+
+
+def test_engine_failure_enters_fault_state_without_traceback():
+    orchestrator = make_orchestrator()
+
+    result = orchestrator.let_computer_play_current_turn()
+
+    assert not result.accepted
+    assert result.snapshot.state == "FAULTED"
+    assert result.error.startswith("ENGINE_ERROR:")
+
+
+def test_home_return_failure_commits_move_then_faults():
+    executor = FakePhysicalExecutor(success=True, home_success=False)
+    orchestrator = make_orchestrator(executor)
+
+    result = orchestrator.submit_human_move("e2", "e4")
+
+    assert result.accepted
+    assert result.physical_success
+    assert result.error == "HOME_FAILED"
+    assert result.snapshot.state == "FAULTED"
+    assert orchestrator.chess_service.board.piece_at(chess.E4).symbol() == "P"
 
 
 def test_computer_move_uses_same_execution_path():
