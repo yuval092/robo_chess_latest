@@ -36,8 +36,11 @@ class QueuedUIBackend:
     def new_game(self):
         """Queue a new-game request."""
         def _fn():
-            if self._env is not None:
-                self._env.reset()
+            try:
+                if self._env is not None:
+                    self._env.reset()
+            except Exception as exc:
+                return self._orchestrator.fault(f"NEW_GAME_RESET_FAILED: {exc}")
             return self._orchestrator.new_game()
         return self._enqueue(_fn)
 

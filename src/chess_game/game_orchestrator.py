@@ -78,6 +78,17 @@ class GameOrchestrator:
         self.state = READY
         return self.snapshot()
 
+    def fault(self, error: str) -> GameSnapshot:
+        """Force the fault state, e.g. after a failed environment reset.
+
+        Used by callers that perform work outside move execution (such as the
+        full sim reset during new_game) so the failure is recorded in the state
+        machine instead of silently leaving the game playable.
+        """
+        self.error = error
+        self.state = FAULTED
+        return self.snapshot()
+
     def snapshot(self) -> GameSnapshot:
         """Return a frozen game snapshot."""
         status = self.chess_service.status()
