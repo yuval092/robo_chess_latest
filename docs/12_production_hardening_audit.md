@@ -349,7 +349,7 @@ invalid square      -> HTTP 400
 | Reorder robot DOFs | Same hard-coded DOF slice risk. | `FAIL` | Resolve named DOFs. |
 | Make table or link collisions severe | No general collision, force, or joint-limit watchdog exists. | `PARTIAL` | Add runtime watchdog and emergency halt. |
 | Close viewer window or cause render exception | Main loop can exit while server requests remain blocked. | `FAIL` | Handle viewer close and coordinate server shutdown. |
-| Run headless without `--no-visualize` | Viewer startup may fail depending on machine. | `PARTIAL` | Detect headless environment or document explicit command. |
+| Run on a headless machine | Viewer startup may fail depending on machine. | `PARTIAL` | Detect headless environment or document supported display requirements. |
 
 ### Reset, Recovery, and State Consistency
 

@@ -75,7 +75,7 @@ The game loop in `main.py` runs on the **main thread**:
 ```python
 while True:
     backend.process_request(env=env, timeout=0.05)  # drains one queued request
-    env.render()                                 # if visualize
+    env.render()
     time.sleep(0.01)
 ```
 

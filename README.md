@@ -23,20 +23,8 @@ Start the web UI and live MuJoCo simulation:
 python main.py
 ```
 
-Open `http://127.0.0.1:8000` in your browser. The MuJoCo viewer is shown by
-default. For headless operation:
-
-```bash
-python main.py --no-visualize
-```
-
-Model paths are read from `configs/deployed_models.yaml` and can be overridden:
-
-```bash
-python main.py --transit-model PATH --descend-model PATH --ascend-model PATH
-```
-
-Useful runtime flags: `--host`, `--port`, `--delay`, and `--debug`.
+Open `http://127.0.0.1:8000` in your browser. The MuJoCo viewer is always shown.
+Model paths are read from `configs/deployed_models.yaml`.
 
 ## Full Board Sweep
 
@@ -59,8 +47,7 @@ robo-chess-train --stage descend
 robo-chess-train --stage ascend
 ```
 
-After training, update `configs/deployed_models.yaml` or pass model overrides to
-`python main.py`.
+After training, update `configs/deployed_models.yaml`.
 
 ## Scene Assets
 

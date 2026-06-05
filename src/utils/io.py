@@ -29,10 +29,9 @@ def resolve_model_paths(overrides: dict[str, str] | None = None) -> dict[str, st
     }
     missing = [stage for stage, path in paths.items() if not path]
     if missing:
-        flags = ", ".join(f"--{stage}-model" for stage in missing)
         raise ValueError(
             f"Missing model path(s) for {', '.join(missing)}. "
-            f"Set configs/deployed_models.yaml or pass {flags}."
+            "Set configs/deployed_models.yaml."
         )
     resolved = {
         stage: str(Path(path) if Path(path).is_absolute() else _PROJECT_ROOT / path)

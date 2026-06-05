@@ -77,7 +77,7 @@ descend: models/descend/model.zip
 ascend:  models/ascend/model.zip
 ```
 
-These paths are resolved by `src/utils/io.resolve_model_paths()`, which accepts optional override paths (e.g. from CLI arguments or test fixtures).
+These paths are resolved by `src/utils/io.resolve_model_paths()`.
 
 ---
 

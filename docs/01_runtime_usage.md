@@ -7,19 +7,7 @@ python main.py
 ```
 
 Opens the MuJoCo viewer and starts a Flask server at `http://127.0.0.1:8000`.
-
-### CLI Options
-
-| Flag | Default | Description |
-|---|---|---|
-| `--host` | `127.0.0.1` | Flask bind address |
-| `--port` | `8000` | Flask bind port |
-| `--no-visualize` | — | Run without the MuJoCo viewer window |
-| `--delay SECS` | `0.0` | Per-step render delay (slows down playback for debugging) |
-| `--debug` | — | Enable verbose per-step environment logs |
-| `--transit-model PATH` | — | Override the deployed transit SAC model |
-| `--descend-model PATH` | — | Override the deployed descend SAC model |
-| `--ascend-model PATH` | — | Override the deployed ascend SAC model |
+Play mode does not accept CLI options; runtime settings come from configuration files.
 
 ### Model Paths
 
@@ -31,7 +19,7 @@ descend: models/descend/model.zip
 ascend:  models/ascend/model.zip
 ```
 
-Override any path with `--transit-model`, `--descend-model`, or `--ascend-model`.
+Update `configs/deployed_models.yaml` to change the deployed model files.
 
 ## Game Configuration
 

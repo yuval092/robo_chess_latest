@@ -7,7 +7,6 @@ from __future__ import annotations
 # noqa: F401 to avoid "imported but unused" lint error since we don't directly reference this module.
 import torch._dynamo  # noqa: F401
 
-import argparse
 import sys
 import threading
 import time
@@ -25,29 +24,13 @@ from src.ui.queued_backend import QueuedUIBackend
 from src.utils.config_validation import validate_config
 from src.utils.io import load_config, resolve_model_paths
 
+HOST = "127.0.0.1"
+PORT = 8000
 
-def add_model_path_args(parser: argparse.ArgumentParser) -> None:
-    parser.add_argument("--transit-model", metavar="PATH", help="Transit model ZIP override.")
-    parser.add_argument("--descend-model", metavar="PATH", help="Descend model ZIP override.")
-    parser.add_argument("--ascend-model", metavar="PATH", help="Ascend model ZIP override.")
 
-def build_controller(
-    env,
-    visualize: bool,
-    delay: float,
-    transit_model: str | None,
-    descend_model: str | None,
-    ascend_model: str | None,
-) -> ModelEmbeddedController:
-    model_paths = resolve_model_paths({
-        "transit": transit_model,
-        "descend": descend_model,
-        "ascend": ascend_model,
-    })
-    controller = ModelEmbeddedController(
-        env=env,
-        render_delay=delay,
-    )
+def build_controller(env) -> ModelEmbeddedController:
+    model_paths = resolve_model_paths()
+    controller = ModelEmbeddedController(env=env)
     controller.load_all(
         transit_path=model_paths["transit"],
         descend_path=model_paths["descend"],
@@ -56,17 +39,8 @@ def build_controller(
     return controller
 
 
-def build_orchestrator(
-    env,
-    visualize: bool,
-    delay: float,
-    transit_model: str | None = None,
-    descend_model: str | None = None,
-    ascend_model: str | None = None,
-) -> GameOrchestrator:
-    controller = build_controller(
-        env, visualize, delay, transit_model, descend_model, ascend_model
-    )
+def build_orchestrator(env) -> GameOrchestrator:
+    controller = build_controller(env)
     physical_executor = PhysicalPlanExecutor(env, controller)
     engine_cfg = load_config("chess").get("engine")
     return GameOrchestrator(
@@ -77,26 +51,19 @@ def build_orchestrator(
     )
 
 
-def run_game(args: argparse.Namespace) -> int:
+def run_game() -> int:
     env = None
     orchestrator = None
     try:
         validate_config()
         env = gym.make(
             "ChessFetchTask-Play-v0",
-            render_mode="human" if args.visualize else None,
+            render_mode="human",
             show_chess_pieces=True,
-            debug=args.debug,
+            debug=False,
         )
         env.reset()
-        orchestrator = build_orchestrator(
-            env,
-            args.visualize,
-            args.delay,
-            transit_model=args.transit_model,
-            descend_model=args.descend_model,
-            ascend_model=args.ascend_model,
-        )
+        orchestrator = build_orchestrator(env)
     except Exception as exc:
         if env is not None:
             env.close()
@@ -106,21 +73,20 @@ def run_game(args: argparse.Namespace) -> int:
     app = create_app(backend)
     server = threading.Thread(
         target=lambda: app.run(
-            host=args.host,
-            port=args.port,
+            host=HOST,
+            port=PORT,
             debug=False,
             use_reloader=False,
         ),
         daemon=True,
     )
     server.start()
-    print(f"RoboChess UI running at http://{args.host}:{args.port}")
+    print(f"RoboChess UI running at http://{HOST}:{PORT}")
 
     try:
         while True:
             backend.process_request(timeout=0.05)
-            if args.visualize:
-                env.render()
+            env.render()
             time.sleep(0.01)
     except KeyboardInterrupt:
         return 0
@@ -131,29 +97,11 @@ def run_game(args: argparse.Namespace) -> int:
             env.close()
 
 
-def build_parser() -> argparse.ArgumentParser:
-    parser = argparse.ArgumentParser(
-        prog="python main.py",
-        description="Start RoboChess play mode.",
-    )
-    parser.add_argument("--host", default="127.0.0.1", help="Flask bind address.")
-    parser.add_argument("--port", type=int, default=8000, help="Flask bind port.")
-    parser.add_argument(
-        "--no-visualize",
-        dest="visualize",
-        action="store_false",
-        default=True,
-        help="Run play mode without the MuJoCo viewer.",
-    )
-    parser.add_argument("--delay", type=float, default=0.0, help="Per-step render delay.")
-    parser.add_argument("--debug", action="store_true", help="Enable verbose environment logs.")
-    add_model_path_args(parser)
-    return parser
-
-
 def main() -> None:
-    args = build_parser().parse_args()
-    sys.exit(run_game(args))
+    if len(sys.argv) > 1:
+        print("RoboChess play mode does not accept CLI flags.", file=sys.stderr)
+        sys.exit(2)
+    sys.exit(run_game())
 
 
 if __name__ == "__main__":

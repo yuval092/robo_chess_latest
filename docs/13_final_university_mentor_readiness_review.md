@@ -353,7 +353,7 @@ Required fix:
 | Run outside repo root | Model paths fail. | High | CWD-independent resources. |
 | Fresh install later | Dependencies unpinned. | Medium | Add constraints/lock. |
 | Windows training run | `fork` start method risk. | Medium | Declare platform or branch by OS. |
-| Headless machine with viewer default | Viewer may fail. | Medium | Detect headless or document `--no-visualize`. |
+| Headless machine with viewer default | Viewer may fail. | Medium | Detect headless or document supported display requirements. |
 
 ### Tests And Release Process
 
