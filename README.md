@@ -30,3 +30,6 @@ You can run `robo-chess-train --help` to see all of the different parameters.
 ## Tests
 
 Feel free to run our unit & integration tests: `PYTHONPATH=. pytest`
+
+To run stress test that validates all 64X63 possible board move:
+`PYTHONPATH=. RUN_EXHAUSTIVE_PHYSICAL_MOVES=1 pytest tests/integration/test_all_square_moves.py -s`
