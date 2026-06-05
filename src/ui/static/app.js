@@ -24,6 +24,9 @@ let selected = null;
 let legalTargets = new Set();
 let flipped = false;
 let requestInFlight = false;
+// Sticky error for failures with no snapshot (server down, rejected requests).
+// Survives the renderSnapshot() in postJson's finally block; cleared on success.
+let transientError = null;
 
 // Promotion state
 let pendingPromotion = null; // { src, dst } while dialog is open
@@ -248,12 +251,12 @@ function renderSnapshot() {
   turnEl.textContent = terminal ? "Game over" : (snapshot.turn === "white" ? "White" : "Black");
   stateEl.textContent = stateText();
   stateEl.dataset.state = stateKey();
-  sublineEl.textContent = snapshot.error || statusLine();
+  sublineEl.textContent = transientError || snapshot.error || statusLine();
   lastMoveEl.textContent = snapshot.last_move || "-";
   legalCountEl.textContent = String((snapshot.legal_moves || []).length);
   fenEl.textContent = snapshot.fen || "-";
   renderHistory();
-  errorEl.textContent = snapshot.error || "";
+  errorEl.textContent = transientError || snapshot.error || "";
   newGameBtn.disabled = Boolean(requestInFlight);
   computerBtn.disabled = Boolean(requestInFlight || terminal || isFaulted());
   refreshBtn.disabled = Boolean(requestInFlight);
@@ -261,6 +264,7 @@ function renderSnapshot() {
 }
 
 function showError(msg) {
+  transientError = msg;
   errorEl.textContent = msg;
 }
 
@@ -269,6 +273,7 @@ async function loadSnapshot() {
     const response = await fetch("/api/snapshot");
     const data = await readJsonResponse(response);
     if (!response.ok) { showError(data.error || `Snapshot error ${response.status}`); return; }
+    transientError = null;
     snapshot = data;
     renderSnapshot();
   } catch (err) {
@@ -300,6 +305,7 @@ async function postJson(url, payload = {}) {
       showError(data.error || `Server error ${response.status}`);
       return null;
     }
+    transientError = null;
     if (data.snapshot) snapshot = data.snapshot;
     else snapshot = data;
     renderSnapshot();
