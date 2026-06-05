@@ -282,16 +282,16 @@ class ChessBaseEnv(ChessSimulationEnv):
 
     def _settle_arm_to_start(self, arm_start_pos):
         """Move the arm to the starting position; prevents physics explosions and gravity sag."""
-        if not self._move_grip_to(
+        settled = self._move_grip_to(
             arm_start_pos,
             max_steps=100,
             tolerance=self.SETTLE_TOLERANCE,
-        ):
-            raise RuntimeError("RESET_ARM_START_MOVE_FAILED")
+        )
         self.data.qvel[:] = 0.0
         self.data.qacc[:] = 0.0
         self.data.ctrl[:] = 0.0
         mujoco.mj_forward(self.model, self.data)
+        return settled
 
     def _sample_goal(self):
         """Returns the goal sampled during reset_sim."""
@@ -460,7 +460,8 @@ class ChessBaseEnv(ChessSimulationEnv):
         # Always start settled with fingers closed for physics stability.
         self.finger_target_joint = self.FINGER_CLOSED_JOINT
         self._commit_finger_target()
-        self._settle_arm_to_start(arm_start_pos)
+        if not self._settle_arm_to_start(arm_start_pos):
+            raise RuntimeError("RESET_ARM_START_MOVE_FAILED")
 
         if self.current_scenario == "descend":
             self._set_fingers_and_move_to(arm_start_pos, self.FINGER_OPEN_JOINT)
